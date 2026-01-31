@@ -281,9 +281,9 @@ For Chimera/Hydra/Cerberus, we can use RDMA on a DIY FPGA PCIe card or Mellanox 
 
 My home setup consists of two towers with a combined 32 cores, 320GB RAM, and 100Gbit networking:
 
-\textbf{Tower 1 (Windows):} Ryzen 9 7950X (16c/32t), 192GB DDR5-5200, RTX 5070 Ti, 2TB Gen5 NVMe, 40TB+ HDD raw storage, 100GbE networking.
+\textbf{Tower 1 (Windows):} Ryzen 9 7950X (16c/32t), 192GB DDR5-5200, RTX 5070 Ti (16GB GDDR7), 2TB Gen5 NVMe, 40TB+ HDD raw storage, 100GbE networking.
 
-\textbf{Tower 2 (Proxmox):} Xeon E5-2697A v4 (16c/32t), 125GB DDR4 ECC, 2$\times$ Tesla V100 32GB, 1TB Gen3 NVMe, 100GbE networking.
+\textbf{Tower 2 (Proxmox):} Gigabyte X99 UD4P, Xeon E5-2697A v4 (16c/32t), 128GB DDR4 2133 ECC, 1$\times$ Tesla V100 32GB (can fit 2nd V100 with higher wattage PSU or PCIe extender to clear the QSFP card), 1TB Crucial NVMe, 2TB Seagate HDD, NZXT H440, 750W Bronze PSU, 100GbE networking.
 
 \textbf{Spare parts:} 128GB DDR4 in X99 system ready to deploy, 8$\times$ DDR4 G.Skill kit.
 
@@ -344,13 +344,21 @@ My home setup consists of two towers with a combined 32 cores, 320GB RAM, and 10
 \toprule
 \textbf{Component} & \textbf{My Cost} & \textbf{MSRP/Current} & \textbf{Savings} \\
 \midrule
-2$\times$ Tesla V100 32GB & \$1,296 & \$22,916 & 94\% \\
+\multicolumn{4}{@{}l@{}}{\textit{Tower 1 (Windows/Daily):}} \\
 Ryzen 9 7950X & \$351 & \$499 & 30\% \\
 192GB DDR5-5200 & $\sim$\$600 & \$3,000+ & 80\% \\
-Mellanox 100GbE (2 cards) & \$230 & \$800+ & 71\% \\
-Xeon E5-2697A v4 + 125GB DDR4 & $\sim$\$400 & \$4,000+ & 90\% \\
+RTX 5070 Ti 16GB & \$825 & \$825 & 0\% \\
 \midrule
-\textbf{Total Compute Hardware} & \textbf{$\sim$\$2,900} & \textbf{\$31,000+} & \textbf{91\%} \\
+\multicolumn{4}{@{}l@{}}{\textit{Tower 2 (Proxmox/X99):}} \\
+Gigabyte X99 UD4P + Xeon E5-2697A v4 & $\sim$\$300 & \$2,000+ & 85\% \\
+128GB DDR4 2133 ECC & \$0 (free) & \$400+ & 100\% \\
+1$\times$ Tesla V100 32GB (have 2nd) & \$648 & \$11,458 & 94\% \\
+NZXT H440 + 750W PSU + Cooler & $\sim$\$150 & \$300 & 50\% \\
+\midrule
+\multicolumn{4}{@{}l@{}}{\textit{Networking:}} \\
+Mellanox 100GbE (2 cards + DAC) & \$272 & \$800+ & 66\% \\
+\midrule
+\textbf{Total Compute Hardware} & \textbf{$\sim$\$3,150} & \textbf{\$19,000+} & \textbf{83\%} \\
 \bottomrule
 \end{tabular}
 \caption{Hardware Cost Breakdown}
@@ -363,7 +371,7 @@ Xeon E5-2697A v4 + 125GB DDR4 & $\sim$\$400 & \$4,000+ & 90\% \\
 \toprule
 \textbf{Solution} & \textbf{Cost} & \textbf{VRAM} & \textbf{Est. tok/s (70B)} & \textbf{\$/tok/s} \\
 \midrule
-My Homelab (2$\times$V100) & \$2,900 & 64GB & $\sim$15 & \$193 \\
+My Homelab (V100 + 5070 Ti) & \$3,150 & 48GB & $\sim$12 & \$263 \\
 NVIDIA DGX A100 & \$199,000 & 640GB & $\sim$150 & \$1,327 \\
 AWS p4d.24xlarge (1yr) & \$285,000 & 320GB & $\sim$80 & \$3,563 \\
 Lambda Labs (1yr) & \$87,600 & 80GB & $\sim$20 & \$4,380 \\
