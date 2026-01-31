@@ -1,0 +1,522 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning,fit,backgrounds}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{3pt}
+\setlength{\parskip}{2pt}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\scriptsize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    aboveskip=3pt,
+    belowskip=3pt
+}
+\lstset{style=mystyle}
+
+\title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
+\large Week 2: Implementation Plan}
+\author{Nathan Gopee\\
+MS Computer Science, SUNY New Paltz\\
+\texttt{gopeen1@newpaltz.edu}\\[1em]
+\small Advisors: Dr. Wafi Danesh \& Dr. Ashley Suchy}
+\date{January 2026}
+
+\begin{document}
+\maketitle
+
+\section{Problem Statement}
+
+Distributed large language model inference suffers from communication bottlenecks that manifest as Time-To-First-Token (TTFT) latency. Current systems like vLLM use NCCL for GPU-to-GPU communication, which employs static routing strategies optimized for bulk transfers. This creates \textbf{head-of-line blocking}: small, latency-sensitive tensors (KV cache pages, attention scores) wait behind large bulk transfers (model weights, gradient accumulations).
+
+This thesis develops an \textbf{adaptive RDMA middleware} that classifies tensor access patterns at runtime and routes transfers through dedicated paths---low-latency channels for frequently-accessed ``hot'' data and throughput-optimized channels for ``cold'' bulk transfers.
+
+\section{What vLLM Already Provides}
+
+Before defining contributions, it is essential to understand vLLM's existing architecture:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Feature} & \textbf{vLLM Implementation} \\
+\midrule
+KV Cache Management & PagedAttention with block-based allocation \\
+Request Scheduling & Continuous batching with FCFS/priority policies \\
+Single-Node Multi-GPU & \texttt{MultiProcExecutor} with tensor parallelism \\
+Multi-Node Distribution & Ray + pipeline parallelism \\
+GPU Communication & NCCL (all-reduce, all-gather) \\
+KV Transfer (Disagg. P/D) & Connector abstraction (LMCache, SharedStorage) \\
+Optimizations & Chunked prefill, prefix caching, speculative decoding \\
+\bottomrule
+\end{tabular}
+\caption{vLLM capabilities this work builds upon, not replaces.}
+\end{table}
+
+vLLM's distributed execution uses \texttt{MultiProcExecutor}, which spawns worker processes coordinated via shared-memory message queues. Inter-GPU communication occurs through NCCL, which discovers network topology at initialization but does not adapt routing based on runtime access patterns.
+
+\section{Thesis Contribution}
+
+This work introduces three components that integrate with vLLM's existing infrastructure:
+
+\subsection{Unified Telemetry Layer}
+A monitoring system that instruments tensor transfers to collect:
+\begin{itemize}[noitemsep]
+    \item Access frequency per tensor/KV block
+    \item Transfer size distributions
+    \item Queue depth at RDMA endpoints
+    \item Latency percentiles (p50, p95, p99)
+\end{itemize}
+
+\subsection{WFA-Based Adaptive Classifier}
+A Weighted Finite Automaton that classifies tensors into hot/cold categories based on observed patterns. States transition based on access frequency:
+
+\begin{center}
+\begin{tikzpicture}[node distance=2.5cm, auto,
+    state/.style={circle, draw, minimum size=1.2cm, font=\small},
+    arrow/.style={->, >=stealth, thick}]
+    
+    \node[state] (cold) {Cold};
+    \node[state, right of=cold] (warm) {Warm};
+    \node[state, right of=warm] (hot) {Hot};
+    
+    \draw[arrow, bend left=20] (cold) to node[above] {\scriptsize freq $> \theta_1$} (warm);
+    \draw[arrow, bend left=20] (warm) to node[below] {\scriptsize idle $> t_1$} (cold);
+    \draw[arrow, bend left=20] (warm) to node[above] {\scriptsize freq $> \theta_2$} (hot);
+    \draw[arrow, bend left=20] (hot) to node[below] {\scriptsize idle $> t_2$} (warm);
+    
+    \draw[arrow, loop left] (cold) to node[left] {\scriptsize batch} (cold);
+    \draw[arrow, loop right] (hot) to node[right] {\scriptsize priority} (hot);
+\end{tikzpicture}
+\end{center}
+
+The classifier also detects workload phase (prefill vs.\ decode, training vs.\ inference) to adjust thresholds dynamically.
+
+\subsection{Smart RDMA Routing Layer}
+Dual-path routing implemented via \texttt{pyverbs} (libibverbs Python bindings):
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Hot Path}: Dedicated Queue Pairs (QPs) with polled completions, RDMA Write with Immediate for sub-5$\mu$s transfers
+    \item \textbf{Cold Path}: Batched transfers with event-driven completions, optimized for throughput over latency
+\end{itemize}
+
+Memory registration uses NUMA-aware allocation via \texttt{libnuma}:
+\begin{itemize}[noitemsep]
+    \item \texttt{numa\_bind\_to\_node()}: Pin RDMA buffers to the same NUMA node as the HCA, avoiding QPI/UPI traversal penalties (40\%+ throughput loss)
+    \item \texttt{numa\_interleave\_nodes()}: For large tensors spanning multiple nodes, interleave allocation across NUMA domains
+    \item Automatic NUMA topology detection via \texttt{/sys/devices/system/node/}
+\end{itemize}
+
+\section{Architecture}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    scale=0.85, transform shape,
+    box/.style={rectangle, draw, rounded corners, minimum width=3cm, minimum height=0.8cm, align=center, font=\small},
+    widebox/.style={rectangle, draw, rounded corners, minimum width=7cm, minimum height=0.8cm, align=center, font=\small},
+    arrow/.style={->, >=stealth, thick}
+]
+
+% Application Layer
+\node[box, fill=blue!10] (vllm) at (0,4) {vLLM Engine};
+\node[box, fill=blue!10] (pytorch) at (4,4) {PyTorch Training};
+
+% Middleware Layer
+\node[widebox, fill=green!15] (telem) at (2,2.8) {Telemetry Layer};
+\node[widebox, fill=green!15] (wfa) at (2,2) {WFA Classifier};
+\node[widebox, fill=green!15] (router) at (2,1.2) {Smart Router};
+
+% Split paths
+\node[box, fill=red!10] (hot) at (-0.5,0) {Hot Path\\(Dedicated QP)};
+\node[box, fill=yellow!10] (cold) at (4.5,0) {Cold Path\\(Batched)};
+
+% RDMA Layer
+\node[widebox, fill=gray!20] (pyverbs) at (2,-1) {pyverbs / libibverbs};
+\node[widebox, fill=gray!30] (rdma) at (2,-1.8) {RDMA Fabric (RoCE / InfiniBand)};
+
+% Arrows
+\draw[arrow] (vllm) -- (telem);
+\draw[arrow] (pytorch) -- (telem);
+\draw[arrow] (telem) -- (wfa);
+\draw[arrow] (wfa) -- (router);
+\draw[arrow] (router) -- (hot);
+\draw[arrow] (router) -- (cold);
+\draw[arrow] (hot) -- (pyverbs);
+\draw[arrow] (cold) -- (pyverbs);
+\draw[arrow] (pyverbs) -- (rdma);
+
+% Labels
+\node[font=\scriptsize, gray] at (-2.5, 4) {Application};
+\node[font=\scriptsize, gray] at (-2.5, 2) {Middleware};
+\node[font=\scriptsize, gray] at (-2.5, -1.4) {Transport};
+
+\end{tikzpicture}
+\caption{System architecture showing middleware integration points.}
+\end{figure}
+
+\subsection{Integration Points}
+
+The middleware intercepts communication at two levels:
+
+\textbf{1. Tensor Parallel Communication} (replacing NCCL):
+\begin{lstlisting}[language=Python]
+# In vllm/distributed/parallel_state.py
+def tensor_model_parallel_all_reduce(tensor):
+    # Original: torch.distributed.all_reduce(tensor)
+    # Modified: route through adaptive middleware
+    pattern = wfa_classifier.classify(tensor)
+    if pattern == "hot":
+        rdma_hot_channel.all_reduce(tensor)
+    else:
+        rdma_cold_channel.batch_all_reduce(tensor)
+\end{lstlisting}
+
+\textbf{2. KV Cache Transfers} (extending vLLM's Connector abstraction):
+\begin{lstlisting}[language=Python]
+# New connector: AdaptiveRDMAConnector
+class AdaptiveRDMAConnector(KVConnectorBase):
+    def save_kv_layer(self, layer_id, kv_tensors):
+        for block in kv_tensors:
+            pattern = self.classifier.classify(block)
+            self.router.transfer(block, pattern)
+\end{lstlisting}
+
+\section{Implementation Plan}
+
+\subsection{Phase 1: Foundation (Weeks 1--4)}
+
+\textbf{Step 1.1: Environment Setup}
+\begin{lstlisting}[language=bash]
+# Install RDMA stack on both nodes
+sudo apt install rdma-core ibverbs-utils perftest libibverbs-dev
+pip install pyverbs
+
+# Enable SoftRoCE on 10GbE interface
+sudo rdma link add rxe0 type rxe netdev eth0
+rdma link  # Verify: rxe0 should appear
+
+# Test connectivity
+ibv_devices  # List RDMA devices
+rping -s -v  # Server
+rping -c -a <server_ip> -v  # Client
+\end{lstlisting}
+
+\textbf{Step 1.2: Baseline Latency Measurement}
+\begin{lstlisting}[language=bash]
+# RDMA write latency (target: <10us for SoftRoCE)
+ib_write_lat -d rxe0 -n 1000  # Server
+ib_write_lat -d rxe0 -n 1000 <server_ip>  # Client
+
+# TCP baseline for comparison
+sockperf ping-pong -i <server_ip> --tcp
+\end{lstlisting}
+
+\textbf{Step 1.3: pyverbs Buffer Pool Implementation}
+\begin{lstlisting}[language=Python]
+import pyverbs as pv
+from pyverbs.pd import PD
+from pyverbs.mr import MR
+import numa
+
+class RDMABufferPool:
+    def __init__(self, ctx, size_mb=256, numa_node=0):
+        self.pd = PD(ctx)
+        # NUMA-aware allocation
+        numa.bind(numa_node)
+        self.mr = MR(self.pd, size_mb * 1024 * 1024,
+                     pv.enums.IBV_ACCESS_LOCAL_WRITE |
+                     pv.enums.IBV_ACCESS_REMOTE_WRITE)
+        
+    def get_buffer(self, size):
+        # Suballocate from registered region
+        ...
+\end{lstlisting}
+
+\textbf{Deliverable}: RDMA ping-pong achieving $<$10$\mu$s RTT on SoftRoCE.
+
+\subsection{Phase 2: Telemetry \& Classification (Weeks 5--8)}
+
+\textbf{Step 2.1: Instrument vLLM's KV Cache Manager}
+\begin{lstlisting}[language=Python]
+# In vllm/core/kv_cache_manager.py
+class InstrumentedKVCacheManager(KVCacheManager):
+    def __init__(self, ...):
+        super().__init__(...)
+        self.access_log = defaultdict(list)  # block_id -> timestamps
+        
+    def allocate_slots(self, request, num_tokens):
+        blocks = super().allocate_slots(request, num_tokens)
+        for block in blocks:
+            self.access_log[block.id].append(time.monotonic_ns())
+        return blocks
+\end{lstlisting}
+
+\textbf{Step 2.2: Implement WFA Classifier}
+\begin{lstlisting}[language=Python]
+class TensorClassifier:
+    COLD, WARM, HOT = 0, 1, 2
+    
+    def __init__(self, theta1=10, theta2=100, t_idle=0.1):
+        self.state = {}  # tensor_id -> (state, last_access)
+        self.theta1, self.theta2 = theta1, theta2
+        self.t_idle = t_idle
+        
+    def classify(self, tensor_id, access_count, elapsed):
+        current = self.state.get(tensor_id, (self.COLD, 0))
+        if elapsed > self.t_idle:
+            new_state = max(self.COLD, current[0] - 1)
+        elif access_count > self.theta2:
+            new_state = self.HOT
+        elif access_count > self.theta1:
+            new_state = self.WARM
+        else:
+            new_state = current[0]
+        self.state[tensor_id] = (new_state, time.monotonic())
+        return new_state
+\end{lstlisting}
+
+\textbf{Step 2.3: Phase Detection (Prefill vs Decode)}
+\begin{lstlisting}[language=Python]
+def detect_phase(input_batch):
+    # Prefill: many tokens, few sequences
+    # Decode: few tokens (1 per seq), many sequences
+    tokens_per_seq = input_batch.num_tokens / input_batch.num_seqs
+    return "prefill" if tokens_per_seq > 8 else "decode"
+\end{lstlisting}
+
+\textbf{Deliverable}: Classifier achieving $>$90\% accuracy on synthetic access patterns.
+
+\subsection{Phase 3: Routing Integration (Weeks 9--12)}
+
+\textbf{Step 3.1: Dual-Path Queue Pair Pool}
+\begin{lstlisting}[language=Python]
+class DualPathRDMA:
+    def __init__(self, ctx, num_hot_qps=4, num_cold_qps=2):
+        # Hot path: dedicated QPs, polled completions
+        self.hot_qps = [self._create_qp(ctx, poll=True) 
+                        for _ in range(num_hot_qps)]
+        # Cold path: shared QPs, event-driven completions
+        self.cold_qps = [self._create_qp(ctx, poll=False) 
+                         for _ in range(num_cold_qps)]
+        self.cold_batch = []  # Accumulate for batching
+        
+    def transfer(self, tensor, classification):
+        if classification == TensorClassifier.HOT:
+            qp = self._get_least_loaded(self.hot_qps)
+            self._rdma_write_immediate(qp, tensor)  # Sub-5us
+        else:
+            self.cold_batch.append(tensor)
+            if len(self.cold_batch) >= 8:
+                self._flush_cold_batch()
+\end{lstlisting}
+
+\textbf{Step 3.2: vLLM Connector Integration}
+\begin{lstlisting}[language=Python]
+# New file: vllm/distributed/kv_transfer/adaptive_rdma.py
+class AdaptiveRDMAConnector(KVConnectorBase):
+    def __init__(self, config):
+        self.rdma = DualPathRDMA(...)
+        self.classifier = TensorClassifier()
+        
+    def save_kv_layer(self, layer_id, kv_tensors):
+        for block_id, kv in enumerate(kv_tensors):
+            cls = self.classifier.classify(
+                f"{layer_id}:{block_id}", 
+                self.access_counts[block_id],
+                time.monotonic() - self.last_access[block_id])
+            self.rdma.transfer(kv, cls)
+\end{lstlisting}
+
+\textbf{Step 3.3: Benchmark TTFT Improvement}
+\begin{lstlisting}[language=bash]
+# Run vLLM benchmark with adaptive connector
+python -m vllm.entrypoints.openai.api_server \
+    --model meta-llama/Llama-2-7b-hf \
+    --tensor-parallel-size 2 \
+    --kv-connector AdaptiveRDMAConnector
+
+# Measure TTFT
+python benchmarks/benchmark_serving.py \
+    --model llama-7b --num-prompts 100
+\end{lstlisting}
+
+\textbf{Deliverable}: 30\%+ TTFT reduction on 7B model inference.
+
+\subsection{Phase 4: Training Extension (Weeks 13--16)}
+
+\textbf{Step 4.1: Adaptive All-Reduce for Gradients}
+\begin{lstlisting}[language=Python]
+# Hook into PyTorch DDP gradient synchronization
+class AdaptiveAllReduce:
+    def __init__(self, process_group, rdma_pool):
+        self.pg = process_group
+        self.rdma = rdma_pool
+        self.grad_classifier = TensorClassifier(theta1=5, theta2=50)
+        
+    def all_reduce(self, tensor):
+        # Classify based on gradient magnitude variance
+        cls = self._classify_gradient(tensor)
+        if cls == TensorClassifier.HOT:
+            # Critical gradients: immediate sync
+            self.rdma.hot_all_reduce(tensor)
+        else:
+            # Bulk gradients: batched async
+            self.rdma.cold_all_reduce_async(tensor)
+\end{lstlisting}
+
+\textbf{Step 4.2: Integration with FSDP}
+\begin{lstlisting}[language=Python]
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+model = FSDP(model, 
+    process_group=AdaptiveProcessGroup(rdma_pool))
+\end{lstlisting}
+
+\textbf{Step 4.3: Profile with Nsight Systems}
+\begin{lstlisting}[language=bash]
+nsys profile -o training_profile \
+    python train.py --model llama-7b --use-adaptive-rdma
+nsys stats training_profile.qdrep
+\end{lstlisting}
+
+\textbf{Deliverable}: Training throughput improvement of 15\%+ over NCCL baseline.
+
+\subsection{Phase 5: Validation \& Writing (Weeks 17--24)}
+
+\textbf{Step 5.1: Comprehensive Benchmarking}
+\begin{lstlisting}[language=bash]
+# Test across model sizes
+for model in llama-7b llama-13b llama-70b; do
+    for tp in 2 4 8; do
+        python benchmark.py --model $model --tp $tp \
+            --connector {nccl,adaptive_rdma} \
+            --metrics ttft,tpot,throughput
+    done
+done
+\end{lstlisting}
+
+\textbf{Step 5.2: Ablation Studies}
+\begin{itemize}[noitemsep]
+    \item WFA classifier vs.\ static hot/cold assignment
+    \item Hot-path only vs.\ dual-path routing
+    \item NUMA-aware vs.\ NUMA-oblivious allocation
+    \item Threshold sensitivity analysis ($\theta_1$, $\theta_2$, $t_{idle}$)
+\end{itemize}
+
+\textbf{Step 5.3: Thesis Writing Timeline}
+\begin{itemize}[noitemsep]
+    \item Week 17--18: Introduction, Background, Related Work
+    \item Week 19--20: Design and Implementation chapters
+    \item Week 21--22: Evaluation chapter with all figures
+    \item Week 23--24: Conclusion, revisions, defense prep
+\end{itemize}
+
+\textbf{Deliverable}: Complete thesis with reproducible benchmarks and defense.
+
+\section{Expected Results}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lccl@{}}
+\toprule
+\textbf{Metric} & \textbf{Baseline} & \textbf{Target} & \textbf{Measurement} \\
+\midrule
+TTFT (7B model) & $\sim$150ms & $<$100ms & vLLM benchmark suite \\
+TTFT (70B model, 2-node) & $\sim$800ms & $<$500ms & vLLM benchmark suite \\
+P99 latency variance & High (HOL) & Low & Custom telemetry \\
+Gradient sync overhead & 30\% step time & $<$15\% & PyTorch profiler \\
+\bottomrule
+\end{tabular}
+\caption{Target performance improvements.}
+\end{table}
+
+\section{Hardware \& Software Requirements}
+
+\textbf{Lab Hardware}:
+\begin{itemize}[noitemsep]
+    \item Cerberus: 2$\times$ RTX 5090 (32GB each)
+    \item Chimera: 3$\times$ RTX 3090 (24GB each)
+    \item Network: 10GbE with SoftRoCE, potential 100GbE upgrade
+\end{itemize}
+
+\textbf{Software Stack}:
+\begin{itemize}[noitemsep]
+    \item \texttt{vllm} (fork with connector modifications)
+    \item \texttt{pyverbs} from \texttt{rdma-core}
+    \item \texttt{ray} for distributed coordination
+    \item \texttt{libnuma} for NUMA-aware allocation
+    \item NVIDIA driver 550+, CUDA 12.4+
+\end{itemize}
+
+\textbf{Key Repositories}:
+\begin{itemize}[noitemsep]
+    \item \url{https://github.com/vllm-project/vllm}
+    \item \url{https://github.com/linux-rdma/rdma-core}
+    \item \url{https://github.com/NVIDIA/nccl} (baseline comparison)
+    \item \url{https://github.com/linux-rdma/perftest}
+    \item \url{https://github.com/teslamotors/ttpoe} -- Tesla's RDMA implementation (xAI cluster optimizations)
+    \item \url{https://github.com/ndg8743/x99-udp4-rebar} -- Custom BIOS for Resizable BAR on X99
+\end{itemize}
+
+\textbf{RDMA \& InfiniBand Documentation}:
+\begin{itemize}[noitemsep]
+    \item \href{https://wiki.archlinux.org/title/InfiniBand}{Arch Wiki: InfiniBand} -- Comprehensive setup guide
+\end{itemize}
+
+\textbf{vLLM \& Inference Framework Resources}:
+\begin{itemize}[noitemsep]
+    \item \href{https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html}{Anatomy of vLLM} -- Official deep-dive into vLLM internals
+    \item \href{https://discuss.vllm.ai/t/vllm-benchmarking-why-is-gpudirect-rdma-not-outperforming-standard-rdma-in-a-pipeline-parallel-setup/1377}{GPUDirect RDMA vs Standard RDMA Benchmarking} -- Pipeline parallel performance analysis
+    \item \href{https://www.reddit.com/r/LocalLLaMA/comments/1oyawkl/why_is_vllm_outperforming_tensorrtllm_nvidias/}{vLLM vs TensorRT-LLM Performance Discussion} -- Community benchmarks
+    \item \href{https://www.reddit.com/r/LocalLLaMA/comments/1pq5k6e/jake_formerly_of_ltt_demonstrates_exos/}{Jake's Exo Distributed Inference Demo} -- Multi-node inference demonstration
+\end{itemize}
+
+\section{Risk Mitigation}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}p{4cm}p{5cm}@{}}
+\toprule
+\textbf{Risk} & \textbf{Mitigation} \\
+\midrule
+SoftRoCE performance insufficient & Focus on algorithmic contribution; note hardware RDMA would improve results \\
+vLLM API changes break integration & Pin to specific commit; abstract integration layer \\
+Classification overhead exceeds benefit & Implement lightweight WFA; batch classification decisions \\
+Limited 100GbE access & Demonstrate on 10GbE; project improvements \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+
+This thesis addresses a concrete performance bottleneck in distributed LLM systems by introducing runtime-adaptive communication optimization. The work builds on vLLM's production-grade infrastructure while contributing a novel pattern-aware routing layer. The approach is validated on consumer hardware, demonstrating that intelligent communication scheduling can achieve latency improvements previously requiring expensive InfiniBand deployments.
+
+\end{document}
