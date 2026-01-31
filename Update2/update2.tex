@@ -515,6 +515,20 @@ Limited 100GbE access & Demonstrate on 10GbE; project improvements \\
 \end{tabular}
 \end{table}
 
+\section{Future Work: LLM for RISC-V Assembly Generation}
+
+A secondary research direction involves training/fine-tuning an LLM to generate RISC-V assembly code. Recent work by \href{https://arxiv.org/abs/2401.10364}{Hossain et al.\ (2024)} explored using ChatGPT for RISC processor design, finding that while LLMs can assist with hardware code generation, significant human intervention is still required to fix bugs.
+
+\textbf{Planned Approach:}
+\begin{itemize}[noitemsep]
+    \item \textbf{Dataset curation}: Collect RISC-V assembly examples from open-source projects, compiler outputs, and educational materials
+    \item \textbf{Fine-tuning}: Use the homelab's V100 + 5070 Ti (48GB VRAM) to fine-tune a code-focused model (e.g., CodeLlama, StarCoder) on RISC-V assembly
+    \item \textbf{Validation pipeline}: Automated testing via RISC-V emulators (Spike, QEMU) to verify generated code correctness
+    \item \textbf{Integration}: Explore FPGA deployment for real hardware validation using the Xilinx UltraScale+ boards
+\end{itemize}
+
+This leverages the same distributed inference infrastructure being developed for the primary thesis work, demonstrating practical application of the RDMA optimizations.
+
 \section{Conclusion}
 
 This thesis addresses a concrete performance bottleneck in distributed LLM systems by introducing runtime-adaptive communication optimization. The work builds on vLLM's production-grade infrastructure while contributing a novel pattern-aware routing layer. The approach is validated on consumer hardware, demonstrating that intelligent communication scheduling can achieve latency improvements previously requiring expensive InfiniBand deployments.

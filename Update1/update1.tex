@@ -177,6 +177,12 @@ Strategic timing on hardware purchases saved significant money. For context on G
     \caption{GPU and Additional Network Hardware Orders}
 \end{figure}
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{ddr5-price-spike.png}
+    \caption{DDR5 192GB (2$\times$96GB kits) -- \$337.98 total (Sep 2025, now \$2,000+)}
+\end{figure}
+
 \subsubsection{Current Market Prices (January 2026)}
 
 \begin{figure}[H]
@@ -203,7 +209,7 @@ Strategic timing on hardware purchases saved significant money. For context on G
 
 \subsubsection{RAM Price Crisis}
 
-DDR5 prices have exploded since late 2025 due to supply constraints and AI demand. I purchased 192GB (6$\times$32GB) of DDR5-5200 before the spike.
+DDR5 prices have exploded since late 2025 due to supply constraints and AI demand. I purchased 192GB (4$\times$48GB) of DDR5-5200 before the spike.
 
 \begin{figure}[H]
     \centering
@@ -214,7 +220,7 @@ DDR5 prices have exploded since late 2025 due to supply constraints and AI deman
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.25\textwidth]{ddr5-96gb-current-price.png}
-    \caption{Current price: G.Skill 96GB DDR5-5200 kit -- \$1,049 (was $\sim$\$200)}
+    \caption{Current price: G.Skill 96GB DDR5-5200 kit -- \$1,049}
 \end{figure}
 
 \subsubsection{Inspiration}
@@ -285,8 +291,6 @@ My home setup consists of two towers with a combined 32 cores, 320GB RAM, and 10
 
 \textbf{Tower 2 (Proxmox):} Gigabyte X99 UD4P, Xeon E5-2697A v4 (16c/32t), 128GB DDR4 2133 ECC, 1$\times$ Tesla V100 32GB (can fit 2nd V100 with higher wattage PSU or PCIe extender to clear the QSFP card), 1TB Crucial NVMe, 2TB Seagate HDD, NZXT H440, 750W Bronze PSU, 100GbE networking.
 
-\textbf{Spare parts:} 128GB DDR4 in X99 system ready to deploy, 8$\times$ DDR4 G.Skill kit.
-
 \begin{figure}[H]
     \centering
     \begin{subfigure}[b]{0.47\textwidth}
@@ -352,13 +356,13 @@ RTX 5070 Ti 16GB & \$825 & \$825 & 0\% \\
 \multicolumn{4}{@{}l@{}}{\textit{Tower 2 (Proxmox/X99):}} \\
 Gigabyte X99 UD4P + Xeon E5-2697A v4 & $\sim$\$300 & \$2,000+ & 85\% \\
 128GB DDR4 2133 ECC & \$0 (free) & \$400+ & 100\% \\
-1$\times$ Tesla V100 32GB (have 2nd) & \$648 & \$11,458 & 94\% \\
+2$\times$ Tesla V100 32GB & \$1,296 & \$22,916 & 94\% \\
 NZXT H440 + 750W PSU + Cooler & $\sim$\$150 & \$300 & 50\% \\
 \midrule
 \multicolumn{4}{@{}l@{}}{\textit{Networking:}} \\
 Mellanox 100GbE (2 cards + DAC) & \$272 & \$800+ & 66\% \\
 \midrule
-\textbf{Total Compute Hardware} & \textbf{$\sim$\$3,150} & \textbf{\$19,000+} & \textbf{83\%} \\
+\textbf{Total Compute Hardware} & \textbf{$\sim$\$3,794} & \textbf{\$30,000+} & \textbf{87\%} \\
 \bottomrule
 \end{tabular}
 \caption{Hardware Cost Breakdown}
@@ -371,7 +375,7 @@ Mellanox 100GbE (2 cards + DAC) & \$272 & \$800+ & 66\% \\
 \toprule
 \textbf{Solution} & \textbf{Cost} & \textbf{VRAM} & \textbf{Est. tok/s (70B)} & \textbf{\$/tok/s} \\
 \midrule
-My Homelab (V100 + 5070 Ti) & \$3,150 & 48GB & $\sim$12 & \$263 \\
+My Homelab (2$\times$V100 + 5070 Ti) & \$3,794 & 80GB & $\sim$18 & \$211 \\
 NVIDIA DGX A100 & \$199,000 & 640GB & $\sim$150 & \$1,327 \\
 AWS p4d.24xlarge (1yr) & \$285,000 & 320GB & $\sim$80 & \$3,563 \\
 Lambda Labs (1yr) & \$87,600 & 80GB & $\sim$20 & \$4,380 \\
