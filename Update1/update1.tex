@@ -261,11 +261,11 @@ For my Homelabs, I had to flash a \href{https://github.com/ndg8743/x99-udp4-reba
     \caption{GA-X99-UD4P BIOS -- Custom F24 adds Resizable BAR and 4G Decoding}
 \end{figure}
 
-\textit{Note: I still need to order a PCIe extender for the top tower to connect the Mellenox card or highwattage PSU for all gpu's to boot.}
+\textit{Note: I still need to order a PCIe extender to fit between the 2 GPUs, or a higher wattage PSU for all GPUs to boot.}
 
 \subsection{FPGA Options for DIY PCIe RDMA}
 
-For Chimera/Hydra/Cerberus, we can use RDMA on a DIY FPGA PCIe card or Mellanox cards (x16 slot gives $\sim$16 GB/s). When implementing custom FPGA solutions, security considerations are important---I enjoyed looking at the security optimizations in \href{https://ieeexplore.ieee.org/abstract/document/10682632}{Wafi's recent work from IEEE ISVLSI 2024}, which demonstrates deep learning approaches for detecting hardware trojans in FPGA bitstreams, achieving 93\% detection accuracy on Xilinx devices.
+For the home towers (Chimera/Hydra/Cerberus), we can use RDMA on a DIY FPGA PCIe card or Mellanox cards (x16 slot gives $\sim$16 GB/s). When implementing custom FPGA solutions, security considerations are important---I enjoyed looking at the security optimizations in \href{https://ieeexplore.ieee.org/abstract/document/10682632}{Wafi's recent work from IEEE ISVLSI 2024}, which demonstrates deep learning approaches for detecting hardware trojans in FPGA bitstreams, achieving 93\% detection accuracy on Xilinx devices.
 
 \begin{figure}[H]
     \centering
@@ -289,7 +289,7 @@ My home setup consists of two towers with a combined 32 cores, 320GB RAM, and 10
 
 \textbf{Tower 1 (Windows):} Ryzen 9 7950X (16c/32t), 192GB DDR5-5200, RTX 5070 Ti (16GB GDDR7), 2TB Gen5 NVMe, 40TB+ HDD raw storage, 100GbE networking.
 
-\textbf{Tower 2 (Proxmox):} Gigabyte X99 UD4P, Xeon E5-2697A v4 (16c/32t), 128GB DDR4 2133 ECC, 1$\times$ Tesla V100 32GB (can fit 2nd V100 with higher wattage PSU or PCIe extender to clear the QSFP card), 1TB Crucial NVMe, 2TB Seagate HDD, NZXT H440, 750W Bronze PSU, 100GbE networking.
+\textbf{Tower 2 (Proxmox):} Gigabyte X99 UD4P, Xeon E5-2697A v4 (16c/32t), 128GB DDR4 2133 ECC, 2$\times$ Tesla V100 32GB (needs PCIe extender to fit between GPUs or higher wattage PSU), 1TB Crucial NVMe, 2TB Seagate HDD, NZXT H440, 750W Bronze PSU, 100GbE networking.
 
 \begin{figure}[H]
     \centering
@@ -350,7 +350,7 @@ My home setup consists of two towers with a combined 32 cores, 320GB RAM, and 10
 \midrule
 \multicolumn{4}{@{}l@{}}{\textit{Tower 1 (Windows/Daily):}} \\
 Ryzen 9 7950X & \$351 & \$499 & 30\% \\
-192GB DDR5-5200 & $\sim$\$600 & \$3,000+ & 80\% \\
+192GB DDR5-5200 (4$\times$48GB) & \$338 & \$3,000+ & 89\% \\
 RTX 5070 Ti 16GB & \$825 & \$825 & 0\% \\
 \midrule
 \multicolumn{4}{@{}l@{}}{\textit{Tower 2 (Proxmox/X99):}} \\
@@ -362,7 +362,7 @@ NZXT H440 + 750W PSU + Cooler & $\sim$\$150 & \$300 & 50\% \\
 \multicolumn{4}{@{}l@{}}{\textit{Networking:}} \\
 Mellanox 100GbE (2 cards + DAC) & \$272 & \$800+ & 66\% \\
 \midrule
-\textbf{Total Compute Hardware} & \textbf{$\sim$\$3,794} & \textbf{\$30,000+} & \textbf{87\%} \\
+\textbf{Total Compute Hardware} & \textbf{$\sim$\$3,532} & \textbf{\$30,000+} & \textbf{88\%} \\
 \bottomrule
 \end{tabular}
 \caption{Hardware Cost Breakdown}
@@ -375,7 +375,7 @@ Mellanox 100GbE (2 cards + DAC) & \$272 & \$800+ & 66\% \\
 \toprule
 \textbf{Solution} & \textbf{Cost} & \textbf{VRAM} & \textbf{Est. tok/s (70B)} & \textbf{\$/tok/s} \\
 \midrule
-My Homelab (2$\times$V100 + 5070 Ti) & \$3,794 & 80GB & $\sim$18 & \$211 \\
+My Homelab (2$\times$V100 + 5070 Ti) & \$3,532 & 80GB & $\sim$18 & \$196 \\
 NVIDIA DGX A100 & \$199,000 & 640GB & $\sim$150 & \$1,327 \\
 AWS p4d.24xlarge (1yr) & \$285,000 & 320GB & $\sim$80 & \$3,563 \\
 Lambda Labs (1yr) & \$87,600 & 80GB & $\sim$20 & \$4,380 \\
