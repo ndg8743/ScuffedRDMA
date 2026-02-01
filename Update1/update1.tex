@@ -97,7 +97,7 @@ Since I started researching RDMA and LLMs across different hardware setups, I've
 
 \section{Hardware Notes}
 
-Regular Ethernet doesn't cut it at these speeds. Ideally we'd use a dual-port QSFP card with DAC cables. As noted in \href{https://www.reddit.com/r/LocalLLaMA/comments/1eks8n4/fabric_question_infiniband_vs_pcie/}{this InfiniBand vs PCIe discussion}: at PCIe 3.0 x8 (workable for a 3090), you get 8GB/s or 64Gbit/s. A dual-port ConnectX-4 100Gbit card ($\sim$\$200) provides 200Gbit of bandwidth---enough for three GPUs.
+Regular Ethernet doesn't cut it at these speeds. Ideally we'd use a dual-port QSFP card with DAC cables. As noted in \href{https://www.reddit.com/r/LocalLLaMA/comments/1eks8n4/fabric_question_infiniband_vs_pcie/}{this InfiniBand vs PCIe discussion}: at PCIe 3.0 x8 (workable for a 3090), you get 8GB/s or 64Gbit/s. A dual-port ConnectX-4 100Gbit card ($\sim$\$200) provides 200Gbit of bandwidth;enough for three GPUs.
 
 \subsection{Network Card Options}
 
@@ -135,7 +135,7 @@ Regular Ethernet doesn't cut it at these speeds. Ideally we'd use a dual-port QS
 
 \subsection{Hardware Purchases \& Price Analysis}
 
-Strategic timing on hardware purchases saved significant money. For context on GPU pricing for LLM workloads, see \href{https://www.reddit.com/r/LocalLLaMA/comments/1p3d34y/inspired_by_a_recent_post_a_list_of_the_cheapest/}{this community-compiled list of cheapest VRAM options}. The Tesla V100 32GB originally launched at \href{https://www.microway.com/hpc-tech-tips/nvidia-tesla-v100-price-analysis/}{\$11,458 MSRP}---I paid \$626--\$669 each (94\% off).
+Strategic timing on hardware purchases saved significant money. For context on GPU pricing for LLM workloads, see \href{https://www.reddit.com/r/LocalLLaMA/comments/1p3d34y/inspired_by_a_recent_post_a_list_of_the_cheapest/}{this community-compiled list of cheapest VRAM options}. The Tesla V100 32GB originally launched at \href{https://www.microway.com/hpc-tech-tips/nvidia-tesla-v100-price-analysis/}{\$11,458 MSRP};I paid \$626--\$669 each (94\% off).
 
 \subsubsection{What I Purchased}
 
@@ -271,7 +271,7 @@ For my Homelabs, I had to flash a \href{https://github.com/ndg8743/x99-udp4-reba
 
 \subsection{FPGA Options for DIY PCIe RDMA}
 
-For the home towers (Chimera/Hydra/Cerberus), we can use RDMA on a DIY FPGA PCIe card or Mellanox cards (x16 slot gives $\sim$16 GB/s). When implementing custom FPGA solutions, security considerations are important---I enjoyed looking at the security optimizations in \href{https://ieeexplore.ieee.org/abstract/document/10682632}{Dr. Wafi Danesh's recent work from IEEE ISVLSI 2024}, which demonstrates deep learning approaches for detecting hardware trojans in FPGA bitstreams, achieving 93\% detection accuracy on Xilinx devices.
+For the home towers (Chimera/Hydra/Cerberus), we can use RDMA on a DIY FPGA PCIe card or Mellanox cards (x16 slot gives $\sim$16 GB/s). When implementing custom FPGA solutions, security considerations are important;I enjoyed looking at the security optimizations in \href{https://ieeexplore.ieee.org/abstract/document/10682632}{Dr. Wafi Danesh's recent work from IEEE ISVLSI 2024}, which demonstrates deep learning approaches for detecting hardware trojans in FPGA bitstreams, achieving 93\% detection accuracy on Xilinx devices.
 
 \begin{figure}[H]
     \centering
