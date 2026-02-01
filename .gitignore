@@ -13,3 +13,6 @@
 
 # Keep PDFs (they're the output)
 # *.pdf
+
+# Claude Code
+.claude/
