@@ -211,6 +211,8 @@ Strategic timing on hardware purchases saved significant money. For context on G
     \caption{Current RTX 5070 Ti Market Prices}
 \end{figure}
 
+\textit{Note: Despite NVIDIA's \$749 MSRP, most RTX 5070 Ti listings now exceed \href{https://videocardz.com/newz/did-nvidia-lie-geforce-rtx-5070-ti-prices-start-crossing-1000-at-us-retailers}{the RTX 5080's MSRP} due to supply constraints.}
+
 \subsubsection{RAM Price Crisis}
 
 DDR5 prices have exploded since late 2025 due to supply constraints and AI demand. I purchased 192GB (4$\times$48GB) of DDR5-5200 before the spike.
@@ -269,7 +271,7 @@ For my Homelabs, I had to flash a \href{https://github.com/ndg8743/x99-udp4-reba
 
 \subsection{FPGA Options for DIY PCIe RDMA}
 
-For the home towers (Chimera/Hydra/Cerberus), we can use RDMA on a DIY FPGA PCIe card or Mellanox cards (x16 slot gives $\sim$16 GB/s). When implementing custom FPGA solutions, security considerations are important---I enjoyed looking at the security optimizations in \href{https://ieeexplore.ieee.org/abstract/document/10682632}{Wafi's recent work from IEEE ISVLSI 2024}, which demonstrates deep learning approaches for detecting hardware trojans in FPGA bitstreams, achieving 93\% detection accuracy on Xilinx devices.
+For the home towers (Chimera/Hydra/Cerberus), we can use RDMA on a DIY FPGA PCIe card or Mellanox cards (x16 slot gives $\sim$16 GB/s). When implementing custom FPGA solutions, security considerations are important---I enjoyed looking at the security optimizations in \href{https://ieeexplore.ieee.org/abstract/document/10682632}{Dr. Wafi Danesh's recent work from IEEE ISVLSI 2024}, which demonstrates deep learning approaches for detecting hardware trojans in FPGA bitstreams, achieving 93\% detection accuracy on Xilinx devices.
 
 \begin{figure}[H]
     \centering
