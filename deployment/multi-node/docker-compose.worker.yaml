@@ -1,0 +1,28 @@
+# Cerberus (Worker Node) - 2x RTX 5090 (64GB VRAM)
+# Connects to Ray head on Chimera for multi-node inference
+# Total cluster: 5 GPUs (136GB VRAM)
+
+services:
+  ray-worker:
+    image: rayproject/ray:2.35.0-py311-gpu
+    container_name: ray-worker
+    network_mode: host
+    ipc: host
+    privileged: true
+    volumes:
+      - /models:/root/.cache/huggingface
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1
+      - RAY_ADDRESS=192.168.1.150:6379  # Chimera head node
+    command: >
+      ray start
+      --address=192.168.1.150:6379
+      --block
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+    restart: unless-stopped

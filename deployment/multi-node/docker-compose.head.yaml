@@ -1,0 +1,58 @@
+# Chimera (Head Node) - 3x RTX 3090 (72GB VRAM)
+# Multi-node vLLM with Ray for pipeline parallelism across Chimera + Cerberus
+# Total: 5 GPUs (136GB VRAM)
+
+services:
+  ray-head:
+    image: rayproject/ray:2.35.0-py311-gpu
+    container_name: ray-head
+    network_mode: host
+    ipc: host
+    privileged: true
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1,2
+    command: >
+      ray start --head --port=6379
+      --dashboard-host=0.0.0.0
+      --dashboard-port=8265
+      --block
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 3
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  vllm-head:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-head
+    network_mode: host
+    ipc: host
+    privileged: true
+    depends_on:
+      - ray-head
+    volumes:
+      - /models:/root/.cache/huggingface
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - CUDA_VISIBLE_DEVICES=0,1,2
+      - RAY_ADDRESS=127.0.0.1:6379
+    command: >
+      --model ${MODEL:-deepseek-ai/DeepSeek-R1-Distill-Llama-70B}
+      --tensor-parallel-size 3
+      --pipeline-parallel-size 2
+      --port 8000
+      --host 0.0.0.0
+      --trust-remote-code
+      --max-model-len 4096
+      --gpu-memory-utilization 0.90
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 3
+              capabilities: [gpu]
+    restart: unless-stopped
