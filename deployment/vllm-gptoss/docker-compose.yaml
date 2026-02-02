@@ -1,0 +1,49 @@
+# vLLM with gpt-oss support
+# Uses special gpt-oss build with MXFP4 quantization
+#
+# Models:
+#   openai/gpt-oss-20b  (14GB) - fits on single GPU
+#   openai/gpt-oss-120b (63GB) - fits on 3x RTX 3090
+
+services:
+  vllm-gptoss:
+    # IMPORTANT: Use the gptoss-specific image!
+    image: vllm/vllm-openai:gptoss
+    container_name: vllm-gptoss
+    network_mode: host
+    ipc: host
+    volumes:
+      - /models:/root/.cache/huggingface
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1,2
+      - VLLM_USE_FLASHINFER_MXFP4_MOE=1  # Enable FlashInfer for MoE
+    command: >
+      --model ${MODEL:-openai/gpt-oss-120b}
+      --tensor-parallel-size ${TP_SIZE:-3}
+      --port 8000
+      --host 0.0.0.0
+      --trust-remote-code
+      --max-model-len 4096
+      --gpu-memory-utilization 0.90
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
+# Usage:
+#   docker compose up -d
+#
+# Test:
+#   curl http://localhost:8000/v1/models
+#
+# OpenWebUI: Already configured at http://localhost:8000/v1
