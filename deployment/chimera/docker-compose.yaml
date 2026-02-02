@@ -1,137 +1,78 @@
-# Chimera (192.168.1.150) - OpenWebUI + Ollama + vLLM
-# Updated: Feb 2026
-#
-# IMPORTANT: Watchtower removed - it breaks settings
-# Pin versions explicitly and update manually
+# vLLM Cluster - Chimera Head Node
+# IP: 192.168.1.150
+# GPUs: 3x RTX 3090 (72GB VRAM)
 
 services:
-  # ============================================
-  # Ollama - Local LLM inference (port 11434)
-  # ============================================
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
+  ray-head:
+    image: rayproject/ray:2.35.0-py311-gpu
+    container_name: ray-head
+    hostname: chimera-ray
+    network_mode: host
+    ipc: host
+    privileged: true
     volumes:
-      - /models:/root/.ollama
-    ports:
-      - "11434:11434"
+      - /dev/infiniband:/dev/infiniband:ro
     environment:
-      # GPU and Memory Optimization - 3x RTX 3090 (72GB VRAM)
-      - OLLAMA_KEEP_ALIVE=-1                  # Keep models in VRAM forever
-      - OLLAMA_FLASH_ATTENTION=1              # Enable Flash Attention
-      - OLLAMA_MAX_LOADED_MODELS=6            # Allow 6 models in VRAM
-      - OLLAMA_GPU_OVERHEAD=0.10              # Reserve 10% VRAM
-      - OLLAMA_NUM_PARALLEL=4                 # 4 concurrent requests
-      - OLLAMA_NUM_GPU=3                      # Use all 3 GPUs
-      - NVIDIA_VISIBLE_DEVICES=0,1,2
-      - OLLAMA_HOST=0.0.0.0:11434
+      - RAY_HEAD_NODE=1
+    command: ray start --head --port=6379 --dashboard-host=0.0.0.0 --dashboard-port=8265 --block
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 3
+              count: all
               capabilities: [gpu]
     restart: unless-stopped
-    tty: true
 
-  # ============================================
-  # vLLM - OpenAI-compatible API (port 8000)
-  # ============================================
-  vllm:
+  vllm-server:
     image: vllm/vllm-openai:latest
     container_name: vllm-server
-    profiles: ["vllm"]  # Only start with: docker compose --profile vllm up
+    network_mode: host
+    ipc: host
+    privileged: true
     volumes:
       - /models:/root/.cache/huggingface
+      - /dev/infiniband:/dev/infiniband:ro
     environment:
-      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      # MXFP4 quantization for MoE models
+      - VLLM_USE_FLASHINFER_MXFP4_MOE=1
+      # Soft-RoCE configuration (for software RDMA)
+      # Uncomment if using Soft-RoCE:
+      # - NCCL_IB_HCA=rxe0
+      # - NCCL_NET_GDR_LEVEL=0
+      # - NCCL_IB_GID_INDEX=3
+      # Hardware RDMA configuration (for Mellanox):
+      # - NCCL_IB_HCA=mlx5_0
+      # Standard TCP fallback (current setup):
+      - NCCL_SOCKET_IFNAME=enp71s0
+      - NCCL_DEBUG=INFO
       - CUDA_VISIBLE_DEVICES=0,1,2
+      - VLLM_ATTENTION_BACKEND=FLASH_ATTN
+    # Example: Run a smaller model first to test
     command: >
-      --model ${MODEL:-deepseek-ai/DeepSeek-R1-Distill-Qwen-32B}
+      vllm serve "meta-llama/Llama-3.1-8B-Instruct"
       --tensor-parallel-size 3
-      --max-model-len 4096
       --port 8000
       --host 0.0.0.0
-      --trust-remote-code
-      --gpu-memory-utilization 0.90
-    ports:
-      - "8000:8000"
+      --max-model-len 4096
+    # For gpt-oss-120b (requires multi-node):
+    # command: >
+    #   vllm serve "openai/gpt-oss-120b"
+    #   --tensor-parallel-size 3
+    #   --pipeline-parallel-size 2
+    #   --trust-remote-code
+    #   --max-model-len 4096
+    #   --port 8000
+    #   --host 0.0.0.0
+    depends_on:
+      - ray-head
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 3
+              count: all
               capabilities: [gpu]
     restart: unless-stopped
 
-  # ============================================
-  # OpenWebUI - Chat interface (port 3000)
-  # ============================================
-  open-webui:
-    # PINNED VERSION - Do not use :latest, Watchtower breaks settings
-    image: ghcr.io/open-webui/open-webui:v0.7.2
-    container_name: open-webui
-    volumes:
-      - open-webui:/app/backend/data
-    depends_on:
-      - ollama
-    ports:
-      - "3000:8080"
-    environment:
-      # Ollama connection
-      - OLLAMA_BASE_URL=http://ollama:11434
-      # vLLM / OpenAI connection (configure in UI: Admin → Connections)
-      # URL: http://host.docker.internal:8000/v1
-      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-}
-      # Performance
-      - CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE=5
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 3
-              capabilities: [gpu]
-
-  # ============================================
-  # OpenWebUI Middleman - Account management API (port 7070)
-  # ============================================
-  openwebui_middleman:
-    build:
-      context: /home/infra/hydra-saml-auth
-      dockerfile: legacy/chimera_docker/Dockerfile.middleman
-    container_name: openwebui_middleman
-    command: ["node", "legacy/openwebui_middleman/index.js"]
-    env_file:
-      - /home/infra/hydra-saml-auth/.env
-    environment:
-      - OPENWEBUI_API_PORT=7070
-    volumes:
-      - open-webui:/app/data:rw
-    ports:
-      - "7070:7070"
-    restart: unless-stopped
-    depends_on:
-      - open-webui
-
-  # ============================================
-  # NO WATCHTOWER - Manual updates only
-  # ============================================
-  # Watchtower was removed because it:
-  # - Resets OpenWebUI settings on update
-  # - Breaks custom configurations
-  # - Causes unexpected downtime
-  #
-  # To update manually:
-  #   docker compose pull open-webui
-  #   docker compose up -d open-webui
-
-volumes:
-  open-webui:
-    external: true
-    name: comp_open-webui
+volumes: {}
