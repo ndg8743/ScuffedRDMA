@@ -115,6 +115,21 @@ export NCCL_SOCKET_IFNAME=eno2np1  # Cerberus
 
 **Expected RDMA improvement: 10-20%** over TCP for multi-node inference.
 
+## Why MXFP4 Matters for RDMA
+
+gpt-oss-120b uses **Microscaling (MX) data formats** ([arXiv:2310.10537](https://arxiv.org/abs/2310.10537)):
+
+| Format | Model Size | Bandwidth Needed |
+|--------|------------|------------------|
+| FP16 | ~240GB | 4x more |
+| MXFP4 | **63GB** | **4x less** |
+
+Benefits for distributed inference:
+- **4x less data** transferred over RDMA
+- Faster KV cache synchronization
+- Lower network bottleneck impact
+- FlashInfer provides optimized MXFP4 kernels
+
 ## Monitoring
 
 ```bash
