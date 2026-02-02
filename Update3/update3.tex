@@ -54,6 +54,10 @@
     citecolor=blue
 }
 
+% Bibliography
+\usepackage[numbers]{natbib}
+\bibliographystyle{unsrtnat}
+
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
 \large Week 3: Lab Infrastructure \& RDMA Transport Testing}
 \author{Nathan Gopee\\
@@ -157,7 +161,7 @@ git clone https://github.com/ndg8743/ScuffedRDMA.git /home/nathan/ScuffedRDMA
 
 \subsection{Configuration}
 
-Soft-RoCE provides RDMA semantics over standard Ethernet without specialized hardware. Setup on both nodes:
+Soft-RoCE provides RDMA semantics over standard Ethernet without specialized hardware \cite{rdma-core}. Setup on both nodes:
 
 \begin{lstlisting}[language=bash]
 # Load kernel module
@@ -240,11 +244,11 @@ Bandwidth & 5--8 Gb/s & 0.92 Gb/s & CPU-limited, not line rate \\
     \item \textbf{Deprecated}: NVIDIA deprecated Soft-RoCE in October 2023
 \end{enumerate}
 
-\textbf{Recommendation}: Soft-RoCE is adequate for development/testing RDMA semantics but production deployments should use Hardware RoCE with Mellanox ConnectX NICs (expected latency $<$2$\mu$s).
+\textbf{Recommendation}: Soft-RoCE is adequate for development/testing RDMA semantics but production deployments should use Hardware RoCE with Mellanox ConnectX NICs \cite{mofed-docs} (expected latency $<$2$\mu$s).
 
 \section{Tesla TTPoe Build}
 
-Successfully compiled Tesla's Time-Triggered Protocol over Ethernet kernel modules:
+Successfully compiled Tesla's Time-Triggered Protocol over Ethernet kernel modules \cite{ttpoe-repo,ttpoe-hotchips}:
 
 \begin{lstlisting}[language=bash]
 # Clone and build
@@ -407,7 +411,7 @@ services:
 \texttt{NCCL\_SOCKET\_IFNAME=enp71s0} & Fallback to specific Ethernet interface \\
 \texttt{NCCL\_NET\_GDR\_LEVEL=0} & Disable GPUDirect (for Soft-RoCE) \\
 \texttt{NCCL\_DEBUG=INFO} & Enable NCCL debug logging \\
-\texttt{VLLM\_USE\_FLASHINFER\_MXFP4\_MOE=1} & Enable MXFP4 quantization for MoE models \\
+\texttt{VLLM\_USE\_FLASHINFER\_MXFP4\_MOE=1} & Enable MXFP4 quantization \cite{mxfp4-paper} for MoE models \\
 \bottomrule
 \end{tabular}
 \caption{Key environment variables for distributed vLLM}
@@ -420,8 +424,8 @@ Created an 18KB comprehensive report covering the RDMA technology landscape:
 \subsection{Emerging Technologies (2025--2026)}
 
 \begin{itemize}[noitemsep]
-    \item \textbf{Ultra Ethernet Consortium (UEC)}: Industry consortium developing 1.6 Tbps lossless Ethernet for AI
-    \item \textbf{OCP Falcon}: Meta's open networking specification
+    \item \textbf{Ultra Ethernet Consortium (UEC)} \cite{uec-spec}: Industry consortium developing 1.6 Tbps lossless Ethernet for AI
+    \item \textbf{OCP Falcon} \cite{ocp-falcon}: Meta's open networking specification
     \item \textbf{NVIDIA BlueField DPA}: Data path acceleration with programmable ARM cores
     \item \textbf{AWS ENA Express}: SRD-based 25$\mu$s p50 latency on commodity instances
 \end{itemize}
@@ -570,5 +574,36 @@ This week established the foundation for distributed LLM inference testing on th
 \end{itemize}
 
 The Soft-RoCE results confirm the thesis hypothesis: software RDMA incurs significant overhead ($\sim$190$\mu$s vs expected $\sim$10$\mu$s), motivating the development of adaptive routing to minimize latency-sensitive transfers. Hardware RoCE testing on the home lab Mellanox NICs will provide the production baseline for comparison.
+
+\begin{thebibliography}{99}
+
+\bibitem{rdma-core}
+Linux RDMA. (2024). \textit{rdma-core Documentation}. \url{https://github.com/linux-rdma/rdma-core}
+
+\bibitem{mofed-docs}
+Mellanox Technologies. (2024). \textit{NVIDIA MLNX\_OFED Documentation}. \url{https://docs.nvidia.com/networking/display/MLNXOFEDv24010331/}
+
+\bibitem{ttpoe-repo}
+Tesla, Inc. (2024). \textit{TTPoe: Time-Triggered Protocol over Ethernet}. \url{https://github.com/teslamotors/ttpoe}
+
+\bibitem{ttpoe-hotchips}
+Tesla. (2024). \textit{TTPoE at Hot Chips 2024: Replacing TCP for Low Latency Applications}. Hot Chips 2024.
+
+\bibitem{mxfp4-paper}
+Rouhani, B. D., et al. (2023). \textit{Microscaling Data Formats for Deep Learning}. arXiv:2310.10537.
+
+\bibitem{uec-spec}
+Ultra Ethernet Consortium. (2025). \textit{UEC 1.0 Specification}. \url{https://ultraethernet.org/}
+
+\bibitem{ocp-falcon}
+Open Compute Project. (2025). \textit{OCP Falcon Networking Specification}. \url{https://github.com/opencomputeproject/OCP-NET-Falcon}
+
+\bibitem{perftest}
+Linux RDMA. (2024). \textit{perftest - RDMA Performance Tests}. \url{https://github.com/linux-rdma/perftest}
+
+\bibitem{gpudirect-docs}
+NVIDIA. (2024). \textit{GPUDirect RDMA Documentation}. \url{https://docs.nvidia.com/cuda/gpudirect-rdma/index.html}
+
+\end{thebibliography}
 
 \end{document}

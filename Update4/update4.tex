@@ -55,6 +55,10 @@
     citecolor=blue
 }
 
+% Bibliography
+\usepackage[numbers]{natbib}
+\bibliographystyle{unsrtnat}
+
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
 \large Week 4: FlashAttention 3 Fix for NVIDIA Blackwell (RTX 5090)}
 \author{Nathan Gopee\\
@@ -69,7 +73,7 @@ MS Computer Science, SUNY New Paltz\\
 
 \section{Executive Summary}
 
-This update documents the discovery and resolution of a critical bug affecting FlashAttention 3 on NVIDIA Blackwell GPUs (RTX 5090). The fix enables our Cerberus node (2$\times$ RTX 5090, 64GB VRAM) to participate in multi-node vLLM inference with full FlashAttention 3 optimization.
+This update documents the discovery and resolution of a critical bug affecting FlashAttention 3 \cite{flashattn2} on NVIDIA Blackwell GPUs (RTX 5090). The fix enables our Cerberus node (2$\times$ RTX 5090, 64GB VRAM) to participate in multi-node vLLM inference with full FlashAttention 3 optimization.
 
 \textbf{Key Finding:} A lazy import pattern resolves early CUDA initialization failures on Blackwell architecture, restoring $\sim$15\% performance loss from FA2 fallback.
 
@@ -98,10 +102,10 @@ This was unexpected because:
 The fix was discovered through systematic investigation:
 
 \begin{enumerate}[noitemsep]
-    \item \textbf{vLLM gpt-oss Blog Post} --- Confirmed gpt-oss requires FlashAttention with MXFP4
+    \item \textbf{vLLM gpt-oss Blog Post} \cite{vllm-gptoss} --- Confirmed gpt-oss requires FlashAttention with MXFP4 \cite{mxfp4-paper}
     \item \textbf{Kernel Fusion Article} --- Understood FlashInfer's role in MoE optimization
-    \item \textbf{FlashInfer GitHub} --- Reviewed MXFP4 kernel implementation
-    \item \textbf{vLLM Issue \#22279} --- Found the exact bug report and community fix
+    \item \textbf{FlashInfer GitHub} \cite{flashinfer} --- Reviewed MXFP4 kernel implementation
+    \item \textbf{vLLM Issue \#22279} \cite{vllm-blackwell-issue} --- Found the exact bug report and community fix
 \end{enumerate}
 
 \begin{table}[H]
@@ -425,15 +429,31 @@ The Blackwell FlashAttention 3 fix resolves a critical compatibility issue that 
     \item \textbf{Applicability}: Any model using \texttt{MMEncoderAttention} on Blackwell GPUs
 \end{enumerate}
 
-This fix enables the full 136GB VRAM cluster (5 GPUs across 2 nodes) to run large models like DeepSeek-R1-70B and gpt-oss-120b with optimal performance.
+This fix enables the full 136GB VRAM cluster (5 GPUs across 2 nodes) to run large models like DeepSeek-R1-70B and gpt-oss-120b \cite{gptoss-hf} with optimal performance.
 
-\section{References}
+\begin{thebibliography}{99}
 
-\begin{itemize}[noitemsep]
-    \item vLLM Issue \#22279: \url{https://github.com/vllm-project/vllm/issues/22279}
-    \item vLLM gpt-oss Blog: \url{https://blog.vllm.ai/2025/08/05/gpt-oss.html}
-    \item FlashInfer: \url{https://github.com/flashinfer-ai/flashinfer}
-    \item FlashAttention Paper: \url{https://arxiv.org/abs/2307.08691}
-\end{itemize}
+\bibitem{flashattn2}
+Dao, T. (2023). \textit{FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning}. arXiv:2307.08691.
+
+\bibitem{vllm-gptoss}
+vLLM Project. (2025). \textit{gpt-oss on vLLM}. \url{https://blog.vllm.ai/2025/08/05/gpt-oss.html}
+
+\bibitem{mxfp4-paper}
+Rouhani, B. D., et al. (2023). \textit{Microscaling Data Formats for Deep Learning}. arXiv:2310.10537.
+
+\bibitem{flashinfer}
+FlashInfer. (2025). \textit{FlashInfer: Kernel Library for LLM Serving}. \url{https://github.com/flashinfer-ai/flashinfer}
+
+\bibitem{vllm-blackwell-issue}
+vLLM. (2026). \textit{Issue \#22279: FlashAttention 3 fails on Blackwell GPUs}. \url{https://github.com/vllm-project/vllm/issues/22279}
+
+\bibitem{gptoss-hf}
+OpenAI. (2025). \textit{gpt-oss-120b Model Card}. \url{https://huggingface.co/openai/gpt-oss-120b}
+
+\bibitem{pagedattn}
+Kwon, W., et al. (2023). \textit{Efficient Memory Management for Large Language Model Serving with PagedAttention}. SOSP 2023.
+
+\end{thebibliography}
 
 \end{document}

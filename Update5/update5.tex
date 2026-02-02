@@ -54,6 +54,10 @@
     citecolor=blue
 }
 
+% Bibliography
+\usepackage[numbers]{natbib}
+\bibliographystyle{unsrtnat}
+
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
 \large Week 5: gpt-oss-120b Benchmarks --- TCP vs RDMA}
 \author{Nathan Gopee\\
@@ -108,8 +112,8 @@ IP Address & 192.168.1.150 & 192.168.1.233 & --- \\
 \toprule
 \textbf{Parameter} & \textbf{Value} \\
 \midrule
-Model & gpt-oss-120b (116.8B parameters) \\
-Quantization & MXFP4 \\
+Model & gpt-oss-120b \cite{gptoss-hf} (116.8B parameters) \\
+Quantization & MXFP4 \cite{mxfp4-paper} \\
 Model Size & 63GB \\
 Context Length & 8192 tokens \\
 VRAM Usage & 67.76GB (loaded) \\
@@ -253,7 +257,7 @@ docker run --gpus all -p 8000:8000 --ipc=host \
 \textbf{Mode} & \textbf{Variables} & \textbf{Effect} \\
 \midrule
 TCP (baseline) & \texttt{NCCL\_NET\_GDR\_LEVEL=0} & Disable GPUDirect, use TCP sockets \\
- & \texttt{NCCL\_IB\_DISABLE=1} & Disable InfiniBand/RoCE \\
+ & \texttt{NCCL\_IB\_DISABLE=1} & Disable InfiniBand/RoCE \cite{nccl-env} \\
 \midrule
 RDMA (Soft-RoCE) & \texttt{NCCL\_IB\_HCA=rxe0} & Use Soft-RoCE device \\
  & \texttt{NCCL\_SOCKET\_IFNAME=enp71s0} & Bind to 10G interface \\
@@ -312,7 +316,7 @@ For single-node inference (all 3 GPUs on Chimera), RDMA provides \textbf{minimal
 \begin{enumerate}[noitemsep]
     \item \textbf{NVLink/PCIe dominates}: GPU-to-GPU communication uses NVLink or PCIe, not the network
     \item \textbf{No cross-node transfers}: gpt-oss-120b (63GB) fits entirely on 3$\times$ RTX 3090 (72GB)
-    \item \textbf{NCCL optimizes locally}: NCCL uses shared memory for intra-node communication
+    \item \textbf{NCCL optimizes locally}: NCCL \cite{nccl-docs} uses shared memory for intra-node communication
 \end{enumerate}
 
 \begin{figure}[H]
@@ -426,7 +430,7 @@ curl http://192.168.1.150:8265/api/cluster_status
     \item \textbf{Single-node RDMA}: Minimal benefit (GPU interconnect dominates)
     \item \textbf{Soft-RoCE limitations}: 189$\mu$s latency vs $<$2$\mu$s for hardware RoCE
     \item \textbf{Multi-node required}: RDMA benefits manifest with pipeline parallelism
-    \item \textbf{Hardware RoCE recommended}: Mellanox ConnectX would provide 100$\times$ better RDMA performance
+    \item \textbf{Hardware RoCE recommended}: Mellanox ConnectX \cite{mofed-docs} would provide 100$\times$ better RDMA performance
 \end{enumerate}
 
 \section{Files Added}
@@ -445,5 +449,33 @@ ScuffedRDMA/deployment/benchmarks/
     \item Compare TCP vs RDMA with pipeline parallelism
     \item Test with hardware RoCE on home lab Mellanox NICs
 \end{enumerate}
+
+\begin{thebibliography}{99}
+
+\bibitem{gptoss-hf}
+OpenAI. (2025). \textit{gpt-oss-120b Model Card}. \url{https://huggingface.co/openai/gpt-oss-120b}
+
+\bibitem{mxfp4-paper}
+Rouhani, B. D., Zhao, R., More, A., et al. (2023). \textit{Microscaling Data Formats for Deep Learning}. arXiv:2310.10537.
+
+\bibitem{nccl-env}
+NVIDIA. (2024). \textit{NCCL Environment Variables}. \url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html}
+
+\bibitem{nccl-docs}
+NVIDIA. (2024). \textit{NCCL Documentation}. \url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html}
+
+\bibitem{mofed-docs}
+Mellanox Technologies. (2024). \textit{NVIDIA MLNX\_OFED Documentation}. \url{https://docs.nvidia.com/networking/display/MLNXOFEDv24010331/}
+
+\bibitem{pagedattn}
+Kwon, W., Li, Z., Zhuang, S., et al. (2023). \textit{Efficient Memory Management for Large Language Model Serving with PagedAttention}. SOSP 2023.
+
+\bibitem{vllm-gptoss}
+vLLM Project. (2025). \textit{gpt-oss on vLLM}. \url{https://blog.vllm.ai/2025/08/05/gpt-oss.html}
+
+\bibitem{rdma-core}
+Linux RDMA. (2024). \textit{rdma-core Documentation}. \url{https://github.com/linux-rdma/rdma-core}
+
+\end{thebibliography}
 
 \end{document}
