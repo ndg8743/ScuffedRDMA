@@ -1,0 +1,31 @@
+# vLLM FlashAttention 3 Blackwell (RTX 5090) Fix
+# Issue: https://github.com/vllm-project/vllm/issues/22279
+#
+# Problem: FlashAttention 3 fails on Blackwell GPUs due to early cuInit call
+# during module import. The import chain:
+#   mm_encoder_attention.py -> fa_utils -> vllm_flash_attn -> flash_attention -> cutlass
+#
+# Solution: Make the import lazy to avoid early CUDA initialization
+#
+# Affected models: HunyuanOCR, any model using MMEncoderAttention
+
+diff --git a/vllm/model_executor/layers/attention/mm_encoder_attention.py b/vllm/model_executor/layers/attention/mm_encoder_attention.py
+index 35c10ec0b..c83c5c587 100644
+--- a/vllm/model_executor/layers/attention/mm_encoder_attention.py
++++ b/vllm/model_executor/layers/attention/mm_encoder_attention.py
+@@ -7,7 +7,6 @@ import torch
+ from vllm.logger import init_logger
+ from vllm.model_executor.custom_op import CustomOp
+ from vllm.model_executor.models.vision import get_vit_attn_backend
+-from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
+ from vllm.v1.attention.backends.registry import AttentionBackendEnum
+ from vllm.v1.attention.ops.vit_attn_wrappers import (
+     vit_flash_attn_wrapper,
+@@ -69,6 +68,7 @@ class MMEncoderAttention(CustomOp):
+             AttentionBackendEnum.FLASH_ATTN,
+             AttentionBackendEnum.ROCM_AITER_FA,
+         }
++        from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
+
+         self._fa_version = (
+             get_flash_attn_version() if self.is_flash_attn_backend else None
