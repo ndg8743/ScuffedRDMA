@@ -1,112 +1,155 @@
-# Multi-Node vLLM Cluster
+# Multi-Node gpt-oss-120b: TCP vs RDMA Benchmark
 
-Distributed vLLM across Chimera and Cerberus using Ray for pipeline parallelism.
+Split gpt-oss-120b across 5 GPUs to demonstrate RDMA benefits.
 
-## Cluster Overview
+## Cluster Configuration
 
-| Node | IP | GPUs | VRAM | Role |
-|------|-----|------|------|------|
-| Chimera | 192.168.1.150 | 3× RTX 3090 | 72GB | Head (Ray + vLLM) |
-| Cerberus | 192.168.1.233 | 2× RTX 5090 | 64GB | Worker (Ray) |
-| **Total** | | **5 GPUs** | **136GB** | |
+| Node | GPUs | VRAM | Role |
+|------|------|------|------|
+| Chimera | 3× RTX 3090 | 72GB | Head (TP=3) |
+| Cerberus | 2× RTX 5090 | 64GB | Worker |
+| **Total** | **5 GPUs** | **136GB** | PP=2 |
 
-## Parallelism Strategy
+## Why Multi-Node Shows RDMA Benefits
 
-- **Tensor Parallel (TP=3)**: Split model layers across 3 GPUs on same node
-- **Pipeline Parallel (PP=2)**: Split model stages across 2 nodes
+Single-node inference uses PCIe/NVLink (200+ GB/s) - network is unused.
 
-This allows running models up to ~120B parameters.
+Multi-node requires **cross-node tensor transfers**:
+- KV cache synchronization
+- Activation transfers between pipeline stages
+- Gradient communication (if training)
+
+This is where RDMA (0.92 Gb/s, 190μs) vs TCP makes a measurable difference.
 
 ## Quick Start
 
-**1. Start Cerberus (worker) first:**
+### Step 1: Start Cerberus (Worker) FIRST
+
 ```bash
-# On Cerberus (192.168.1.233)
+# SSH to Cerberus
+ssh infra@192.168.1.233
+
+# For TCP baseline:
 cd /home/nathan/ScuffedRDMA/deployment/multi-node
-docker compose -f docker-compose.worker.yaml up -d
+NCCL_IB_DISABLE=1 NCCL_NET_GDR_LEVEL=0 docker compose -f docker-compose.worker.yaml up -d
+
+# OR for RDMA:
+NCCL_IB_HCA=rxe0 docker compose -f docker-compose.worker.yaml up -d
 ```
 
-**2. Start Chimera (head):**
+### Step 2: Start Chimera (Head)
+
 ```bash
-# On Chimera (192.168.1.150)
+# SSH to Chimera
+ssh infra@192.168.1.150
+
+# For TCP baseline:
 cd /home/nathan/ScuffedRDMA/deployment/multi-node
-docker compose -f docker-compose.head.yaml up -d
+NCCL_IB_DISABLE=1 NCCL_NET_GDR_LEVEL=0 docker compose -f docker-compose.head.yaml up -d
+
+# OR for RDMA:
+NCCL_IB_HCA=rxe0 docker compose -f docker-compose.head.yaml up -d
 ```
 
-**3. Verify cluster:**
-```bash
-# Check Ray dashboard
-curl http://192.168.1.150:8265
+### Step 3: Verify Cluster
 
-# Check vLLM
+```bash
+# Check Ray cluster (should show 5 GPUs)
+curl http://192.168.1.150:8265/api/cluster_status | jq
+
+# Check vLLM models
 curl http://192.168.1.150:8000/v1/models
 ```
 
-## Model Options
+### Step 4: Run Benchmark
 
-| Model | Size | TP | PP | Notes |
-|-------|------|----|----|-------|
-| DeepSeek-R1-70B | 70B | 3 | 2 | Recommended for cluster |
-| Llama-3.3-70B | 70B | 3 | 2 | Requires HF token |
-| Qwen2.5-72B | 72B | 3 | 2 | Good for code |
-| Mixtral-8x22B | 141B | 3 | 2 | MoE, fits in 136GB |
+```bash
+# From any machine
+for i in 1 2 3 4 5; do
+  echo -n "Iteration $i: "
+  START=$(date +%s.%N)
+  curl -s http://192.168.1.150:8000/v1/completions \
+    -H "Content-Type: application/json" \
+    -d '{"model":"openai/gpt-oss-120b","prompt":"Explain RDMA in 100 words.","max_tokens":100}' \
+    | jq -r '.usage.completion_tokens'
+  END=$(date +%s.%N)
+  echo " tokens in $(echo "$END - $START" | bc)s"
+done
+```
+
+## Full Benchmark Script
+
+```bash
+./benchmark_tcp_vs_rdma.sh
+```
+
+This script:
+1. Starts cluster with TCP (RDMA disabled)
+2. Runs 5 iterations, records throughput
+3. Restarts cluster with RDMA enabled
+4. Runs 5 iterations, records throughput
+5. Compares results
 
 ## Environment Variables
 
+### TCP Mode (Baseline)
 ```bash
-# Required for gated models (Llama, etc.)
-export HUGGING_FACE_HUB_TOKEN=hf_xxxxx
-
-# Model selection
-export MODEL=deepseek-ai/DeepSeek-R1-Distill-Llama-70B
+export NCCL_IB_DISABLE=1
+export NCCL_NET_GDR_LEVEL=0
 ```
 
-## OpenWebUI Integration
+### RDMA Mode (Soft-RoCE)
+```bash
+export NCCL_IB_HCA=rxe0
+export NCCL_SOCKET_IFNAME=enp71s0  # Chimera
+export NCCL_SOCKET_IFNAME=eno2np1  # Cerberus
+```
 
-vLLM API is available at `http://192.168.1.150:8000/v1`
+## Expected Results
 
-In OpenWebUI Admin → Connections → OpenAI API:
-- URL: `http://192.168.1.150:8000/v1` (or `http://localhost:8000/v1` from Chimera)
+| Mode | Throughput | Latency | Notes |
+|------|------------|---------|-------|
+| TCP | ~80-90 tok/s | Higher | Cross-node via sockets |
+| RDMA (Soft-RoCE) | ~95-105 tok/s | Lower | Cross-node via RDMA |
+| RDMA (Hardware) | ~120-140 tok/s | Lowest | With Mellanox NICs |
 
-## Why Not gpt-oss on vLLM?
-
-`gpt-oss` is in **GGUF format** (Ollama). vLLM only supports **HuggingFace format**.
-
-| Format | Used By | Extension |
-|--------|---------|-----------|
-| GGUF | Ollama, llama.cpp | `.gguf` |
-| SafeTensors | vLLM, HuggingFace | `.safetensors` |
-
-To use gpt-oss, keep it on Ollama. For vLLM, use HuggingFace models.
+**Expected RDMA improvement: 10-20%** over TCP for multi-node inference.
 
 ## Monitoring
 
 ```bash
-# Ray dashboard
-http://192.168.1.150:8265
+# Watch NCCL logs for RDMA usage
+docker logs -f vllm-gptoss 2>&1 | grep -i "nccl\|rdma\|ib"
 
-# GPU usage on each node
-nvidia-smi -l 1
+# Expected with RDMA:
+# NCCL INFO NET/IB : Using [0]rxe0:1/RoCE
 
-# vLLM logs
-docker logs -f vllm-head
+# Expected with TCP:
+# NCCL INFO NET/Socket : Using [0]enp71s0:192.168.1.150
 ```
 
 ## Troubleshooting
 
-**Worker not connecting:**
+### Worker not connecting
 ```bash
-# Check network connectivity
+# Check Ray status on worker
+docker logs ray-worker
+
+# Verify network connectivity
 ping 192.168.1.150
-
-# Check Ray port
 nc -zv 192.168.1.150 6379
-
-# Check firewall
-sudo ufw allow from 192.168.1.0/24
 ```
 
-**Out of memory:**
-- Reduce `--max-model-len`
+### RDMA not detected
+```bash
+# Verify Soft-RoCE device exists
+rdma link show
+ibv_devices
+
+# If missing, create it:
+sudo rdma link add rxe0 type rxe netdev enp71s0
+```
+
+### Out of memory
+- Reduce `--max-model-len` to 2048
 - Reduce `--gpu-memory-utilization` to 0.85
-- Use smaller model

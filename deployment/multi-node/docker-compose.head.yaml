@@ -1,6 +1,7 @@
-# Chimera (Head Node) - 3x RTX 3090 (72GB VRAM)
-# Multi-node vLLM with Ray for pipeline parallelism across Chimera + Cerberus
-# Total: 5 GPUs (136GB VRAM)
+# Chimera (Head Node) - 3× RTX 3090 (72GB VRAM)
+# gpt-oss-120b split across 5 GPUs with pipeline parallelism
+#
+# Start Cerberus worker FIRST, then this head node
 
 services:
   ray-head:
@@ -15,6 +16,7 @@ services:
       ray start --head --port=6379
       --dashboard-host=0.0.0.0
       --dashboard-port=8265
+      --num-gpus=3
       --block
     deploy:
       resources:
@@ -25,9 +27,9 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  vllm-head:
-    image: vllm/vllm-openai:latest
-    container_name: vllm-head
+  vllm-gptoss:
+    image: vllm/vllm-openai:gptoss
+    container_name: vllm-gptoss
     network_mode: host
     ipc: host
     privileged: true
@@ -36,11 +38,18 @@ services:
     volumes:
       - /models:/root/.cache/huggingface
     environment:
-      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      # RDMA Configuration (comment out for TCP baseline)
+      - NCCL_IB_HCA=${NCCL_IB_HCA:-rxe0}
+      - NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-enp71s0}
+      - NCCL_DEBUG=INFO
+      # For TCP baseline, set these instead:
+      # - NCCL_IB_DISABLE=1
+      # - NCCL_NET_GDR_LEVEL=0
       - CUDA_VISIBLE_DEVICES=0,1,2
       - RAY_ADDRESS=127.0.0.1:6379
+      - VLLM_USE_FLASHINFER_MXFP4_MOE=1
     command: >
-      --model ${MODEL:-deepseek-ai/DeepSeek-R1-Distill-Llama-70B}
+      --model openai/gpt-oss-120b
       --tensor-parallel-size 3
       --pipeline-parallel-size 2
       --port 8000

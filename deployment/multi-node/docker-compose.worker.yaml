@@ -1,6 +1,7 @@
-# Cerberus (Worker Node) - 2x RTX 5090 (64GB VRAM)
-# Connects to Ray head on Chimera for multi-node inference
-# Total cluster: 5 GPUs (136GB VRAM)
+# Cerberus (Worker Node) - 2× RTX 5090 (64GB VRAM)
+# Connects to Ray head on Chimera for multi-node gpt-oss-120b
+#
+# START THIS FIRST before the head node!
 
 services:
   ray-worker:
@@ -12,11 +13,19 @@ services:
     volumes:
       - /models:/root/.cache/huggingface
     environment:
+      # RDMA Configuration (comment out for TCP baseline)
+      - NCCL_IB_HCA=${NCCL_IB_HCA:-rxe0}
+      - NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eno2np1}
+      - NCCL_DEBUG=INFO
+      # For TCP baseline, set these instead:
+      # - NCCL_IB_DISABLE=1
+      # - NCCL_NET_GDR_LEVEL=0
       - CUDA_VISIBLE_DEVICES=0,1
-      - RAY_ADDRESS=192.168.1.150:6379  # Chimera head node
+      - RAY_ADDRESS=192.168.1.150:6379
     command: >
       ray start
       --address=192.168.1.150:6379
+      --num-gpus=2
       --block
     deploy:
       resources:
