@@ -14,5 +14,37 @@
 # Keep PDFs (they're the output)
 # *.pdf
 
+# Extracted archives
+References/*-extracted/
+
+# Large binaries and zips in references
+References/*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+.venv/
+venv/
+
+# Rust build artifacts (Neumann has its own .gitignore)
+target/
+
+# Local working copy of Neumann (submodule tracks the fork)
+Neumann-main/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
 # Claude Code
 .claude/
+
+# Temp/null files
+nul

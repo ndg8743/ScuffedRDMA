@@ -1,0 +1,248 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{times}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{parskip}
+\usepackage{titlesec}
+
+% Reduce spacing
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{3pt}
+
+% Custom section formatting
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+
+\begin{document}
+
+\begin{center}
+{\LARGE \textbf{Adaptive RDMA Optimization for Distributed LLM\\Training and Inference on Consumer Hardware}}\\[8pt]
+{\large Nathan Gopee}\\
+M.S. Computer Science, SUNY New Paltz\\
+\textit{Proposed Advisors: Dr. Wafi Danesh \& Dr. Ashley Suchy}\\
+Target Completion: December 2026
+\end{center}
+
+\section{Problem Statement}
+
+Training and serving large language models (7B+ parameters) on consumer GPU clusters is bottlenecked by network communication. Current systems optimize either training (gradient synchronization) or inference (KV cache management) separately, missing opportunities for unified optimization. In our lab with two machines---one with 2$\times$ RTX 5090s for training, another with 3$\times$ RTX 3090s for inference, connected over 10 Gigabit Ethernet---running a 7B parameter model with 8K context takes 2--3 seconds for Time-To-First-Token (TTFT), a critical latency metric measuring the delay before the first response token arrives \cite{nvidia-nim}. Interactive applications need under 1 second TTFT.
+
+The network has adequate bandwidth. The problem is uniform data treatment: a tiny 4KB attention weight accessed every request waits behind a massive 10MB model layer used once per hundred requests. This head-of-line blocking kills latency despite available bandwidth. Existing solutions require expensive InfiniBand hardware (\$10K+ per node) inaccessible to most academic labs.
+
+\section{Proposed Solution}
+
+I propose a \textbf{unified middleware system} that jointly optimizes both training and inference workloads using adaptive runtime telemetry on commodity 10 Gigabit Ethernet. By classifying data as ``hot'' (frequently accessed) or ``cold'' (rarely accessed) and routing them appropriately, the system achieves measurable speedups without kernel modifications or enterprise networking equipment.
+
+\textbf{Why This Is Novel:} This would be the first system to jointly optimize gradient communication and KV cache placement using adaptive telemetry. Existing work treats training and inference as separate problems. My approach unifies them under a single classification engine, enabling use cases like continuous self-training where a model simultaneously trains and serves queries.
+
+\textbf{Key Insight:} RDMA (Remote Direct Memory Access) lets machines transfer data directly between memories without CPU involvement, achieving sub-10 microsecond latency versus 50--100 microseconds with TCP/IP. This matters because overhead compounds when moving thousands of tensors per request. By intelligently routing hot data through dedicated RDMA paths while batching cold data, we eliminate head-of-line blocking.
+
+\section{Technical Approach}
+
+\subsection{Unified Telemetry Monitoring}
+The telemetry monitor hooks into vLLM, logging (layer\_id, timestamp, size) for each tensor access in a rolling 1000-request window with under 1\% overhead. Python decorators wrap vLLM's core operations, maintaining a lock-free circular buffer in shared memory that flushes to Prometheus every 100ms or when 80\% full. This provides near-real-time visibility into access patterns for both model weights and KV cache.
+
+\subsection{Adaptive Classification System}
+The classifier is a deterministic finite automaton where tensors transition: COLD $\rightarrow$ WARM (first access) $\rightarrow$ HOT (repeated access), with decay back through WARM $\rightarrow$ COLD during idle periods. The scoring function:
+\[
+\text{hotness} = 0.4 \times \text{recency} + 0.3 \times \text{frequency} + 0.3 \times \text{size}
+\]
+uses adaptive thresholds based on network congestion (ECN marks, queue depth). Performance target: classify 10,000 tensors in $<$1ms using hash tables, cached counters, and SIMD operations.
+
+Each tensor maintains state $S \in \{\text{HOT}, \text{WARM}, \text{COLD}\}$ with transitions triggered by access events or timeouts (default 5s). The system guarantees: (1) exactly one state per tensor, (2) monotonic access statistics, (3) no deadlocks. Exponential moving averages ($\alpha = 0.9$) prevent classification oscillation. This enables formal proofs of termination, determinism, and O(1) complexity.
+
+\subsection{RDMA-Based Smart Routing}
+Hot tensors send immediately via dedicated unreliable datagram (UD) queue pairs; cold tensors batch, compress via Top-K sparsification (5\% largest values), and send via shared reliable connection (RC) QPs when batch exceeds 10 tensors or 50ms timeout; warm tensors use shared RC QPs with medium priority. We allocate 4 dedicated QPs for hot traffic per GPU pair, 2 for warm, 1 for cold. Compression is lossy ($<$2\% accuracy impact), happening on-GPU via CUDA kernels with parallel Top-K selection. GPUDirect RDMA (when supported by the NIC and GPU) enables zero-copy NIC-to-GPU transfers; otherwise we fall back to pinned host-memory staging. Dedicated CPU cores poll completion queues at 1$\mu$s granularity for minimum tail latency.
+
+\subsection{KV Cache Placement \& Migration}
+The migration strategy moves KV cache entries to GPUs likely to handle future requests. High-frequency conversations ($>$5 req/min) trigger migration; low-frequency fetch on-demand. Protocol: RESIDENT$\rightarrow$MIGRATING$\rightarrow$MIGRATED with atomic pointer swaps after async RDMA copy, ensuring entries exist on exactly one GPU and remain accessible during migration. We hash the last 128 context tokens to determine target GPU (sticky routing), migrating entire conversation caches together. Hysteresis prevents thrashing: 3 consecutive requests required before migration, with 2$\times$ thresholds for recently-migrated caches.
+
+\subsection{Joint Training-Inference Scheduling}
+The scheduler dynamically allocates RDMA queue pairs and bandwidth based on workload characteristics, preventing training/inference starvation. Gradient synchronization follows ZeRO patterns with hot/cold classification on frequently-updated layers. Weighted fair queuing gives inference 2$\times$ priority during business hours, training 2$\times$ during off-hours. Periodic bandwidth probes adjust batch sizes and compression ratios to maintain $<$80\% link utilization, preventing congestion while maximizing throughput.
+
+\section{Implementation Stack \& Related Work}
+
+\textbf{Core Technologies:} pyverbs (RDMA), rdma-core utilities, vLLM 0.6+ (PagedAttention for KV cache), PyTorch 2.4+, Ray 2.35+ (coordination), custom C++/pybind11 for zero-copy GPU-NIC transfers, CUDA kernels for Top-K compression, nsight-systems (profiling), Prometheus/Grafana (monitoring).
+
+\textbf{Related Research:} Meta's production RDMA deployment supporting 24,000 GPUs showed receiver-driven congestion control outperforms traditional approaches for ML workloads \cite{meta-rdma}. vLLM's PagedAttention \cite{vllm} provides efficient single-node KV cache management with near-zero waste. Priority-based parameter propagation \cite{p3} and domain-specific transport protocols \cite{mlt} demonstrate value of differentiating data by importance. Gradient compression strategies \cite{powersgd,accordion,lgreco} inform cold data batching. BytePS \cite{byteps} showed how separating communication from computation improves efficiency.
+
+\textbf{Differentiation:} Existing work optimizes training \cite{meta-rdma,byteps,zero} or inference \cite{vllm,sglang,distserve} separately, often requiring InfiniBand or kernel modifications. This middleware jointly optimizes both workloads using runtime telemetry on commodity 10GbE, making the approach accessible to academic labs. IBM's work on storage-tier optimization \cite{ibm-storage} applies similar access-pattern-based placement but targets storage rather than network communication.
+
+\section{Self-Training Demonstration}
+
+To validate the system, I'll fine-tune a pretrained Llama-2 7B or similar size model using the optimization system itself. The training loop uses the RDMA layer for gradient communication while evaluation requests exercise the optimized inference path with KV cache placement. If gradient routing works, training converges faster. If KV cache placement works, evaluation latency drops. The model essentially uses the system to train itself faster---showing 30--40\% training speedup and 40--50\% inference speedup on identical hardware proves the concept works in practice.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}p{1.5cm}p{3cm}p{5cm}p{4.5cm}@{}}
+\toprule
+\textbf{Months} & \textbf{Phase} & \textbf{Deliverables} & \textbf{Success Criteria} \\
+\midrule
+1--2 & Infrastructure & RoCE config, vLLM distributed, baseline TTFT & RDMA $<$10$\mu$s, baseline $\sim$2.5s TTFT @ 8K \\
+3--4 & RDMA + Compress & Zero-copy library, CUDA Top-K, multi-QP support & 1KB in $<$15$\mu$s, 1MB @ $>$8Gbps, 20$\times$ compression \\
+5--6 & Classification & Access tracking, DFA classifier, Prometheus metrics & $>$75\% accuracy, $<$1\% overhead, $<$1ms classification \\
+7--8 & Integration & Multi-queue scheduler, end-to-end vLLM, error handling & Hot 2$\times$ faster than cold, TTFT $<$1.5s @ 8K \\
+9 & Self-Training & Fine-tune 7B model, measure training + inference speedup & 30--40\% faster training, 40--50\% faster inference \\
+10--11 & Evaluation & Performance tests, ablation, stress testing, bottleneck analysis & Targets validated, stable under failures \\
+12 & Writing & Complete thesis with proofs, defense prep, open-source release & Draft complete, code public with docs \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Hardware Constraints \& System Requirements}
+
+Everything runs on Ubuntu 24.04 userspace (no kernel mods). For hardware RDMA, the system requires RoCEv2-capable RNICs and a correctly configured Ethernet fabric (PFC/DCB). If such NICs are unavailable, we can run with software RDMA (Linux SoftRoCE/rxe or SoftiWARP); functionality remains, but sub-10$\mu$s latency and GPUDirect RDMA do not apply in this configuration.
+
+Note that 10 GbE alone is not sufficient for RDMA: the NIC must explicitly support RDMA (e.g., data-center class adapters from NVIDIA/Mellanox ConnectX, Broadcom NetXtreme-E, Chelsio). Many consumer 10GBase-T adapters (e.g., Aquantia/Marvell AQC107-based) do not support RDMA.
+
+The Threadripper provides 64 PCIe 4.0 lanes: 32 for RTX 5090s/3090s, 8 for NIC. When training and serving simultaneously, PCIe may bottleneck before network. Each 5090 has 32GB VRAM (sufficient for 7B model + training overhead); 3090s have 24GB each for inference. RDMA QPs allocate dynamically per-job, respecting cgroup limits to avoid interfering with other lab users.
+
+\section{Evaluation Methodology}
+
+\textbf{Microbenchmarks:} RDMA latency/bandwidth for 1KB--10MB messages; hot vs cold path comparison; classification overhead scaling; GPU compression throughput.
+
+\textbf{End-to-End:} Inference at 1K/2K/4K/8K context, batch sizes 1/4/8/16; training convergence on HumanEval/Alpaca; combined training+inference loads.
+
+\textbf{Ablations:} Disable classifier, compression, priority routing, and migration individually to quantify each component's contribution.
+
+\textbf{Stress Testing:} 24-hour operation monitoring memory leaks and degradation; failure injection (process kills, network disconnects); MTBF/MTTR measurement.
+
+\textbf{Baselines:} Compare against vLLM (single-node), vLLM+Ray (multi-node unoptimized), DeepSpeed ZeRO, NCCL AllReduce.
+
+\section{Technical Contributions}
+
+\textbf{1. Adaptive DFA-Based Classifier:} O(1) tensor classification with provable bounds on misclassification rate\\
+\textbf{2. Lock-Free RDMA Scheduler:} Multi-queue preventing head-of-line blocking with deadlock freedom and progress guarantees\\
+\textbf{3. Safe Migration Protocol:} Three-state protocol with formal correctness proofs (safety, consistency, liveness)\\
+\textbf{4. End-to-End System:} Practical demonstration on commodity 10GbE achieving 40--50\% speedup
+
+The broader contribution shows smart software can extract good performance from consumer hardware for LLM workloads, making distributed serving and training accessible to academic labs without large budgets.
+
+\section{Why I Need Your Expertise}
+
+\textbf{Dr. Danesh:} Your expertise in hardware systems, pattern analysis, and adaptive computing directly applies to this work. The runtime telemetry and adaptive routing parallel your work on real-time pattern recognition and reconfigurable systems. I need guidance on RDMA configuration, PCIe bandwidth characterization (64 lanes split between GPUs and NIC), hardware debugging, and performance validation against theoretical limits. Your experience with low-level optimization and hardware-software co-design is essential for making this practical.
+
+\textbf{Dr. Suchy:} Your expertise in formal languages, algorithm design, and complexity analysis is critical for the theoretical parts this work requires. The classification system is a DFA requiring formal proofs of termination, determinism, and bounded complexity. The migration protocol needs correctness verification preserving invariants under failures. I need your guidance on proving these properties, identifying edge cases in state transitions, and ensuring the algorithms have provable performance guarantees.
+
+
+
+\newpage
+\bibliographystyle{plain}
+\begin{thebibliography}{99}
+
+\bibitem{nvidia-nim}
+NVIDIA Corporation,
+\textit{NVIDIA NIM for LLMs: Benchmarking},
+2024.
+\url{https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html}
+
+\bibitem{meta-rdma}
+A. Gangidi, R. Miao, S. Zheng, et al.,
+\textit{RDMA over Ethernet for Distributed AI Training at Meta Scale},
+SIGCOMM 2024.
+\url{https://cs.stanford.edu/~keithw/sigcomm2024/sigcomm24-final246-acmpaginated.pdf}
+
+\bibitem{vllm}
+W. Kwon, Z. Li, S. Zhuang, et al.,
+\textit{Efficient Memory Management for Large Language Model Serving with PagedAttention},
+SOSP 2023.
+\url{https://arxiv.org/abs/2309.06180}
+
+\bibitem{byteps}
+Y. Jiang, Y. Zhu, C. Lan, et al.,
+\textit{BytePS: A Unified Architecture for Accelerating Distributed DNN Training},
+OSDI 2020.
+\url{https://www.usenix.org/system/files/osdi20-jiang.pdf}
+
+\bibitem{zero}
+S. Rajbhandari, J. Rasley, O. Ruwase, Y. He,
+\textit{ZeRO: Memory Optimizations Toward Training Trillion Parameter Models},
+SC 2020.
+
+\bibitem{taccl}
+A. Shah, V. Chidambaram, M. Cowan, et al.,
+\textit{TACCL: Guiding Collective Algorithm Synthesis using Communication Sketches},
+NSDI 2023.
+\url{https://www.usenix.org/system/files/nsdi23-shah.pdf}
+
+\bibitem{p3}
+A. Jayarajan, J. Wei, G. Gibson, et al.,
+\textit{Priority-based Parameter Propagation for Distributed DNN Training},
+MLSys 2019.
+\url{https://arxiv.org/pdf/1905.03960}
+
+\bibitem{mlt}
+H. Wang, H. Tian, J. Chen, et al.,
+\textit{Towards Domain-Specific Network Transport for Distributed DNN Training},
+NSDI 2024.
+
+\bibitem{powersgd}
+T. Vogels, S. Karimireddy, M. Jaggi,
+\textit{PowerSGD: Practical Low-Rank Gradient Compression for Distributed Optimization},
+NeurIPS 2019.
+\url{https://arxiv.org/abs/1905.13727}
+
+\bibitem{accordion}
+S. Agarwal, H. Wang, K. Lee, et al.,
+\textit{Accordion: Adaptive Gradient Communication via Critical Learning Regime Identification},
+MLSys 2021.
+\url{https://arxiv.org/abs/2010.16248}
+
+\bibitem{lgreco}
+I. Markov, K. Alimohammadi, E. Frantar, D. Alistarh,
+\textit{L-GreCo: Layerwise-Adaptive Gradient Compression},
+MLSys 2024.
+
+\bibitem{sglang}
+L. Zheng, L. Yin, Z. Xie, et al.,
+\textit{SGLang: Efficient Execution of Structured Language Model Programs},
+arXiv 2023.
+\url{https://arxiv.org/pdf/2312.07104}
+
+\bibitem{distserve}
+Y. Zhong, S. Liu, J. Chen, et al.,
+\textit{DistServe: Disaggregating Prefill and Decoding for LLM Serving},
+arXiv 2024.
+\url{https://arxiv.org/abs/2401.09670}
+
+\bibitem{cassini}
+S. Rajasekaran, M. Ghobadi, A. Akella,
+\textit{CASSINI: Network-Aware Job Scheduling in ML Clusters},
+NSDI 2024.
+\url{https://people.csail.mit.edu/ghobadi/papers/cassini_nsdi_2024.pdf}
+
+\bibitem{ibm-storage}
+IBM Research,
+\textit{Accelerating AI Inference with IBM Storage Scale}, 2024.
+\url{https://research.ibm.com/blog/accelerating-ai-inference-with-ibm-storage-scale}
+
+\bibitem{ibm-turbo}
+IBM Corporation,
+\textit{Optimize GPU Resources with Turbonomic}, 2023.
+\url{https://www.ibm.com/new/announcements/optimize-gpu-resources-turbonomic}
+
+\bibitem{codag}
+N. Dryden, A. Marzoev, T. Benson, et al.,
+\textit{CODAG: Characterizing and Optimizing Decompression Algorithms for GPUs},
+ResearchGate 2023.
+\url{https://www.researchgate.net/publication/372248184}
+
+
+
+\bibitem{rdma-docs}
+Linux RDMA Documentation,
+\textit{RDMA Core Userspace Libraries and Daemons}.
+\url{https://github.com/linux-rdma/rdma-core}
+
+\end{thebibliography}
+
+\end{document}
