@@ -1587,7 +1587,7 @@ We structure validation around three experimental pillars:
 \centering
 \resizebox{0.9\textwidth}{!}{%
 \begin{tikzpicture}[
-    node distance=1.5cm,
+    node distance=2cm,
     state/.style={circle, draw, thick, minimum size=1.5cm, align=center, font=\footnotesize},
     seq/.style={state, fill=solutiongreen!20},
     str/.style={state, fill=ucxblue!20},
@@ -1599,24 +1599,24 @@ We structure validation around three experimental pillars:
 ]
 
 \node[rnd] (random) {Random\\$q_0$};
-\node[seq, right=2.2cm of random] (seq) {Seq.\\$q_1$};
-\node[str, below right=1.8cm and 0.8cm of random] (str) {Strided\\$q_2$};
-\node[lsw, below left=1.8cm and 0.8cm of random] (lsw) {Layer\\Sweep\\$q_3$};
-\node[adp, below=2.5cm of random] (adp) {Adaptive\\$q_4$};
+\node[seq, right=3cm of random] (seq) {Seq.\\$q_1$};
+\node[str, below right=2.5cm and 1.8cm of random] (str) {Strided\\$q_2$};
+\node[lsw, below left=2.5cm and 1.8cm of random] (lsw) {Layer\\Sweep\\$q_3$};
+\node[adp, below=4.2cm of random] (adp) {Adaptive\\$q_4$};
 
 \draw[arrow] ($(random.west)+(-0.8,0)$) -- (random) node[midway, above, font=\scriptsize] {init};
 
 \draw[arrow, bend left=20] (random) to node[above, label] {stride=1\\detected} (seq);
 \draw[arrow, bend left=20] (seq) to node[below, label] {pattern\\broken} (random);
 
-\draw[arrow, bend left=15] (random) to node[right, label] {stride$>$1} (str);
-\draw[arrow, bend left=15] (str) to node[left, label] {broken} (random);
+\draw[arrow, bend left=15] (random) to node[above right, label] {stride$>$1} (str);
+\draw[arrow, bend left=15] (str) to node[below left, label] {broken} (random);
 
-\draw[arrow, bend right=15] (random) to node[left, label] {prefix\\match} (lsw);
-\draw[arrow, bend right=15] (lsw) to node[right, label] {broken} (random);
+\draw[arrow, bend right=15] (random) to node[above left, label] {prefix\\match} (lsw);
+\draw[arrow, bend right=15] (lsw) to node[below right, label] {broken} (random);
 
 \draw[arrow, dashed] (seq) to node[right, label] {auto} (adp);
-\draw[arrow, dashed] (str) to node[left, label] {auto} (adp);
+\draw[arrow, dashed] (str) to node[right, label] {auto} (adp);
 \draw[arrow, dashed] (lsw) to node[left, label] {auto} (adp);
 
 \draw[arrow] (seq) to[loop right] node[label] {correct} (seq);

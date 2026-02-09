@@ -36,11 +36,18 @@ class CacheStats:
     puts: int = 0
     evictions: int = 0
     bytes_transferred: int = 0
+    prefetch_hits: int = 0
+    prefetch_misses: int = 0
 
     @property
     def hit_rate(self) -> float:
         total = self.hits + self.misses
         return self.hits / total if total > 0 else 0.0
+
+    @property
+    def prefetch_hit_rate(self) -> float:
+        total = self.prefetch_hits + self.prefetch_misses
+        return self.prefetch_hits / total if total > 0 else 0.0
 
 
 class RdmaTensorCache:
@@ -136,7 +143,12 @@ class RdmaTensorCache:
             Tensor in requested format, or None if not found.
         """
         if self._prefetch:
+            was_prefetch_hit = key in self._prefetch._prefetched
             self._prefetch.record_access(key, layer_idx)
+            if was_prefetch_hit:
+                self._stats.prefetch_hits += 1
+            else:
+                self._stats.prefetch_misses += 1
 
         entry = self._store.get(key)
         if entry is None:
@@ -145,6 +157,9 @@ class RdmaTensorCache:
 
         self._stats.hits += 1
         entry.last_access = time.monotonic()
+
+        if self._prefetch:
+            self._prefetch_next(target_format)
 
         if target_format is None or target_format == PrecisionFormat.FP32:
             return entry.data.copy()
@@ -217,6 +232,34 @@ class RdmaTensorCache:
             data = np.frombuffer(wire_bytes, dtype=np.float32)
 
         return self._quantizer.dequantize(data, meta)
+
+    def _prefetch_next(self, target_format: Optional[PrecisionFormat] = None) -> None:
+        """Pre-warm cache for predicted next tensors via transport."""
+        if not self._prefetch or not self._transport:
+            return
+
+        predictions = self._prefetch.predict_next()
+        for pred_key in predictions:
+            if pred_key in self._store:
+                continue
+            try:
+                data = self._transport.fetch(pred_key)
+                if data is not None:
+                    self.put_tensor(pred_key, data)
+                    self._prefetch._prefetched.add(pred_key)
+            except Exception:
+                pass
+
+    @property
+    def prefetch_stats(self) -> Optional[Dict[str, float]]:
+        if not self._prefetch:
+            return None
+        return {
+            **self._prefetch.stats,
+            "cache_prefetch_hits": self._stats.prefetch_hits,
+            "cache_prefetch_misses": self._stats.prefetch_misses,
+            "cache_prefetch_hit_rate": self._stats.prefetch_hit_rate,
+        }
 
     def _evict(self) -> None:
         """Evict least-recently-used entry."""

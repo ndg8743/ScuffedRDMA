@@ -1,0 +1,419 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, calc, fit}
+
+\definecolor{codebg}{HTML}{F5F5F5}
+\definecolor{hot}{HTML}{EF4444}
+\definecolor{warm}{HTML}{F59E0B}
+\definecolor{cold}{HTML}{3B82F6}
+\definecolor{gapred}{HTML}{DC2626}
+
+\title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
+\large Update 11: Mechanistic Interpretability Meets Distributed Tensor Transport\\[0.3em]
+\normalsize Insights from the Transformer Circuits Thread}
+\author{Nathan Gopee\\
+MS Computer Science, SUNY New Paltz\\
+Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\date{February 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This update bridges Anthropic's Transformer Circuits research program (2021--2025) with the adaptive RDMA middleware developed in Updates~2--10. By analyzing how transformers actually compute internally---which layers matter, how features compose across layers, and how sparse activations really are---we identify concrete gaps in the current middleware design and propose circuit-aware optimizations. The key finding is that mechanistic interpretability provides the missing ``why'' behind our WFA tensor classifier: feature sparsity, cross-layer composition, and induction head access patterns give principled reasons for the hot/warm/cold routing decisions that Update~10 makes heuristically.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%=============================================================================
+\section{The Transformer Circuits Research Program}
+\label{sec:circuits-overview}
+%=============================================================================
+
+Anthropic's Transformer Circuits Thread is a multi-year research effort to reverse-engineer the computational mechanisms inside transformer language models. Starting with a mathematical framework for small attention-only models~\cite{elhage2021framework} and progressing through dictionary learning on production-scale systems~\cite{templeton2024scaling}, the program now includes circuit tracing on Claude 3.5 Haiku~\cite{lindsey2025biology} with 30 million learned features.
+
+The research is organized around a core observation: individual neurons in transformers are \textbf{polysemantic}---a single neuron may respond to unrelated concepts (DNA sequences, legal language, Korean text). This is not a bug but an efficient encoding strategy called \textbf{superposition}~\cite{elhage2022superposition}, where models store more concepts than they have dimensions by exploiting the near-orthogonality of sparse feature directions.
+
+\subsection{Why This Matters for RDMA}
+
+The Circuits research answers questions that directly affect tensor transport decisions:
+
+\begin{enumerate}
+    \item \textbf{Which layers matter for a given computation?} Circuit tracing reveals that features routinely skip layers---a concept activated at layer 3 may directly influence layer 12 with no meaningful computation in between~\cite{ameisen2025tracing}.
+    \item \textbf{How sparse are activations really?} On any given token, only $\sim$235 features out of 30 million are active (L0 = 235 in Claude 3.5 Haiku)~\cite{lindsey2025biology}. At the SAE level, $<$300 features per token out of millions~\cite{templeton2024scaling}.
+    \item \textbf{What access patterns do attention heads create?} Induction heads generate content-dependent, long-range lookback into the KV cache~\cite{olsson2022induction}, creating the non-uniform access patterns our WFA classifier observes.
+    \item \textbf{How do precision requirements vary across computation?} Parallel internal pathways have different precision needs---approximate estimation streams tolerate quantization while precise digit-calculation streams do not~\cite{lindsey2025biology}.
+\end{enumerate}
+
+%=============================================================================
+\section{Key Findings from the Circuits Thread}
+\label{sec:findings}
+%=============================================================================
+
+\subsection{The Residual Stream as a Communication Bus}
+
+The mathematical framework~\cite{elhage2021framework} reconceptualizes the transformer not as a stack of layers but as a \textbf{residual stream}: a high-dimensional vector per token position that every component reads from and writes to additively. Each attention head and MLP layer contributes its output to a running sum:
+\begin{equation}
+    \mathbf{x}_{\text{final}} = \mathbf{W}_E + \mathbf{W}_{\text{pos}} + \sum_{\ell} \sum_h \text{head}_{\ell,h}(\mathbf{x}) + \sum_{\ell} \text{MLP}_\ell(\mathbf{x})
+\end{equation}
+
+Because every component's contribution is additive, the output logits decompose into a linear sum of each component's individual effect. This enables \textbf{direct logit attribution}: measuring how much each head or MLP contributes to the final prediction for any input.
+
+The residual stream has \textbf{no privileged basis}~\cite{anthropic2023privileged}---individual dimensions are meaningless; only directions carry semantic content. However, Adam optimizer normalization creates stable outlier dimensions with 20$\times$ magnitude, which has direct implications for quantization (Section~\ref{sec:gaps}).
+
+\subsection{QK and OV Circuits: Two Independent Computations per Head}
+
+Each attention head implements two mathematically independent circuits~\cite{elhage2021framework}:
+
+\begin{itemize}
+    \item \textbf{QK circuit} ($\mathbf{W}_Q \mathbf{W}_K^\top$): Determines \emph{where to attend}. A rank-$d_{\text{head}}$ bilinear form over token pairs.
+    \item \textbf{OV circuit} ($\mathbf{W}_V \mathbf{W}_O$): Determines \emph{what to move}. Maps attended-to information into the residual stream.
+\end{itemize}
+
+The full token-level QK circuit $\mathbf{W}_E^\top \mathbf{W}_{QK} \mathbf{W}_E$ can be precomputed to predict attention patterns from token identity alone---a signal for KV cache prefetching.
+
+\subsection{Composition: Virtual Attention Heads}
+
+Multi-layer transformers gain power through \textbf{head composition}~\cite{elhage2021framework}. A layer-0 head's output enters the residual stream and modifies the queries, keys, or values of layer-1 heads, creating three composition types:
+
+\begin{table}[htbp]
+\centering
+\caption{Attention head composition types and their implications for RDMA transfer scheduling}
+\label{tab:composition}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Type} & \textbf{Mechanism} & \textbf{Effective Result} & \textbf{RDMA Implication} \\
+\midrule
+Q-composition & Head 0 output $\to$ Head 1 query & Dynamic search criteria & Transfer must precede QK compute \\
+K-composition & Head 0 output $\to$ Head 1 key & Enriched source tokens & KV cache depends on prior layer \\
+V-composition & Head 0 output $\to$ Head 1 value & Chained information move & Composition chain = latency-critical \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Composition strength is measurable: $\|\mathbf{W}_{OV}^{h_0} \cdot \mathbf{W}_K^{h_1}\|_F$ quantifies how strongly head $h_0$ influences head $h_1$'s attention pattern. This gives a \textbf{computable, static metric} for RDMA transfer priority between pipeline stages.
+
+\subsection{Induction Heads and In-Context Learning}
+
+Induction heads~\cite{olsson2022induction} implement pattern completion: given $[A][B]\ldots[A]$, predict $[B]$. They emerge through a sharp phase transition during training and are the primary mechanism for in-context learning.
+
+The circuit requires exactly two heads across two layers:
+\begin{enumerate}
+    \item \textbf{Previous-token head} (layer 0): Writes predecessor identity into the residual stream via positional attention.
+    \item \textbf{Induction head} (layer 1): Uses K-composition to match current token against predecessor annotations, then copies the following token.
+\end{enumerate}
+
+Induction heads create \textbf{content-dependent, long-range, sparse lookback} into the KV cache---exactly the non-local access pattern that our WFA classifier must handle. Only 1--3\% of heads are induction/retrieval heads, but they require full KV cache access. This asymmetry validates the hot/warm/cold classification: induction head KV entries are HOT (dedicated QP, polled completions), while non-retrieval heads can use compressed cache (COLD, batched).
+
+\subsection{Superposition and Extreme Sparsity}
+
+The superposition hypothesis~\cite{elhage2022superposition} is proven in toy models: networks store $n \gg m$ features in $m$ dimensions using near-orthogonal directions. This works because features are sparse---interference is rarely realized when few features are simultaneously active.
+
+\begin{table}[htbp]
+\centering
+\caption{Activation sparsity across Transformer Circuits publications}
+\label{tab:sparsity}
+\begin{tabular}{@{}llrl@{}}
+\toprule
+\textbf{Model} & \textbf{Method} & \textbf{Active / Total} & \textbf{Sparsity} \\
+\midrule
+1-layer transformer~\cite{bricken2023monosemantic} & SAE (8$\times$) & 30 / 4,096 & 99.3\% \\
+Claude 3 Sonnet~\cite{templeton2024scaling} & SAE (34M) & $<$300 / 34M & 99.999\% \\
+Claude 3.5 Haiku~\cite{lindsey2025biology} & CLT (30M) & 235 / 30M & 99.999\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The phase diagram from~\cite{elhage2022superposition} identifies sharp transitions between three representation states:
+\begin{itemize}
+    \item \textbf{Dedicated}: Feature gets its own dimension. Full precision needed.
+    \item \textbf{Superposition}: Feature shares dimensions. Tolerates some quantization noise (already experiencing interference).
+    \item \textbf{Absent}: Feature not represented. No transfer needed.
+\end{itemize}
+
+The transitions are discontinuous (first-order), meaning compression quality does not degrade smoothly---there are natural breakpoints where increasing compression has minimal impact until a phase boundary is crossed.
+
+\subsection{Cross-Layer Feature Persistence}
+
+Crosscoders~\cite{anthropic2024crosscoders} prove that significant redundant structure exists across layers: features computed at one layer persist in the residual stream through many subsequent layers. A single crosscoder feature spanning 10 layers replaces 10 redundant per-layer SAE features.
+
+This directly supports \textbf{delta-based tensor transport}: send a base representation from the first layer where a feature activates, then transmit only per-layer deltas for subsequent layers. The cross-layer redundancy means most deltas are near-zero.
+
+\subsection{Feature Steering and Causal Significance}
+
+Scaling Monosemanticity~\cite{templeton2024scaling} demonstrates that clamping individual SAE features predictably modifies model behavior---from making Claude obsess about the Golden Gate Bridge to overriding RLHF safety training. Features are not correlational artifacts; they are causally significant computational units.
+
+For our SAE feature steering work (Update~10 Section~12), this validates that the sparse feature representation we use for gradient-free behavioral modification is operating on the same fundamental units that Anthropic's mechanistic interpretability identifies.
+
+\subsection{The Biology of Computation}
+
+Circuit tracing on Claude 3.5 Haiku~\cite{lindsey2025biology} reveals how a production model actually computes. Key architectural patterns:
+
+\begin{itemize}
+    \item \textbf{Multi-hop reasoning}: Intermediate representations (``Dallas'' $\to$ ``Texas'' $\to$ ``Austin'') traverse the residual stream across layers. Pipeline-parallel partitioning must preserve these chains.
+    \item \textbf{Planning features}: The model holds candidate outputs before generating (rhyme targets, diagnostic hypotheses). Early layers predict late-layer needs---a signal for RDMA prefetching.
+    \item \textbf{Parallel precision pathways}: Arithmetic uses simultaneous approximate-estimation and precise-digit streams. Different pathways in the \emph{same layer} have different precision requirements.
+    \item \textbf{Default refusal with override}: Safety operates as an always-on refusal circuit suppressed by ``known entity'' features. Hallucination occurs when the override fires incorrectly.
+\end{itemize}
+
+%=============================================================================
+\section{Gap Analysis: What the Middleware is Missing}
+\label{sec:gaps}
+%=============================================================================
+
+Mapping Circuits findings against the current Update~10 middleware design reveals five concrete gaps.
+
+\subsection{Gap 1: WFA Classification is Heuristic, Not Circuit-Aware}
+
+\textbf{Current state}: The WFA classifier uses access-frequency thresholds ($\theta_1 = 5$, $\theta_2 = 20$) and idle timeouts ($t_{\text{idle}} = 0.5$s) to classify tensors as hot/warm/cold. These thresholds are hand-tuned.
+
+\textbf{What Circuits reveals}: Tensor importance is not just about access frequency. A tensor accessed 5 times might be on a critical composition chain (K-composition feeding an induction head) while a tensor accessed 50 times might be a redundant copy of a cross-layer feature.
+
+\textbf{Gap}: The WFA lacks a \textbf{composition-awareness} signal. Two metrics from the framework could augment it:
+
+\begin{equation}
+    \text{priority}(h) = \underbrace{\|\mathbf{W}_E \cdot \mathbf{W}_{OV}^h \cdot \mathbf{W}_U\|_\sigma}_{\text{direct importance (spectral norm)}} + \sum_{h' \in \text{downstream}} \underbrace{\|\mathbf{W}_{OV}^h \cdot \mathbf{W}_K^{h'}\|_F}_{\text{composition strength}}
+\end{equation}
+
+Heads with high composition strength but low direct attribution are ``invisible but critical''---they would be classified WARM or COLD by access frequency alone but should be HOT.
+
+\subsection{Gap 2: Precision Management Ignores Superposition Phase}
+
+\textbf{Current state}: The precision pipeline (Update~10 Section~10) adapts between FP16/BF16/FP8/MXFP4 based on tensor type (weights, activations, gradients) and hardware (V100 FP16, 5070~Ti BF16).
+
+\textbf{What Circuits reveals}: Precision requirements depend on the \textbf{superposition phase} of the features being transferred:
+\begin{itemize}
+    \item \textbf{Dedicated features}: Zero interference margin. Quantization noise directly corrupts the signal. Needs FP16+.
+    \item \textbf{Superposition features}: Already experiencing interference from overlapping directions. Quantization noise is a small additional cost. Tolerates FP8 or MXFP4.
+    \item \textbf{Dense important features} (attention, residual stream): Many simultaneous features means low interference tolerance. High precision required.
+    \item \textbf{Sparse MLP activations} (post-ReLU): 50--90\% zeros. Sparsity encoding + aggressive quantization on nonzeros.
+\end{itemize}
+
+Additionally, privileged basis outlier dimensions~\cite{anthropic2023privileged} with 20$\times$ magnitude devastate uniform quantization. Channel-wise or per-dimension scaling is needed.
+
+\textbf{Gap}: The precision pipeline treats all activations at a given layer uniformly. It should differentiate by \textbf{feature phase} and \textbf{dimensional outliers}.
+
+\subsection{Gap 3: No Sparse Activation Compression}
+
+\textbf{Current state}: Activation tensors are transferred as dense buffers over RDMA, optionally with MXFP4 quantization (4$\times$ compression).
+
+\textbf{What Circuits reveals}: In the SAE feature basis, activations are 99.3--99.999\% sparse. Even without SAE decomposition, post-ReLU MLP activations are 50--90\% zero. Transferring dense tensors wastes bandwidth on zeros.
+
+\textbf{Gap}: The middleware has no \textbf{sparsity-aware transfer mode}. Options:
+\begin{itemize}
+    \item \textbf{Zero-skip encoding}: Transmit only nonzero indices + values. For 90\% sparse tensors, this is a 10$\times$ compression before any quantization.
+    \item \textbf{Feature-basis projection}: Project activations into a sparse basis before transfer, transmit $\sim$300 (index, value) pairs instead of 12K+ dense floats ($\sim$20$\times$ compression at FP16).
+    \item \textbf{Combined}: Sparse encoding + MXFP4 on nonzero values = 40--80$\times$ theoretical compression.
+\end{itemize}
+
+\subsection{Gap 4: KV Cache Prefetching is Pattern-Blind}
+
+\textbf{Current state}: The prefetch FSM (Update~10 Section~10.5) uses a simple state machine (Idle $\to$ Prefetching $\to$ Ready) driven by the WFA classifier. It does not know \emph{which} KV cache entries will be needed.
+
+\textbf{What Circuits reveals}: KV cache access patterns are predictable from circuit structure:
+\begin{itemize}
+    \item \textbf{Previous-token heads}: Always access position $t-1$. Stride-1 prefetch.
+    \item \textbf{Induction heads}: Access positions where $\text{token}_{j-1} = \text{current token}$. Content-indexed prefetch.
+    \item \textbf{BOS/global heads}: Always access position 0. Pin in cache.
+\end{itemize}
+
+Furthermore, only 1--3\% of heads are retrieval heads requiring full cache access. The rest can use compressed or partial KV cache~\cite{olsson2022induction}.
+
+\textbf{Gap}: The prefetch module should maintain a \textbf{head-type registry} (previous-token, induction, global, local-window) and issue targeted RDMA reads based on head type rather than blanket prefetching.
+
+\subsection{Gap 5: No Cross-Layer Delta Compression}
+
+\textbf{Current state}: Each pipeline stage transfers full activation tensors to the next stage.
+
+\textbf{What Circuits reveals}: Crosscoders~\cite{anthropic2024crosscoders} show that features persist across many layers with minimal change. The residual stream at layer $\ell+1$ is layer $\ell$'s stream plus a small delta from the MLP and attention heads.
+
+\textbf{Gap}: For pipeline-parallel inference where consecutive layers are on different nodes, sending only the \textbf{delta} (the head and MLP output) rather than the full residual stream could significantly reduce transfer size. The delta is bounded by:
+\begin{equation}
+    \|\delta_\ell\| = \|\text{head}_\ell(\mathbf{x}) + \text{MLP}_\ell(\mathbf{x})\| \ll \|\mathbf{x}_\ell\|
+\end{equation}
+particularly in later layers where the residual stream norm grows while per-layer contributions remain bounded.
+
+%=============================================================================
+\section{Proposed Circuit-Aware Enhancements}
+\label{sec:proposals}
+%=============================================================================
+
+\subsection{Enhancement 1: Composition-Weighted WFA}
+
+Augment the existing WFA state machine with a static composition weight per tensor, computed once from model weights:
+
+\begin{equation}
+    \text{WFA\_class}(t) = f\big(\text{access\_count}(t),\; \text{elapsed}(t),\; \underbrace{w_{\text{comp}}(t)}_{\text{new: static weight}}\big)
+\end{equation}
+
+The composition weight biases classification upward for tensors on critical composition chains. A tensor with low access count but high $w_{\text{comp}}$ stays classified as WARM or HOT.
+
+\subsection{Enhancement 2: Phase-Aware Precision Allocation}
+
+Extend the precision pipeline with three new signals:
+
+\begin{enumerate}
+    \item \textbf{Sparsity ratio}: Measured at runtime per tensor. High sparsity $\to$ allow MXFP4.
+    \item \textbf{Outlier magnitude}: Per-dimension max/mean ratio. High outliers $\to$ per-channel scaling before quantization.
+    \item \textbf{Composition depth}: Number of downstream composition hops. Deep chains $\to$ higher precision (quantization errors compound through $\mathbf{W}_{OV}^{h_0} \cdot \mathbf{W}_{OV}^{h_1}$).
+\end{enumerate}
+
+\subsection{Enhancement 3: Sparse RDMA Transfer Mode}
+
+Add a sparse transfer path to the transport layer:
+
+\begin{enumerate}
+    \item Sender scans activation tensor, extracts nonzero indices and values.
+    \item Packs into a sparse message: \texttt{[count:u32][indices:u16[]][values:fp16[]]}.
+    \item Receiver reconstructs dense tensor from sparse message.
+\end{enumerate}
+
+For a $d = 12{,}288$ activation vector at 90\% sparsity: dense FP16 = 24~KB, sparse = $\sim$4.8~KB (5$\times$ compression). At 99\% sparsity (SAE basis): sparse = $\sim$0.5~KB (48$\times$).
+
+\subsection{Enhancement 4: Head-Type-Aware Prefetching}
+
+Classify each attention head by type (from weight analysis, computed once):
+
+\begin{table}[htbp]
+\centering
+\caption{Head-type-aware KV cache prefetch strategy}
+\label{tab:prefetch}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Head Type} & \textbf{Detection Method} & \textbf{Prefetch Strategy} & \textbf{Cache Policy} \\
+\midrule
+Previous-token & Positional QK diagonal & Stride-1 sequential & Sliding window \\
+Induction & High K-composition with prev-tok head & Content-indexed lookup & Full retention \\
+BOS/global & Uniform attention to pos 0 & Pin position 0 & Never evict \\
+Local window & Banded QK structure & Fixed-window prefetch & LRU within window \\
+Semantic & Content-based QK & Reactive (no prefetch) & Frequency-based evict \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Enhancement 5: Delta-Mode Pipeline Transfer}
+
+For pipeline-parallel inference, the receiving node maintains the previous residual stream state. The sender transmits only the per-layer delta:
+
+\begin{equation}
+    \text{transfer}(\ell) = \text{head}_\ell(\mathbf{x}) + \text{MLP}_\ell(\mathbf{x})
+\end{equation}
+
+The receiver reconstructs: $\mathbf{x}_{\ell+1} = \mathbf{x}_\ell + \text{transfer}(\ell)$. Combined with sparse encoding on the delta (which is sparser than the full residual stream), this compounds bandwidth savings.
+
+%=============================================================================
+\section{Mapping Circuits Findings to Existing Middleware}
+\label{sec:mapping}
+%=============================================================================
+
+\begin{table}[htbp]
+\centering
+\caption{Transformer Circuits findings mapped to \texttt{tensor\_rdma} modules}
+\label{tab:mapping}
+\footnotesize
+\begin{tabular}{@{}p{3.8cm}p{3cm}p{2.5cm}p{3.5cm}@{}}
+\toprule
+\textbf{Circuits Finding} & \textbf{Source} & \textbf{Module} & \textbf{Application} \\
+\midrule
+Extreme activation sparsity (L0=235/30M) & Biology~\cite{lindsey2025biology} & \texttt{transport.rs} & Sparse transfer encoding \\
+Composition strength measurable from weights & Framework~\cite{elhage2021framework} & \texttt{config.rs} & Static priority computation \\
+Induction heads = content-indexed KV access & Induction~\cite{olsson2022induction} & \texttt{prefetch.rs} & Content-aware prefetch \\
+Phase transitions in representation & Superposition~\cite{elhage2022superposition} & \texttt{precision.rs} & Phase-aware quantization \\
+Cross-layer feature persistence & Crosscoders~\cite{anthropic2024crosscoders} & \texttt{rdma\_cache.rs} & Delta compression, dedup \\
+Parallel precision pathways & Biology~\cite{lindsey2025biology} & \texttt{precision.rs} & Per-pathway precision \\
+Privileged basis outlier dimensions & Privileged~\cite{anthropic2023privileged} & \texttt{rounding.rs} & Per-channel scaling \\
+Feature steering = causal modification & Scaling~\cite{templeton2024scaling} & SAE steering & Validates gradient-free approach \\
+Planning features activate early & Biology~\cite{lindsey2025biology} & \texttt{prefetch.rs} & Predictive RDMA reads \\
+Head-type taxonomy (prev-tok, induction) & Framework~\cite{elhage2021framework} & \texttt{rdma\_cache.rs} & Per-head cache policy \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=============================================================================
+\section{Quantitative Impact Estimates}
+\label{sec:impact}
+%=============================================================================
+
+\begin{table}[htbp]
+\centering
+\caption{Estimated bandwidth savings from circuit-aware optimizations on ConnectX-4 100GbE}
+\label{tab:impact}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Optimization} & \textbf{Compression} & \textbf{Effective BW} & \textbf{Stacks With} \\
+\midrule
+Baseline (dense FP16) & 1$\times$ & 12.5 GB/s & --- \\
+MXFP4 quantization (current) & 4$\times$ & 50 GB/s equiv & --- \\
++ Sparse encoding (90\% sparsity) & 10$\times$ & 125 GB/s equiv & MXFP4 \\
++ Delta-mode pipeline & 2--5$\times$ & 250--625 GB/s equiv & Sparse + MXFP4 \\
+Combined worst case & 40$\times$ & 500 GB/s equiv & All \\
+Combined best case (99\% sparse) & 200$\times$ & 2,500 GB/s equiv & All \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At the combined best case, the effective bandwidth of a single ConnectX-4 100GbE link approaches that of NVLink, making commodity Ethernet competitive with proprietary interconnects for sparse-activation workloads.
+
+%=============================================================================
+\section{Limitations and Caveats}
+\label{sec:limitations}
+%=============================================================================
+
+\begin{enumerate}
+    \item \textbf{SAE reconstruction gap}: The best CLTs achieve only 50\% output-match with the original model and 78.3\% reconstruction accuracy. The remaining computation may resist sparse decomposition.
+    \item \textbf{Feature-basis projection adds compute}: Projecting activations into a sparse basis before RDMA transfer requires an encoder forward pass per pipeline stage. Whether the bandwidth savings outweigh the compute cost depends on the network-to-compute ratio.
+    \item \textbf{Induction heads are well-studied on toy tasks}: Real-world KV access patterns during long-context generation may be more complex than the induction head model predicts.
+    \item \textbf{Composition metrics are static}: The composition strength computed from weights does not account for input-dependent attention pattern variation.
+    \item \textbf{No runtime SAE}: Current SAE inference adds latency. The enhancements in Sections~\ref{sec:proposals}.3--\ref{sec:proposals}.5 can be implemented without SAEs using cheaper heuristics (zero-counting for sparsity, weight analysis for head typing).
+\end{enumerate}
+
+%=============================================================================
+\section{Connection to Thesis Roadmap}
+\label{sec:roadmap}
+%=============================================================================
+
+The five identified gaps map to existing and new projects in the thesis roadmap:
+
+\begin{table}[htbp]
+\centering
+\caption{Gap-to-project mapping}
+\label{tab:roadmap}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Gap} & \textbf{Project} & \textbf{Status} \\
+\midrule
+1: Composition-aware WFA & P10 (WFA Integration) & Enhancement to existing \\
+2: Phase-aware precision & P11 (Precision Pipeline) & Enhancement to existing \\
+3: Sparse transfer mode & P12 (Transport Layer) & \textbf{New module needed} \\
+4: Head-type prefetching & P13 (Prefetch FSM) & Enhancement to existing \\
+5: Delta-mode pipeline & P14 (Pipeline Transport) & \textbf{New module needed} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Gaps 1, 2, and 4 require additions to existing \texttt{tensor\_rdma} modules. Gaps 3 and 5 require new functionality in \texttt{transport.rs} (sparse encoding/decoding) and a new delta-compression module.
+
+%=============================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+%=============================================================================
+
+Mechanistic interpretability provides the theoretical foundation for decisions the RDMA middleware currently makes heuristically. The WFA classifier's hot/warm/cold labels correspond to real structural properties: HOT tensors are on composition-critical paths where induction heads demand full KV cache access; COLD tensors carry sparse activations that tolerate aggressive compression.
+
+The five gaps identified---composition awareness, phase-aware precision, sparse transfer encoding, head-type prefetching, and delta-mode pipeline transport---represent concrete, implementable enhancements to the \texttt{tensor\_rdma} crate. The most impactful is sparse transfer mode (Gap~3), which could yield 10--200$\times$ bandwidth savings on activation tensors without any changes to the model itself.
+
+The Transformer Circuits research program is ongoing. As Anthropic extends circuit tracing to larger models and develops faster interpretability tools (MOLT transcoders~\cite{anthropic2025molt} achieve 1000$\times$ fewer FLOPs than standard transcoders), runtime circuit-aware scheduling may become practical for production inference systems.
+
+\bibliographystyle{plain}
+\bibliography{update11}
+
+\end{document}

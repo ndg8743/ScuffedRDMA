@@ -11,7 +11,7 @@ from .precision import V100_PROFILE, RTX5070TI_PROFILE
 from .prefetch import AccessPattern, PrefetchEngine
 from .quantization import AdaptiveQuantizer
 from .cache import RdmaTensorCache
-from .vllm_connector import NeumannKVCacheConnector
+from .vllm_connector import NeumannKVCacheConnector, TensorClassifier
 from .sae_steering import SAEFeatureStore, steer_model
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     'AdaptiveQuantizer',
     'RdmaTensorCache',
     'NeumannKVCacheConnector',
+    'TensorClassifier',
     'SAEFeatureStore',
     'steer_model',
 ]

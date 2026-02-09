@@ -16,6 +16,49 @@ import numpy as np
 from .precision import PrecisionFormat
 
 
+COLD, WARM, HOT = 0, 1, 2
+
+PRIORITY_MAP = {
+    HOT: 0,   # high priority, immediate transfer
+    WARM: 1,  # medium priority, standard path
+    COLD: 2,  # low priority, batched transfer
+}
+
+
+class TensorClassifier:
+    """WFA-based tensor heat classifier for transport prioritization."""
+
+    def __init__(self, theta1=10, theta2=100, t_idle=0.1):
+        self._state: Dict[str, Tuple[int, float]] = {}
+        self._access_counts: Dict[str, int] = {}
+        self.theta1, self.theta2 = theta1, theta2
+        self.t_idle = t_idle
+
+    def record_access(self, tensor_id: str) -> int:
+        now = time.monotonic()
+        self._access_counts[tensor_id] = self._access_counts.get(tensor_id, 0) + 1
+        count = self._access_counts[tensor_id]
+
+        prev_state, prev_time = self._state.get(tensor_id, (COLD, now))
+        elapsed = now - prev_time
+
+        if elapsed > self.t_idle:
+            new_state = max(COLD, prev_state - 1)
+        elif count > self.theta2:
+            new_state = HOT
+        elif count > self.theta1:
+            new_state = WARM
+        else:
+            new_state = prev_state
+
+        self._state[tensor_id] = (new_state, now)
+        return new_state
+
+    def get_priority(self, tensor_id: str) -> int:
+        state = self._state.get(tensor_id, (COLD, 0))[0]
+        return PRIORITY_MAP[state]
+
+
 @dataclass
 class KVCacheBlock:
     """A single KV cache block for one layer."""
@@ -80,16 +123,19 @@ class NeumannKVCacheConnector:
 
     def __init__(self, transport: Any = None,
                  cache: Any = None,
-                 wire_format: PrecisionFormat = PrecisionFormat.FP16):
+                 wire_format: PrecisionFormat = PrecisionFormat.FP16,
+                 classifier: Optional[TensorClassifier] = None):
         """
         Args:
             transport: RDMA or TCP-sim transport backend.
             cache: RdmaTensorCache instance for local buffering.
             wire_format: Precision for KV data on the wire.
+            classifier: WFA tensor classifier for transport prioritization.
         """
         self._transport = transport
         self._cache = cache
         self._wire_format = wire_format
+        self._classifier = classifier or TensorClassifier()
         self._pending: Dict[str, KVCacheMetadata] = {}
 
     def send_kv_cache(self, request_id: str,
@@ -120,15 +166,21 @@ class NeumannKVCacheConnector:
             wire_format=self._wire_format,
         )
 
-        if self._cache is not None:
-            for block in blocks:
-                k_key = f"kv:{request_id}:L{block.layer_idx}:K"
-                v_key = f"kv:{request_id}:L{block.layer_idx}:V"
+        priorities = []
+        for block in blocks:
+            k_key = f"kv:{request_id}:L{block.layer_idx}:K"
+            v_key = f"kv:{request_id}:L{block.layer_idx}:V"
+            self._classifier.record_access(k_key)
+            self._classifier.record_access(v_key)
+            priorities.append(self._classifier.get_priority(k_key))
+
+            if self._cache is not None:
                 self._cache.put_tensor(k_key, block.key_data, self._wire_format)
                 self._cache.put_tensor(v_key, block.value_data, self._wire_format)
 
         if self._transport is not None:
-            self._send_via_transport(meta, blocks)
+            priority = min(priorities) if priorities else PRIORITY_MAP[COLD]
+            self._send_via_transport(meta, blocks, priority=priority)
 
         self._pending[request_id] = meta
         return meta
@@ -157,6 +209,8 @@ class NeumannKVCacheConnector:
         for layer in range(meta.num_layers):
             k_key = f"kv:{request_id}:L{layer}:K"
             v_key = f"kv:{request_id}:L{layer}:V"
+            self._classifier.record_access(k_key)
+            self._classifier.record_access(v_key)
 
             if self._cache is not None:
                 k_data = self._cache.get_tensor(k_key, layer_idx=layer)
@@ -179,16 +233,20 @@ class NeumannKVCacheConnector:
         return blocks
 
     def _send_via_transport(self, meta: KVCacheMetadata,
-                            blocks: List[KVCacheBlock]) -> None:
+                            blocks: List[KVCacheBlock],
+                            priority: int = 2) -> None:
         """Serialize and send KV data over the transport."""
         meta_bytes = meta.to_bytes()
-        self._transport.send(meta_bytes)
+        send = self._transport.send
+        if hasattr(self._transport, 'send_with_priority'):
+            send = lambda data: self._transport.send_with_priority(data, priority)
 
+        send(meta_bytes)
         for block in blocks:
             k_wire = block.key_data.astype(np.float16).tobytes()
             v_wire = block.value_data.astype(np.float16).tobytes()
             header = struct.pack('<III', block.layer_idx, len(k_wire), len(v_wire))
-            self._transport.send(header + k_wire + v_wire)
+            send(header + k_wire + v_wire)
 
     def _recv_metadata(self) -> KVCacheMetadata:
         raw = self._transport.recv(88)
@@ -204,6 +262,10 @@ class NeumannKVCacheConnector:
         v_data = np.frombuffer(v_wire, dtype=np.float16).astype(np.float32)
         shape = (meta.num_heads, meta.seq_len, meta.head_dim)
         return k_data.reshape(shape), v_data.reshape(shape)
+
+    @property
+    def classifier(self) -> TensorClassifier:
+        return self._classifier
 
     @property
     def pending_requests(self) -> List[str]:
