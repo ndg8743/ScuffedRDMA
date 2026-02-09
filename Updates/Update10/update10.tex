@@ -1516,13 +1516,13 @@ This mirrors the Hetis system~\cite{hetis2024}, which demonstrated 2.25$\times$ 
 
 \subsection{Sparse Auto-Encoder Feature Steering}
 
-SAEs decompose a model's internal activation $\mathbf{a} \in \mathbb{R}^d$ into a sparse feature vector $\mathbf{f} \in \mathbb{R}^D$ where $D \gg d$~\cite{cunningham2023sae}:
+SAEs decompose a model's internal activation $\mathbf{a} \in \mathbb{R}^d$ into a sparse feature vector $\mathbf{f} \in \mathbb{R}^D$ where $D \gg d$~\cite{cunningham2023sae, templeton2024scaling}:
 \begin{equation}
     \mathbf{f} = \text{ReLU}(W_{\text{enc}} \cdot \mathbf{a} + \mathbf{b}_{\text{enc}}), \quad
     \hat{\mathbf{a}} = W_{\text{dec}} \cdot \mathbf{f} + \mathbf{b}_{\text{dec}}
 \end{equation}
 
-Feature steering modifies behavior by clamping features: $\mathbf{f}'_i = \alpha \cdot \mathbf{f}_{\max,i}$. This requires no gradient computation and no backward pass---only a sparse vector read from Neumann. SAE feature vectors map to Neumann's \texttt{SparseVector} type with 51$\times$ compression (a 65536-dim vector with $\sim$50 active features: 256~KB dense $\to$ 400~bytes sparse).
+Feature steering modifies behavior by clamping features: $\mathbf{f}'_i = \alpha \cdot \mathbf{f}_{\max,i}$. This requires no gradient computation and no backward pass---only a sparse vector read from Neumann. SAE feature vectors map to Neumann's \texttt{SparseVector} type with $\sim$655$\times$ compression (a 65536-dim vector with $\sim$50 active features: 256~KB dense $\to$ $\sim$400~bytes sparse, storing only non-zero index--value pairs).
 
 \begin{table}[htbp]
 \centering
@@ -1541,6 +1541,34 @@ Reversibility & Requires checkpoint & Immediate ($\alpha = 0$) \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{SAE Steering Validation}
+
+We validate gradient-free SAE steering on a real workload: LLM4Decompile-6.7B inference on a Google Colab H100 VM in BF16 with FlashAttention~2. The experiment (Update~9, \texttt{llm4decompile\_wfa.ipynb}) implements the steering mechanism from Golden Gate Claude~\cite{golden-gate-claude} and the Eiffel Tower Llama demo~\cite{eiffel-tower-llama}.
+
+\textbf{Steering mechanism.} A forward hook on layer $\ell$ modifies hidden states:
+\begin{equation}
+    \mathbf{h}'_\ell = \mathbf{h}_\ell + \alpha \cdot \hat{\mathbf{d}} - \text{proj}_{\hat{\mathbf{d}}}(\mathbf{h}_\ell)
+    \label{eq:steering}
+\end{equation}
+where $\hat{\mathbf{d}}$ is a unit-norm steering direction (an SAE decoder column) and $\alpha$ controls strength. The projection subtraction prevents runaway amplification. No gradients are computed---only a forward-pass vector addition.
+
+\begin{table}[htbp]
+\centering
+\caption{SAE steering configuration for WFA validation}
+\label{tab:steering-config}
+\begin{tabular}{@{}lcll@{}}
+\toprule
+\textbf{Layer} & \textbf{Strength ($\alpha$)} & \textbf{Position} & \textbf{Expected Effect} \\
+\midrule
+8  & 3.0 & Early (feature extraction) & Moderate output shift \\
+16 & 5.0 & Mid (reasoning) & Strong behavior change \\
+24 & 2.0 & Late (generation) & Light token distribution shift \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{WFA interaction.} Running the WFA classifier on both the unsteered baseline and steered model shows that steering alters per-layer access timing distributions. Steered layers exhibit measurably different inter-access gaps due to the additional hook computation. The WFA detects this and would route steered-layer KV cache via dedicated RDMA Queue Pairs, while non-steered layers use shared or batched channels. This validates that the WFA adapts its routing decisions when the inference workload changes---exactly the behavior needed for dynamic SAE steering in production.
 
 %=============================================================================
 \section{Experimental Design}
@@ -1661,7 +1689,7 @@ The thesis implementation is organized as independent, self-contained projects. 
 \textbf{\#} & \textbf{Project} & \textbf{Deliverables} & \textbf{Section} \\
 \midrule
 P1 & Cluster Deployment & Phase 1 lab cluster (Chimera/Cerberus/Hydra), Soft-RoCE baseline (0.92~Gb/s, 189~$\mu$s) & \S\ref{sec:hardware}, \S\ref{sec:softroce-baseline} \\
-P2 & FlashAttention 3 Fix & Lazy import patch for Blackwell GPUs, +15.5\% throughput on RTX 5090 & \S\ref{sec:fa3-fix} \\
+P2 & FlashAttention 3 Fix & Lazy import patch for vLLM Blackwell support, +15.5\% vLLM throughput on RTX 5090 & \S\ref{sec:fa3-fix} \\
 P3 & TCP Benchmarks & gpt-oss-120b baseline (104.42~tok/s), single-node vs multi-node analysis & \S\ref{sec:benchmarks} \\
 P4 & Transport Middleware & TransportBase abstraction, TCP/RoCE/TTPoe implementations, TransportSelector, NCCLConfig & \S\ref{sec:architecture} \\
 P5 & EXO Integration & RDMADiscovery, RDMATransport, RDMATopologyManager (639 lines) & \S\ref{sec:architecture} \\
