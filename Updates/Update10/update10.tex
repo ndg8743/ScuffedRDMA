@@ -441,7 +441,7 @@ The survey's analysis of \emph{practical integration challenges}---resource-mana
 
 Mixture-of-Experts (MoE) models use conditional computation to increase model capacity without proportionally increasing compute. GShard~\cite{lepikhin2020gshard} introduced expert parallelism for distributed MoE training, where experts are distributed across GPUs and a gating network routes each token to its top-$k$ experts.
 
-The Switch Transformer~\cite{fedus2021switch} simplified this to top-1 routing: each token is sent to exactly one expert, reducing the communication overhead from $O(k \cdot E)$ to $O(E)$ AllToAll messages. With $E$ experts distributed across $N$ GPUs, each GPU hosts $E/N$ experts and must exchange tokens with all other GPUs via AllToAll.
+The Switch Transformer~\cite{fedus2021switch} simplified this to top-1 routing: each token is sent to exactly one expert, reducing the communication overhead from $O(k \cdot E)$ to $O(E)$ AllToAll messages. With $E$ experts distributed across $N$ GPUs, each GPU hosts $E/N$ experts and must exchange tokens with all other GPUs via AllToAll. DeepSeek-V3~\cite{deepseekv3} scaled this to 671B total parameters (37B activated per token) using Multi-head Latent Attention and an auxiliary-loss-free load balancing strategy, training on 14.8T tokens in 2.788M H800 GPU hours---demonstrating that MoE architectures with adaptive routing are the dominant paradigm for cost-efficient frontier models.
 
 Expert parallelism interacts with tensor and data parallelism through:
 \begin{equation}
@@ -712,30 +712,30 @@ UCX fails when \texttt{UCX\_TLS} is set to any transport other than ``rc'' (Reli
 ]
 
 \node[neutral] (start) {UCX Init};
-\node[good, below left=1cm and 0.5cm of start] (rc) {rc (Reliable\\Connection)};
-\node[bad, below=1cm of start] (ud) {ud (Unreliable\\Datagram)};
-\node[bad, below right=1cm and 0.5cm of start] (dc) {dc (Dynamic\\Connection)};
+\node[good, below left=1.5cm and 1.5cm of start] (rc) {rc (Reliable\\Connection)};
+\node[bad, below=1.5cm of start] (ud) {ud (Unreliable\\Datagram)};
+\node[bad, below right=1.5cm and 1.5cm of start] (dc) {dc (Dynamic\\Connection)};
 
 \node[good, below=1cm of rc] (rcok) {Success};
 \node[bad, below=1cm of ud] (udfail) {Fail};
 \node[bad, below=1cm of dc] (dcfail) {Fail};
 
-\draw[arrow] (start) -- node[above left, font=\tiny] {\texttt{UCX\_TLS=rc}} (rc);
-\draw[arrow] (start) -- node[left, font=\tiny] {\texttt{UCX\_TLS=ud}} (ud);
-\draw[arrow] (start) -- node[above right, font=\tiny] {\texttt{UCX\_TLS=dc}} (dc);
+\draw[arrow] (start) -- node[above, sloped, font=\tiny] {\texttt{UCX\_TLS=rc}} (rc);
+\draw[arrow] (start) -- node[right, font=\tiny, xshift=2pt] {\texttt{UCX\_TLS=ud}} (ud);
+\draw[arrow] (start) -- node[above, sloped, font=\tiny] {\texttt{UCX\_TLS=dc}} (dc);
 
 \draw[arrow, green!50!black] (rc) -- (rcok);
 \draw[arrow, red] (ud) -- (udfail);
 \draw[arrow, red] (dc) -- (dcfail);
 
-\draw[dashed, thick] (3.5,-4) -- (3.5,0.5);
+\draw[dashed, thick] (4.5,-5) -- (4.5,0.5);
 
-\node[neutral, right=4cm of start] (start2) {UCX Init\\(Proposed)};
-\node[good, below=1cm of start2] (probe) {Transport\\Probe};
-\node[good, below left=1cm and 0.3cm of probe] (t1) {Best:\\rc/dc};
-\node[good, below=1cm of probe] (t2) {Fallback:\\tcp};
-\node[good, below right=1cm and 0.3cm of probe] (t3) {Fallback:\\shm};
-\node[good, below=0.8cm of t2] (success) {Always\\Succeeds};
+\node[neutral, right=6cm of start] (start2) {UCX Init\\(Proposed)};
+\node[good, below=1.2cm of start2] (probe) {Transport\\Probe};
+\node[good, below left=1.2cm and 1cm of probe] (t1) {Best:\\rc/dc};
+\node[good, below=1.2cm of probe] (t2) {Fallback:\\tcp};
+\node[good, below right=1.2cm and 1cm of probe] (t3) {Fallback:\\shm};
+\node[good, below=1cm of t2] (success) {Always\\Succeeds};
 
 \draw[arrow] (start2) -- (probe);
 \draw[arrow] (probe) -- (t1);
@@ -953,50 +953,56 @@ Megatron-LM~\cite{megatron2020} & Canonical TP/PP/DP parallelism strategies \\
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
     node distance=0.5cm,
-    layer/.style={rectangle, draw, thick, rounded corners, minimum width=13cm, minimum height=1.1cm, align=center},
+    layer/.style={rectangle, draw, thick, rounded corners, minimum width=13cm, align=center},
     sublayer/.style={rectangle, draw, rounded corners, minimum width=3.2cm, minimum height=0.85cm, align=center, font=\small},
     component/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=0.65cm, align=center, font=\footnotesize},
     arrow/.style={->, >=stealth, thick},
     biarrow/.style={<->, >=stealth, thick},
+    layerlabel/.style={font=\small\bfseries},
 ]
 
-\node[layer, fill=blue!15] (app) at (0, 0) {};
-\node[above=0.05cm of app.north, font=\small\bfseries] {\textbf{Application Layer}};
-\node[sublayer, fill=blue!25] (vllm) at (-4,0) {vLLM};
-\node[sublayer, fill=blue!25] (exo) at (0,0) {Exo};
-\node[sublayer, fill=blue!25] (custom) at (4,0) {Custom MoE Training};
+% Application Layer - label inside box at top
+\node[layer, fill=blue!15, minimum height=1.8cm] (app) at (0, 0) {};
+\node[layerlabel] at (0, 0.55) {Application Layer};
+\node[sublayer, fill=blue!25] at (-4,-0.15) {vLLM};
+\node[sublayer, fill=blue!25] at (0,-0.15) {Exo};
+\node[sublayer, fill=blue!25] at (4,-0.15) {Custom MoE Training};
 
-\node[layer, fill=wfapurple!20, below=0.8cm of app, minimum height=2.8cm] (middleware) {};
-\node[above=0.05cm of middleware.north, font=\small\bfseries] {\textbf{Proposed Adaptive RDMA Middleware}};
+\draw[biarrow] (0,-0.95) -- (0,-1.55);
 
-\node[component, fill=wfapurple!40] (wfa) at (-4,-2.2) {WFA Tensor Classifier};
-\node[component, fill=wfapurple!40] (telemetry) at (0,-2.2) {Runtime Telemetry};
-\node[component, fill=wfapurple!40] (router) at (4,-2.2) {Adaptive Router};
+% Middleware - label inside box at top
+\node[layer, fill=wfapurple!20, minimum height=3.4cm] (middleware) at (0, -3.25) {};
+\node[layerlabel] at (0, -1.85) {Proposed Adaptive RDMA Middleware};
 
-\node[component, fill=wfapurple!30] (mempool) at (-4,-3.2) {Memory Pool Proxy};
-\node[component, fill=wfapurple!30] (container) at (0,-3.2) {Container Broker};
-\node[component, fill=wfapurple!30] (numa) at (4,-3.2) {NUMA-Aware Placement};
+\node[component, fill=wfapurple!40] (wfa) at (-4,-2.7) {WFA Tensor Classifier};
+\node[component, fill=wfapurple!40] (telemetry) at (0,-2.7) {Runtime Telemetry};
+\node[component, fill=wfapurple!40] (router) at (4,-2.7) {Adaptive Router};
 
-\draw[arrow, gray] (wfa) -- (router);
-\draw[arrow, gray] (telemetry) -- (wfa);
+\node[component, fill=wfapurple!30] (mempool) at (-4,-3.7) {Memory Pool Proxy};
+\node[component, fill=wfapurple!30] (container) at (0,-3.7) {Container Broker};
+\node[component, fill=wfapurple!30] (numa) at (4,-3.7) {NUMA-Aware Placement};
+
+\draw[arrow, gray] (wfa) -- (telemetry);
 \draw[arrow, gray] (telemetry) -- (router);
 
-\node[layer, fill=yellow!20, below=0.8cm of middleware] (transport) at (0,-4.8) {};
-\node[above=0.05cm of transport.north, font=\small\bfseries] {\textbf{Transport Abstraction Layer}};
-\node[sublayer, fill=yellow!30] at (-4,-4.8) {UCX (Primary)};
-\node[sublayer, fill=yellow!30] at (0,-4.8) {NCCL (Fallback)};
-\node[sublayer, fill=yellow!30] at (4,-4.8) {JACCL (Apple)};
+\draw[biarrow] (0,-4.5) -- (0,-5.1);
 
-\node[layer, fill=green!15, below=0.8cm of transport] (physical) at (0,-6.4) {};
-\node[above=0.05cm of physical.north, font=\small\bfseries] {\textbf{Physical Transport Layer}};
-\node[sublayer, fill=green!25, minimum width=2.4cm] at (-4.5,-6.4) {InfiniBand};
-\node[sublayer, fill=green!25, minimum width=2.4cm] at (-1.5,-6.4) {RoCE};
-\node[sublayer, fill=green!25, minimum width=2.4cm] at (1.5,-6.4) {iWARP};
-\node[sublayer, fill=green!25, minimum width=2.4cm] at (4.5,-6.4) {TTPoe};
+% Transport Abstraction Layer - label inside box at top
+\node[layer, fill=yellow!20, minimum height=1.8cm] (transport) at (0,-5.9) {};
+\node[layerlabel] at (0, -5.25) {Transport Abstraction Layer};
+\node[sublayer, fill=yellow!30] at (-4,-6.05) {UCX (Primary)};
+\node[sublayer, fill=yellow!30] at (0,-6.05) {NCCL (Fallback)};
+\node[sublayer, fill=yellow!30] at (4,-6.05) {JACCL (Apple)};
 
-\draw[biarrow] (0,-0.6) -- (0,-1.4);
-\draw[biarrow] (0,-3.9) -- (0,-4.25);
-\draw[biarrow] (0,-5.35) -- (0,-5.85);
+\draw[biarrow] (0,-6.85) -- (0,-7.45);
+
+% Physical Transport Layer - label inside box at top
+\node[layer, fill=green!15, minimum height=1.8cm] (physical) at (0,-8.25) {};
+\node[layerlabel] at (0, -7.6) {Physical Transport Layer};
+\node[sublayer, fill=green!25, minimum width=2.4cm] at (-4.5,-8.4) {InfiniBand};
+\node[sublayer, fill=green!25, minimum width=2.4cm] at (-1.5,-8.4) {RoCE};
+\node[sublayer, fill=green!25, minimum width=2.4cm] at (1.5,-8.4) {iWARP};
+\node[sublayer, fill=green!25, minimum width=2.4cm] at (4.5,-8.4) {TTPoe};
 
 \end{tikzpicture}%
 }
@@ -1388,19 +1394,20 @@ RTX 5090 + FA3 (fixed) & 164 tok/s & 24 ms & 28 GB \\
 \begin{tikzpicture}
 \begin{axis}[
     ybar,
-    bar width=1cm,
-    width=0.6\textwidth,
+    bar width=1.2cm,
+    width=0.55\textwidth,
     height=5cm,
     ylabel={Tokens/sec},
-    symbolic x coords={FA2 (Fallback), FA3 (Fixed)},
-    xtick=data,
+    xtick={0,1},
+    xticklabels={FA2 (Fallback), FA3 (Fixed)},
     ymin=0,
     ymax=200,
     nodes near coords,
     every node near coord/.append style={font=\small},
+    enlarge x limits=0.5,
 ]
-\addplot[fill=red!40] coordinates {(FA2 (Fallback), 142)};
-\addplot[fill=green!50] coordinates {(FA3 (Fixed), 164)};
+\addplot+[ybar, bar shift=0pt, fill=red!40, draw=black] coordinates {(0, 142)};
+\addplot+[ybar, bar shift=0pt, fill=green!50, draw=black] coordinates {(1, 164)};
 \end{axis}
 \end{tikzpicture}
 \caption{Throughput improvement after applying Blackwell FA3 fix.}
@@ -1569,6 +1576,141 @@ where $\hat{\mathbf{d}}$ is a unit-norm steering direction (an SAE decoder colum
 \end{table}
 
 \textbf{WFA interaction.} Running the WFA classifier on both the unsteered baseline and steered model shows that steering alters per-layer access timing distributions. Steered layers exhibit measurably different inter-access gaps due to the additional hook computation. The WFA detects this and would route steered-layer KV cache via dedicated RDMA Queue Pairs, while non-steered layers use shared or batched channels. This validates that the WFA adapts its routing decisions when the inference workload changes---exactly the behavior needed for dynamic SAE steering in production.
+
+%=============================================================================
+\section{Mechanistic Interpretability and Circuit-Aware Transport}
+\label{sec:circuits}
+%=============================================================================
+
+Anthropic's Transformer Circuits Thread is a multi-year research effort to reverse-engineer the computational mechanisms inside transformer language models. Starting with a mathematical framework for small attention-only models~\cite{elhage2021framework} and progressing through dictionary learning on production-scale systems~\cite{templeton2024scaling}, the program includes circuit tracing on Claude 3.5 Haiku~\cite{lindsey2025biology} with 30 million learned features.
+
+The core observation is that individual neurons are \textbf{polysemantic}---a single neuron may respond to unrelated concepts (DNA sequences, legal language, Korean text). This is not a bug but an efficient encoding strategy called \textbf{superposition}~\cite{elhage2022superposition}, where models store more concepts than they have dimensions by exploiting the near-orthogonality of sparse feature directions. The Circuits research answers questions that directly affect tensor transport decisions:
+
+\begin{enumerate}
+    \item \textbf{Which layers matter for a given computation?} Features routinely skip layers---a concept activated at layer 3 may directly influence layer 12 with no meaningful computation in between~\cite{ameisen2025tracing}.
+    \item \textbf{How sparse are activations really?} On any given token, only $\sim$235 features out of 30 million are active (L0 = 235 in Claude 3.5 Haiku)~\cite{lindsey2025biology}. At the SAE level, $<$300 features per token out of millions~\cite{templeton2024scaling}.
+    \item \textbf{What access patterns do attention heads create?} Induction heads generate content-dependent, long-range lookback into the KV cache~\cite{olsson2022induction}, creating the non-uniform access patterns our WFA classifier observes.
+    \item \textbf{How do precision requirements vary across computation?} Parallel internal pathways have different precision needs---approximate estimation streams tolerate quantization while precise digit-calculation streams do not~\cite{lindsey2025biology}.
+\end{enumerate}
+
+\subsection{The Residual Stream as a Communication Bus}
+
+The mathematical framework~\cite{elhage2021framework} reconceptualizes the transformer not as a stack of layers but as a \textbf{residual stream}: a high-dimensional vector per token position that every component reads from and writes to additively:
+\begin{equation}
+    \mathbf{x}_{\text{final}} = \mathbf{W}_E + \mathbf{W}_{\text{pos}} + \sum_{\ell} \sum_h \text{head}_{\ell,h}(\mathbf{x}) + \sum_{\ell} \text{MLP}_\ell(\mathbf{x})
+\end{equation}
+
+Because every component's contribution is additive, the output logits decompose into a linear sum of each component's individual effect, enabling \textbf{direct logit attribution}. The residual stream has \textbf{no privileged basis}~\cite{anthropic2023privileged}---individual dimensions are meaningless; only directions carry semantic content. However, Adam optimizer normalization creates stable outlier dimensions with 20$\times$ magnitude, which has direct implications for quantization (\Cref{sec:circuits-gaps}).
+
+\subsection{QK/OV Circuits and Head Composition}
+
+Each attention head implements two mathematically independent circuits~\cite{elhage2021framework}: the \textbf{QK circuit} ($\mathbf{W}_Q \mathbf{W}_K^\top$) determines \emph{where to attend}, while the \textbf{OV circuit} ($\mathbf{W}_V \mathbf{W}_O$) determines \emph{what to move}. Multi-layer transformers gain power through \textbf{head composition}---a layer-0 head's output modifies the queries, keys, or values of layer-1 heads:
+
+\begin{table}[htbp]
+\centering
+\caption{Attention head composition types and RDMA scheduling implications}
+\label{tab:composition}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Type} & \textbf{Mechanism} & \textbf{Effective Result} & \textbf{RDMA Implication} \\
+\midrule
+Q-composition & Head 0 output $\to$ Head 1 query & Dynamic search criteria & Transfer must precede QK compute \\
+K-composition & Head 0 output $\to$ Head 1 key & Enriched source tokens & KV cache depends on prior layer \\
+V-composition & Head 0 output $\to$ Head 1 value & Chained information move & Composition chain = latency-critical \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Composition strength is measurable: $\|\mathbf{W}_{OV}^{h_0} \cdot \mathbf{W}_K^{h_1}\|_F$ quantifies how strongly head $h_0$ influences head $h_1$'s attention pattern---a \textbf{computable, static metric} for RDMA transfer priority between pipeline stages.
+
+\subsection{Induction Heads and KV Cache Access Patterns}
+
+Induction heads~\cite{olsson2022induction} implement pattern completion: given $[A][B]\ldots[A]$, predict $[B]$. They emerge through a sharp phase transition during training and are the primary mechanism for in-context learning. The circuit requires a \textbf{previous-token head} (layer 0) that writes predecessor identity into the residual stream, followed by an \textbf{induction head} (layer 1) that uses K-composition to match the current token against predecessor annotations.
+
+Induction heads create \textbf{content-dependent, long-range, sparse lookback} into the KV cache---exactly the non-local access pattern that the WFA classifier (\Cref{sec:architecture}) must handle. Only 1--3\% of heads are induction/retrieval heads, but they require full KV cache access. This asymmetry validates the hot/warm/cold classification: induction head KV entries are HOT (dedicated QP, polled completions), while non-retrieval heads can use compressed cache (COLD, batched).
+
+\subsection{Superposition, Sparsity, and Cross-Layer Persistence}
+
+The superposition hypothesis~\cite{elhage2022superposition} is proven in toy models: networks store $n \gg m$ features in $m$ dimensions using near-orthogonal directions. Phase transitions between dedicated, superposition, and absent representation states are discontinuous, meaning compression quality does not degrade smoothly---there are natural breakpoints where increasing compression has minimal impact until a phase boundary is crossed.
+
+\begin{table}[htbp]
+\centering
+\caption{Activation sparsity across Transformer Circuits publications}
+\label{tab:sparsity}
+\begin{tabular}{@{}llrl@{}}
+\toprule
+\textbf{Model} & \textbf{Method} & \textbf{Active / Total} & \textbf{Sparsity} \\
+\midrule
+1-layer transformer~\cite{bricken2023monosemantic} & SAE (8$\times$) & 30 / 4,096 & 99.3\% \\
+Claude 3 Sonnet~\cite{templeton2024scaling} & SAE (34M) & $<$300 / 34M & 99.999\% \\
+Claude 3.5 Haiku~\cite{lindsey2025biology} & CLT (30M) & 235 / 30M & 99.999\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Crosscoders~\cite{anthropic2024crosscoders} prove that significant redundant structure exists across layers: features computed at one layer persist in the residual stream through many subsequent layers. A single crosscoder feature spanning 10 layers replaces 10 redundant per-layer SAE features---directly supporting \textbf{delta-based tensor transport} where only per-layer deltas are transmitted after a base representation.
+
+\subsection{Gap Analysis: Current Middleware vs.\ Circuit Findings}
+\label{sec:circuits-gaps}
+
+Mapping Circuits findings against the current middleware design reveals five concrete gaps:
+
+\textbf{Gap 1: WFA classification is heuristic, not circuit-aware.} The WFA uses access-frequency thresholds ($\theta_1$, $\theta_2$) and idle timeouts. But tensor importance depends on composition chains---a tensor accessed 5 times on a critical K-composition path feeding an induction head is more important than one accessed 50 times carrying a redundant cross-layer feature. Two metrics from the framework could augment the WFA:
+\begin{equation}
+    \text{priority}(h) = \underbrace{\|\mathbf{W}_E \cdot \mathbf{W}_{OV}^h \cdot \mathbf{W}_U\|_\sigma}_{\text{direct importance}} + \sum_{h' \in \text{downstream}} \underbrace{\|\mathbf{W}_{OV}^h \cdot \mathbf{W}_K^{h'}\|_F}_{\text{composition strength}}
+\end{equation}
+
+\textbf{Gap 2: Precision management ignores superposition phase.} The precision pipeline (\Cref{sec:rdma-cache}) adapts by tensor type and hardware, but precision requirements depend on feature phase: dedicated features need FP16+, superposition features tolerate MXFP4 (already experiencing interference), and privileged basis outlier dimensions with 20$\times$ magnitude devastate uniform quantization.
+
+\textbf{Gap 3: No sparse activation compression.} Activation tensors are transferred as dense buffers. In the SAE feature basis, activations are 99.3--99.999\% sparse. Even without SAE decomposition, post-ReLU MLP activations are 50--90\% zero. Zero-skip encoding on 90\% sparse tensors yields 10$\times$ compression before quantization; combined with MXFP4 on nonzero values, 40--80$\times$ theoretical compression.
+
+\textbf{Gap 4: KV cache prefetching is pattern-blind.} The prefetch FSM does not know \emph{which} KV cache entries will be needed. Circuit structure predicts this: previous-token heads always access position $t-1$ (stride-1 prefetch), induction heads access positions where $\text{token}_{j-1} = \text{current token}$ (content-indexed prefetch), and BOS/global heads always access position 0 (pin in cache).
+
+\textbf{Gap 5: No cross-layer delta compression.} Each pipeline stage transfers full activation tensors. Crosscoders show that features persist across many layers with minimal change. Sending only the per-layer delta $\|\delta_\ell\| = \|\text{head}_\ell(\mathbf{x}) + \text{MLP}_\ell(\mathbf{x})\| \ll \|\mathbf{x}_\ell\|$ could significantly reduce transfer size, particularly in later layers where residual stream norm grows while per-layer contributions remain bounded.
+
+\subsection{Proposed Circuit-Aware Enhancements}
+
+\begin{table}[htbp]
+\centering
+\caption{Circuit-aware enhancements for \texttt{tensor\_rdma} modules}
+\label{tab:circuit-enhancements}
+\footnotesize
+\begin{tabular}{@{}p{2.6cm}p{5.8cm}p{2.2cm}c@{}}
+\toprule
+\textbf{Enhancement} & \textbf{Description} & \textbf{Module} & \textbf{Gap} \\
+\midrule
+Composition WFA & Static composition weight biases classification for critical chains & \texttt{config.rs} & 1 \\
+Phase-aware precision & Sparsity ratio + outlier magnitude drive per-tensor quantization & \texttt{precision.rs} & 2 \\
+Sparse transfer & Index-value encoding for sparse activations (10--200$\times$) & \texttt{transport.rs} & 3 \\
+Head-type prefetch & Head registry (prev-token, induction, BOS) for targeted reads & \texttt{prefetch.rs} & 4 \\
+Delta pipeline & Transmit per-layer delta; receiver reconstructs residual stream & \texttt{rdma\_cache.rs} & 5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Quantitative Impact Estimates}
+
+\begin{table}[htbp]
+\centering
+\caption{Estimated bandwidth savings from circuit-aware optimizations on ConnectX-4 100GbE}
+\label{tab:circuit-impact}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Optimization} & \textbf{Compression} & \textbf{Effective BW} & \textbf{Stacks With} \\
+\midrule
+Baseline (dense FP16) & 1$\times$ & 12.5 GB/s & --- \\
+MXFP4 quantization (current) & 4$\times$ & 50 GB/s equiv & --- \\
++ Sparse encoding (90\% sparsity) & 10$\times$ & 125 GB/s equiv & MXFP4 \\
++ Delta-mode pipeline & 2--5$\times$ & 250--625 GB/s equiv & Sparse + MXFP4 \\
+Combined worst case & 40$\times$ & 500 GB/s equiv & All \\
+Combined best case (99\% sparse) & 200$\times$ & 2,500 GB/s equiv & All \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At the combined best case, the effective bandwidth of a single ConnectX-4 100GbE link approaches that of NVLink, making commodity Ethernet competitive with proprietary interconnects for sparse-activation workloads.
+
+\textbf{Limitations.} (1)~Best CLTs achieve only 50\% output-match and 78.3\% reconstruction accuracy; the remaining computation may resist sparse decomposition. (2)~Feature-basis projection adds an encoder forward pass per pipeline stage; whether bandwidth savings outweigh compute cost depends on the network-to-compute ratio. (3)~Composition metrics are static and do not account for input-dependent attention pattern variation. (4)~Enhancements 3--5 can be implemented without runtime SAEs using cheaper heuristics (zero-counting for sparsity, weight analysis for head typing).
 
 %=============================================================================
 \section{Experimental Design}
@@ -1747,7 +1889,7 @@ A secondary research direction involves fine-tuning an LLM to generate RISC-V as
 
 \subsection{Conclusions}
 
-This report consolidates the research progress from Updates 2--8, presenting a unified view of the adaptive RDMA optimization framework for distributed LLM workloads. The key contributions are:
+This report consolidates the research progress from Updates 2--11, presenting a unified view of the adaptive RDMA optimization framework for distributed LLM workloads. The key contributions are:
 
 \begin{enumerate}
     \item \textbf{Comprehensive issue analysis}: Seven critical blocking issues identified across NCCL, UCX, and vLLM, with proposed solutions for each.
@@ -1755,6 +1897,7 @@ This report consolidates the research progress from Updates 2--8, presenting a u
     \item \textbf{RDMA Tensor Cache}: A precision management layer in Neumann that resolves heterogeneous GPU precision mismatches through FP32 master weight storage and stochastic rounding.
     \item \textbf{Pluggable transport}: Support for TCP, Soft-RoCE, hardware RoCE, and TTPoe through a unified abstraction, with integration into both vLLM and exo frameworks.
     \item \textbf{Experimental validation framework}: Three-pillar methodology targeting precision overhead, prefetch effectiveness, and quantization quality, with concrete performance targets.
+    \item \textbf{Circuit-aware transport}: Analysis of Anthropic's Transformer Circuits research identifies five concrete gaps in the middleware and proposes circuit-aware enhancements---composition-weighted WFA, phase-aware precision, sparse RDMA transfers, head-type prefetching, and delta-mode pipeline transport---with estimated 40--200$\times$ bandwidth compression on sparse-activation workloads.
 \end{enumerate}
 
 The work demonstrates that intelligent communication scheduling---treating tensor transfers as first-class objects with metadata-driven routing---can achieve latency improvements on consumer hardware that previously required expensive InfiniBand deployments.
