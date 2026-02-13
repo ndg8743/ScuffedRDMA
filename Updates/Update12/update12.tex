@@ -1,0 +1,391 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, calc, fit}
+
+\definecolor{codebg}{HTML}{F5F5F5}
+\definecolor{hot}{HTML}{EF4444}
+\definecolor{warm}{HTML}{F59E0B}
+\definecolor{cold}{HTML}{3B82F6}
+
+\title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
+\large Update 12: Work-First Scheduling for Tensor Transport\\[0.3em]
+\normalsize From Cilk's Work-First Principle to RDMA-Aware Task Scheduling}
+\author{Nathan Gopee\\
+MS Computer Science, SUNY New Paltz\\
+Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\date{February 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This update examines the Work-First Algorithm (WFA) from its origins in Cilk's work-stealing scheduler through its implications for CPU scheduling, memory hierarchy management, and distributed tensor transport over RDMA. The work-first principle---minimize overhead on the serial execution path at the expense of the parallel coordination path---provides the theoretical grounding for the WFA tensor classifier introduced in Update~10. We connect Frigo, Leiserson, and Randall's continuation-stealing strategy to Ryan Fleury's lane-based multi-core model, analyze the memory scheduling consequences (cache locality, NUMA awareness, space bounds), and show how these ideas map onto RDMA transport decisions for distributed LLM inference.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%=============================================================================
+\section{The Work-First Principle}
+\label{sec:principle}
+%=============================================================================
+
+The work-first principle originates from Frigo, Leiserson, and Randall's implementation of Cilk-5~\cite{frigo1998cilk5}:
+
+\begin{quote}
+\emph{Minimize the scheduling overhead borne by the work of a computation. Concentrate on reducing overheads that contribute to $T_1$, even at the expense of overheads that contribute to $T_\infty$.}
+\end{quote}
+
+The insight is counterintuitive. In a computation with work $T_1$ (total operations) and span $T_\infty$ (critical path length), the expected runtime on $P$ processors under work-stealing is:
+\begin{equation}
+    E[T_P] = \frac{T_1}{P} + O(T_\infty)
+    \label{eq:workstealing}
+\end{equation}
+
+The $T_1/P$ term dominates for well-parallelized programs. Shaving overhead from the common serial execution path yields greater returns than reducing the rare parallel-coordination overhead.
+
+\subsection{Two-Clone Compilation}
+
+Cilk-5 implements this via a two-clone compiler strategy~\cite{frigo1998cilk5}:
+
+\begin{itemize}
+    \item \textbf{Fast clone}: Nearly identical to the serial C version. Executes in the common case where no stealing occurs. Spawn overhead is 2--6$\times$ the cost of a C function call.
+    \item \textbf{Slow clone}: Contains full parallel bookkeeping (deque management, frame setup). Executes only when work is actually stolen by another processor.
+\end{itemize}
+
+The runtime uses a Dijkstra-like mutual-exclusion protocol for the ready deque that avoids locks in the fast-clone path. The result: programs pay nearly zero overhead when running on a single core, and the scheduling machinery only activates on the rare steal path.
+
+\subsection{Continuation Stealing vs.\ Child Stealing}
+
+The work-first principle mandates \textbf{continuation stealing}. On a \texttt{spawn}, the spawning worker immediately executes the child (the ``work'') and pushes the continuation onto the deque for potential stealing. This contrasts with child stealing, where the child is enqueued and the parent continues.
+
+\begin{table}[htbp]
+\centering
+\caption{Continuation stealing (work-first) vs.\ child stealing comparison}
+\label{tab:stealing}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Property} & \textbf{Continuation Stealing} & \textbf{Child Stealing} \\
+\midrule
+On spawn & Execute child, enqueue continuation & Enqueue child, continue parent \\
+Execution order & Depth-first (mimics serial) & Breadth-first divergence \\
+Space bound & $O(S_1 \cdot P)$ -- provably bounded & Unbounded in worst case \\
+Cache behavior & Preserves serial access pattern & Departs from serial locality \\
+Implementation & Requires compiler support & Works as a library \\
+Steal overhead & Higher (continuation is heavier) & Lower (child is lighter) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The space bound is critical: continuation stealing guarantees that $P$ processors use at most $P$ times the single-processor stack space~\cite{blumofe1999workstealing}. Child stealing provides no such guarantee---fork-heavy loops can grow work queues without bound.
+
+%=============================================================================
+\section{CPU Scheduling: Work-Stealing Mechanics}
+\label{sec:cpu}
+%=============================================================================
+
+\subsection{The Blumofe-Leiserson Theorem}
+
+Blumofe and Leiserson~\cite{blumofe1999workstealing} proved that randomized work-stealing executes a fully strict computation in expected time satisfying Equation~\ref{eq:workstealing}. This is optimal to within a constant factor of the lower bound $\max(T_1/P, T_\infty)$.
+
+Each processor maintains a double-ended queue (deque) of ready tasks:
+
+\begin{enumerate}
+    \item A worker pushes and pops from the \textbf{bottom} of its own deque (depth-first, following serial order).
+    \item When idle, a worker becomes a \textbf{thief} and steals from the \textbf{top} of a randomly chosen victim's deque (oldest/shallowest tasks).
+    \item Stealing the shallowest task maximizes the amount of work obtained per steal, minimizing total steal count.
+\end{enumerate}
+
+The expected number of steals is $O(P \cdot T_\infty)$---proportional to the critical path, not the total work. Since $T_\infty \ll T_1$ for well-parallelized programs, steals are rare events. This is why the work-first principle pays off: the fast path (no steal) runs almost all the time.
+
+\subsection{Work-First vs.\ Help-First in Practice}
+
+Guo et al.~\cite{guo2009workfirst} formalized the distinction between work-first and help-first (breadth-first) policies for async-finish task parallelism. Their key finding: neither policy universally dominates.
+
+\begin{itemize}
+    \item \textbf{Work-first wins} for deep recursion with good temporal locality (e.g., divide-and-conquer, tree traversals).
+    \item \textbf{Help-first wins} for broad fork-join with many short-lived tasks where the continuation is cheaper than the child.
+\end{itemize}
+
+This motivated SLAW~\cite{guo2010slaw}, which selects the policy per-task at runtime based on locality hints---an adaptive approach that directly parallels our WFA tensor classifier selecting transport strategies per-tensor based on access patterns.
+
+%=============================================================================
+\section{Memory Scheduling: Cache and NUMA Implications}
+\label{sec:memory}
+%=============================================================================
+
+\subsection{Cache Miss Analysis}
+
+Acar, Blelloch, and Blumofe~\cite{acar2002locality} analyzed the parallel cache complexity under work-stealing:
+
+\begin{equation}
+    Q_P \leq Q_1 + O\!\left(\frac{P \cdot T_\infty \cdot M}{B}\right)
+    \label{eq:cachemiss}
+\end{equation}
+
+where $Q_1$ is the serial cache complexity, $M$ is cache size, and $B$ is cache line size. The additive term represents cache misses caused by steal operations disrupting locality---each steal can flush up to $M/B$ cache lines.
+
+The work-first principle minimizes this penalty because:
+
+\begin{enumerate}
+    \item \textbf{Depth-first execution preserves serial locality}. A worker follows the same memory access pattern as the serial program until a steal occurs.
+    \item \textbf{Steals are rare} ($O(P \cdot T_\infty)$ total). Each steal incurs a bounded cache disruption, but there are few of them.
+    \item \textbf{Stolen tasks are large}. Stealing the shallowest continuation yields the most work, amortizing the cache refill cost over more computation.
+\end{enumerate}
+
+However, the bound can be tight in adversarial cases. Acar et al.\ showed that a computation with $O(n)$ work and $O(1)$ cache misses on one processor can incur $\Omega(n)$ cache misses on just two processors when a steal destroys critical cache state.
+
+\subsection{NUMA-Aware Work-Stealing}
+
+Standard randomized work-stealing is \textbf{locality-oblivious}: a thief steals from a uniformly random victim regardless of NUMA topology. On modern multi-socket systems with non-uniform memory access costs, this causes unnecessary cross-socket traffic.
+
+SLAW~\cite{guo2010slaw} addresses this by grouping workers into ``places'' aligned with the NUMA topology. Workers preferentially steal from within their place (same socket, shared LLC) before attempting remote steals. The adaptive policy selection further reduces NUMA penalties: work-first policy keeps data close to the producer (good for intra-socket), while help-first distributes work across sockets when local queues are saturated.
+
+\subsection{Space Bounds and Stack Management}
+
+The $O(S_1 \cdot P)$ space bound under continuation stealing~\cite{blumofe1999workstealing} has a direct memory scheduling consequence: each processor's stack grows at the same rate as the serial execution. No processor accumulates unbounded pending work.
+
+Under child stealing, a parallel \texttt{for} loop spawning $n$ iterations immediately enqueues $n$ tasks, consuming $O(n)$ space regardless of $P$. This is why systems like Intel TBB and .NET's Task Parallel Library (which use child stealing) require work-limiting heuristics to avoid memory exhaustion---a scheduling concern that continuation stealing avoids by construction.
+
+%=============================================================================
+\section{Fleury's Lane Model: Multi-Core by Default}
+\label{sec:fleury}
+%=============================================================================
+
+Ryan Fleury~\cite{fleury2025multicore} proposes inverting the traditional parallelism model: instead of writing single-threaded code with special multi-core carve-outs, start with all $N$ cores executing the same entry function parameterized by thread index. Serial sections use \texttt{if(LaneIdx() == 0)}.
+
+This ``multi-core by default'' model resembles GPU shader programming more than traditional CPU threading. The key primitives:
+
+\begin{itemize}
+    \item \textbf{\texttt{LaneRange(count)}}: Uniformly distributes iteration ranges across threads, handling remainders.
+    \item \textbf{\texttt{LaneSync()}}: Barrier synchronization between threads in a group.
+    \item \textbf{\texttt{LaneSyncU64()}}: Broadcasts small values across threads for data sharing without persistent statics.
+\end{itemize}
+
+\subsection{Connection to Work-First Scheduling}
+
+Fleury's model is implicitly work-first: every core begins with work (the full program), and the distribution primitives (\texttt{LaneRange}) partition work uniformly without a steal mechanism. This works because:
+
+\begin{enumerate}
+    \item \textbf{Uniform work}: When tasks have similar cost, static partitioning matches work-stealing's steady state (where steals are rare because queues stay balanced).
+    \item \textbf{Variable work}: Fleury uses atomic counters for dynamic assignment---functionally equivalent to a centralized work queue, which converges to work-stealing behavior under contention.
+    \item \textbf{Few expensive tasks}: Requires algorithmic redesign (Fleury switched from comparison sort to radix sort). This parallels the work-first insight that reducing $T_1$ matters more than reducing coordination overhead.
+\end{enumerate}
+
+The model trades the generality of work-stealing (handles arbitrary task graphs) for simplicity (SPMD execution with barriers). For LLM inference, where the computation graph is known at compile time and tasks within a layer are homogeneous, this trade-off favors the lane model.
+
+\subsection{Memory Implications of the Lane Model}
+
+The lane model has favorable memory scheduling properties:
+
+\begin{itemize}
+    \item \textbf{No deque overhead}: No per-thread task queues to manage. Memory footprint is purely the thread stacks plus shared data.
+    \item \textbf{Predictable access patterns}: Each thread's data partition is known statically, enabling NUMA-aware allocation.
+    \item \textbf{Stack as thread-local storage}: Each thread's stack is available throughout execution, avoiding heap allocation for per-thread state.
+\end{itemize}
+
+These properties align with RDMA buffer management, where memory regions must be pre-registered with the NIC and pinned in physical memory. Predictable access patterns enable pre-registration of the exact memory regions each thread will touch.
+
+%=============================================================================
+\section{Mapping to RDMA Tensor Transport}
+\label{sec:rdma}
+%=============================================================================
+
+The work-first principle translates directly to distributed tensor transport decisions.
+
+\subsection{The Tensor Transport Analogy}
+
+In distributed LLM inference, the ``work'' is GPU computation on tensor data, and the ``coordination overhead'' is RDMA transfer between nodes. The work-first principle says: \emph{minimize overhead on the computation-critical path, even at the expense of the transfer coordination path}.
+
+\begin{table}[htbp]
+\centering
+\caption{Work-first principle mapped to tensor transport}
+\label{tab:analogy}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Cilk Concept} & \textbf{Tensor Transport Analog} & \textbf{Implementation} \\
+\midrule
+Work ($T_1$) & GPU compute on tensors & Kernel execution time \\
+Span ($T_\infty$) & Longest pipeline stage & Critical-path layer \\
+Fast clone & HOT path: dedicated QP, polled & Zero-copy RDMA read \\
+Slow clone & COLD path: batched, compressed & Sparse-encoded bulk transfer \\
+Steal (rare event) & Cross-node transfer & RDMA send/recv \\
+Depth-first execution & Compute before transfer & Overlap compute with prefetch \\
+Deque (bottom = local) & Local GPU memory & No transfer needed \\
+Deque (top = stealable) & Registered RDMA buffers & Available for remote read \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{WFA Classifier as Scheduling Policy}
+
+The WFA tensor classifier (Update~10) implements an adaptive scheduling policy analogous to SLAW~\cite{guo2010slaw}:
+
+\begin{itemize}
+    \item \textbf{HOT tensors} ($\text{access\_count} > \theta_2$): Dedicated queue pair, polled completions, pinned memory. This is the ``fast clone''---minimal per-transfer overhead on the critical path.
+    \item \textbf{WARM tensors} ($\theta_1 < \text{access\_count} \leq \theta_2$): Shared queue pair, event-driven completions. Moderate overhead, balancing resource usage.
+    \item \textbf{COLD tensors} ($\text{access\_count} \leq \theta_1$): Batched transfers, compression enabled. This is the ``slow clone''---higher per-transfer overhead, but these tensors are off the critical path.
+\end{itemize}
+
+The classifier's idle timeout ($t_\text{idle}$) implements demotion: tensors that stop being accessed cool down from HOT to WARM to COLD, freeing dedicated resources. This mirrors how work-stealing reclaims idle processors---an idle worker becomes a thief rather than holding resources.
+
+\subsection{Continuation Stealing over RDMA}
+
+Shiina and Taura~\cite{shiina2022continuation} demonstrated distributed continuation stealing over MPI-3 RMA (one-sided RDMA operations). Their findings are directly relevant:
+
+\begin{enumerate}
+    \item \textbf{Continuation stealing outperformed child stealing} in distributed settings. The depth-first locality advantage of continuation stealing is amplified by the high cost of remote memory access over RDMA---each ``cache miss'' is now a network round trip.
+    \item \textbf{Space efficiency matters more over RDMA}. The $O(S_1 \cdot P)$ space bound prevents RDMA buffer exhaustion. Under child stealing, unbounded task queues translate to unbounded memory registration, which exhausts NIC resources.
+    \item \textbf{Uni-address thread management} reduces virtual memory consumption, making RDMA-based work-stealing feasible at scale.
+\end{enumerate}
+
+\subsection{Cache Hierarchy $\to$ Memory Hierarchy $\to$ Network Hierarchy}
+
+The cache miss analysis from Section~\ref{sec:memory} extends across the full memory hierarchy:
+
+\begin{table}[htbp]
+\centering
+\caption{Work-first locality benefits across the memory hierarchy}
+\label{tab:hierarchy}
+\begin{tabular}{@{}llrl@{}}
+\toprule
+\textbf{Level} & \textbf{``Cache Miss'' Cost} & \textbf{Latency} & \textbf{Work-First Benefit} \\
+\midrule
+L1 $\to$ L2 & CPU cache miss & $\sim$5 ns & Serial access pattern preserved \\
+L2 $\to$ DRAM & LLC miss & $\sim$100 ns & Depth-first reduces working set \\
+DRAM $\to$ GPU & PCIe/NVLink transfer & $\sim$1 $\mu$s & Prefetch on critical path only \\
+GPU $\to$ remote GPU & RDMA transfer & $\sim$1--5 $\mu$s & HOT tensors get dedicated QP \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At each level, the work-first principle says the same thing: optimize the common case (data is local) and accept higher overhead on the rare case (data must be fetched). The ratio of common-to-rare improves at each level because deeper transfers are more expensive, making the optimization more valuable.
+
+%=============================================================================
+\section{Implications for the Middleware}
+\label{sec:implications}
+%=============================================================================
+
+\subsection{Scheduling Policy Selection}
+
+SLAW's adaptive policy selection~\cite{guo2010slaw} suggests the WFA classifier should not use a single fixed strategy. Different tensor types benefit from different scheduling policies:
+
+\begin{table}[htbp]
+\centering
+\caption{Tensor type to scheduling policy mapping}
+\label{tab:policy}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Tensor Type} & \textbf{Access Pattern} & \textbf{Policy} & \textbf{Rationale} \\
+\midrule
+Attention KV (induction) & Sparse, long-range & Work-first & Critical path, cache-sensitive \\
+Attention KV (local) & Dense, sequential & Lane (static) & Predictable, NUMA-friendly \\
+MLP activations & Batch-uniform & Lane (static) & Homogeneous across tokens \\
+Gradient all-reduce & Bulk, periodic & Help-first & Distribute across all links \\
+Pipeline activations & Sequential, per-stage & Work-first & Depth-first minimizes bubbles \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{NUMA-Aware Buffer Placement}
+
+The NUMA-aware extensions to work-stealing have a direct analog in RDMA buffer placement. On our ConnectX-4 setup, the NIC is attached to a specific NUMA node. RDMA buffers should be allocated on the NIC's local NUMA node to avoid cross-socket penalties on the critical path~\cite{shiina2022continuation}.
+
+For the two-tower setup:
+\begin{itemize}
+    \item \textbf{Tower 1} (Windows, 5070 Ti): Single-socket, no NUMA concern. TCP/gRPC fallback means buffer placement affects PCIe locality only.
+    \item \textbf{Tower 2} (Linux, 2$\times$ V100): Multi-GPU with ConnectX-4. RDMA buffers must be on the NUMA node closest to the NIC. GPU tensors for GPUDirect RDMA must be on the GPU whose PCIe root port shares the NIC's NUMA domain.
+\end{itemize}
+
+\subsection{Space-Bounded Transfer Queues}
+
+The $O(S_1 \cdot P)$ space bound under continuation stealing motivates bounded RDMA transfer queues. Rather than allowing unbounded outstanding RDMA operations (which exhaust NIC send/receive queue entries), the middleware should:
+
+\begin{enumerate}
+    \item Maintain a fixed-depth queue per QP, sized proportionally to the pipeline depth.
+    \item Use back-pressure (completion polling) when the queue fills, rather than allocating more entries.
+    \item Prioritize draining the queue (completing in-flight transfers) over posting new operations---the work-first principle applied to the NIC itself.
+\end{enumerate}
+
+%=============================================================================
+\section{Quantitative Analysis}
+\label{sec:quantitative}
+%=============================================================================
+
+\subsection{Steal Frequency in Tensor Transport}
+
+From Equation~\ref{eq:workstealing}, the number of steals is $O(P \cdot T_\infty)$. For pipeline-parallel inference with $L$ layers distributed across $P$ nodes:
+
+\begin{equation}
+    T_\infty = L \cdot t_\text{layer} + (P-1) \cdot t_\text{transfer}
+\end{equation}
+
+With $L = 32$ layers, $P = 2$ nodes, $t_\text{layer} \approx 5$~ms, and $t_\text{transfer} \approx 0.5$~ms (12~KB activation at 100~Gbps), the transfer overhead is $<$3\% of the critical path. The work-first principle predicts that optimizing the 97\% (compute) matters far more than optimizing the 3\% (transfer coordination).
+
+However, the transfer latency is not the full cost. Each cross-node transfer incurs:
+
+\begin{itemize}
+    \item \textbf{Registration cost}: $\sim$10~$\mu$s for on-demand \texttt{ibv\_reg\_mr}. Pre-registration (HOT path) eliminates this.
+    \item \textbf{Cache pollution}: Incoming RDMA writes invalidate CPU cache lines. DMA-coherent buffers avoid this.
+    \item \textbf{Synchronization}: Completion notification adds $\sim$1~$\mu$s (polled) to $\sim$10~$\mu$s (event-driven). HOT path uses polling.
+\end{itemize}
+
+The total per-transfer overhead on the fast path (HOT, pre-registered, polled) is $\sim$2~$\mu$s. On the slow path (COLD, on-demand registration, event-driven) it is $\sim$25~$\mu$s. The 12$\times$ difference justifies the WFA classifier's resource allocation: dedicating QPs and pre-registered buffers to HOT tensors is the work-first principle in action.
+
+%=============================================================================
+\section{Connection to Prior Updates}
+\label{sec:connection}
+%=============================================================================
+
+\begin{table}[htbp]
+\centering
+\caption{Work-first concepts mapped to existing middleware components}
+\label{tab:connection}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{WFA Concept} & \textbf{Middleware Component} & \textbf{Update} \\
+\midrule
+Fast clone (zero overhead path) & HOT tensor: dedicated QP, polled & Update 10 \\
+Slow clone (coordination path) & COLD tensor: batched, compressed & Update 10 \\
+Adaptive policy selection (SLAW) & WFA classifier $\theta_1$/$\theta_2$ thresholds & Update 10 \\
+Depth-first cache locality & Prefetch FSM following access chains & Update 10 \\
+Composition-aware priority & Composition-weighted WFA & Update 11 \\
+NUMA-aware stealing & NIC-local buffer placement & Update 8 \\
+Space-bounded queues & Fixed-depth QP send queues & \texttt{transport.rs} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The WFA tensor classifier was designed empirically in Update~10 and given circuit-awareness in Update~11. This update provides the \textbf{theoretical foundation}: the hot/warm/cold classification is an instance of the work-first principle applied to a memory hierarchy that extends from CPU cache through GPU memory to RDMA network transfers. The thresholds $\theta_1$ and $\theta_2$ correspond to the boundary between ``common case'' (local, fast) and ``rare case'' (remote, slow) in the work-stealing framework.
+
+%=============================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+%=============================================================================
+
+The work-first principle provides a unifying framework for understanding the scheduling decisions in the RDMA middleware:
+
+\begin{enumerate}
+    \item \textbf{CPU scheduling}: Work-stealing with continuation stealing minimizes overhead on the serial path. The WFA classifier's HOT/WARM/COLD tiers implement the same principle for tensor transport---zero overhead on the critical compute path, higher overhead acceptable for non-critical transfers.
+
+    \item \textbf{Memory scheduling}: Depth-first execution under work-first preserves cache locality. The middleware's prefetch FSM follows the same principle---prefetch along the depth-first computation path (layer-by-layer pipeline), not breadth-first across all possible future accesses.
+
+    \item \textbf{Network scheduling}: The $O(S_1 \cdot P)$ space bound motivates bounded RDMA transfer queues. NUMA-aware work-stealing maps to NIC-local buffer placement. The steal frequency bound $O(P \cdot T_\infty)$ predicts that cross-node transfers are rare relative to local computation, justifying aggressive optimization of the local (fast) path.
+
+    \item \textbf{Adaptive policy}: SLAW's per-task policy selection validates the WFA classifier's per-tensor strategy assignment. Neither work-first nor help-first universally dominates; the classifier selects based on observed access patterns, just as SLAW selects based on locality hints.
+\end{enumerate}
+
+Fleury's lane model~\cite{fleury2025multicore} provides an alternative framing for the homogeneous-work case common in LLM inference: when all tokens in a batch undergo identical computation, static SPMD partitioning with barrier synchronization is simpler and equally efficient. The middleware should use lane-style scheduling within a pipeline stage (homogeneous token processing) and work-first stealing between stages (heterogeneous pipeline scheduling).
+
+\bibliographystyle{plain}
+\bibliography{update12}
+
+\end{document}
