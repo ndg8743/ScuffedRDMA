@@ -1,391 +1,313 @@
 \documentclass[11pt,letterpaper]{article}
+
 \usepackage[margin=1in]{geometry}
-\usepackage{graphicx}
-\usepackage{hyperref}
+\usepackage{setspace}
+\onehalfspacing
+
+\usepackage{microtype}
 \usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tabularx}
 \usepackage{xcolor}
+\usepackage{listings}
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red!70!black},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=5pt,
+}
+
 \usepackage{amsmath}
-\usepackage{amssymb}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning, calc, fit}
+\usepackage[hyphens]{url}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{cleveref}
+\usepackage[numbers,sort&compress]{natbib}
 
-\definecolor{codebg}{HTML}{F5F5F5}
-\definecolor{hot}{HTML}{EF4444}
-\definecolor{warm}{HTML}{F59E0B}
-\definecolor{cold}{HTML}{3B82F6}
+\title{
+    \vspace{-1cm}
+    \textbf{Update 12: USB4 RDMA Investigation} \\[0.5em]
+    \large SoftRoCE over USB4 Networking for Distributed LLM Workloads
+}
 
-\title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
-\large Update 12: Work-First Scheduling for Tensor Transport\\[0.3em]
-\normalsize From Cilk's Work-First Principle to RDMA-Aware Task Scheduling}
-\author{Nathan Gopee\\
-MS Computer Science, SUNY New Paltz\\
-Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\author{
+    Nathan Gopee \\
+    \textit{MS Computer Science Candidate} \\
+    SUNY New Paltz \\
+    \texttt{gopeen1@newpaltz.edu}
+}
+
 \date{February 2026}
 
 \begin{document}
+
 \maketitle
 
 \begin{abstract}
 \noindent
-This update examines the Work-First Algorithm (WFA) from its origins in Cilk's work-stealing scheduler through its implications for CPU scheduling, memory hierarchy management, and distributed tensor transport over RDMA. The work-first principle---minimize overhead on the serial execution path at the expense of the parallel coordination path---provides the theoretical grounding for the WFA tensor classifier introduced in Update~10. We connect Frigo, Leiserson, and Randall's continuation-stealing strategy to Ryan Fleury's lane-based multi-core model, analyze the memory scheduling consequences (cache locality, NUMA awareness, space bounds), and show how these ideas map onto RDMA transport decisions for distributed LLM inference.
+This update investigates the feasibility of RDMA communication over USB4 networking between the Phase~1 cluster nodes (Cerberus and Chimera). USB4 offers a 20~Gbps point-to-point link that could supplement or replace the current 2.5~GbE RDMA path. We present hardware reconnaissance, driver analysis, and a gap assessment that identifies the requirements for USB4 RDMA deployment.
 \end{abstract}
 
-\tableofcontents
-\newpage
+\section{Motivation}
 
-%=============================================================================
-\section{The Work-First Principle}
-\label{sec:principle}
-%=============================================================================
+Test~1 established SoftRoCE-based RDMA between Cerberus and Chimera over 2.5~GbE Realtek interfaces, achieving 0.91~Gbps via \texttt{ib\_write\_bw} and 111.86~MB/s via UCX \texttt{tag\_bw}. While sufficient for protocol validation, the 2.5~GbE bottleneck limits practical tensor transfer throughput to $\sim$38\% of even the Realtek's theoretical line rate.
 
-The work-first principle originates from Frigo, Leiserson, and Randall's implementation of Cilk-5~\cite{frigo1998cilk5}:
+USB4 offers a potential 20~Gbps point-to-point link---an 8$\times$ bandwidth improvement over the current 2.5~GbE path. If SoftRoCE can be layered over a USB4 network interface, the resulting RDMA channel could approach the throughput of the 10~GbE NICs (Intel X710, Aquantia AQC107) without requiring direct NIC-to-NIC cabling.
 
-\begin{quote}
-\emph{Minimize the scheduling overhead borne by the work of a computation. Concentrate on reducing overheads that contribute to $T_1$, even at the expense of overheads that contribute to $T_\infty$.}
-\end{quote}
+\section{USB4 Architecture Overview}
 
-The insight is counterintuitive. In a computation with work $T_1$ (total operations) and span $T_\infty$ (critical path length), the expected runtime on $P$ processors under work-stealing is:
-\begin{equation}
-    E[T_P] = \frac{T_1}{P} + O(T_\infty)
-    \label{eq:workstealing}
-\end{equation}
-
-The $T_1/P$ term dominates for well-parallelized programs. Shaving overhead from the common serial execution path yields greater returns than reducing the rare parallel-coordination overhead.
-
-\subsection{Two-Clone Compilation}
-
-Cilk-5 implements this via a two-clone compiler strategy~\cite{frigo1998cilk5}:
+USB4 is based on the Thunderbolt 3 protocol and provides:
 
 \begin{itemize}
-    \item \textbf{Fast clone}: Nearly identical to the serial C version. Executes in the common case where no stealing occurs. Spawn overhead is 2--6$\times$ the cost of a C function call.
-    \item \textbf{Slow clone}: Contains full parallel bookkeeping (deque management, frame setup). Executes only when work is actually stolen by another processor.
+    \item \textbf{Tunneling architecture}: USB4 encapsulates multiple protocols (USB 3.x, DisplayPort, PCIe) within a single physical link.
+    \item \textbf{IP networking}: The \texttt{thunderbolt-net} Linux kernel module creates a virtual Ethernet interface over the USB4/Thunderbolt tunnel, presenting a standard \texttt{thunderboltN} or \texttt{enpXsYuZuW} network device.
+    \item \textbf{High MTU}: The \texttt{thunderbolt-net} driver supports MTU up to 65,520 bytes, dramatically reducing per-packet overhead compared to standard 1500-byte Ethernet.
+    \item \textbf{Point-to-point}: USB4 networking is inherently point-to-point with no switching fabric, eliminating congestion from other traffic.
 \end{itemize}
 
-The runtime uses a Dijkstra-like mutual-exclusion protocol for the ready deque that avoids locks in the fast-clone path. The result: programs pay nearly zero overhead when running on a single core, and the scheduling machinery only activates on the rare steal path.
+The RDMA stack layering for USB4 is:
+\begin{center}
+\begin{tabular}{@{}cl@{}}
+\toprule
+\textbf{Layer} & \textbf{Component} \\
+\midrule
+5 & Application (UCX \texttt{perftest}, NCCL) \\
+4 & UCX / libibverbs \\
+3 & SoftRoCE (\texttt{rdma\_rxe}) \\
+2 & \texttt{thunderbolt-net} (virtual Ethernet) \\
+1 & USB4 tunnel manager \\
+0 & USB4 physical link (20 Gbps) \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-\subsection{Continuation Stealing vs.\ Child Stealing}
+\section{Hardware Reconnaissance}
 
-The work-first principle mandates \textbf{continuation stealing}. On a \texttt{spawn}, the spawning worker immediately executes the child (the ``work'') and pushes the continuation onto the deque for potential stealing. This contrasts with child stealing, where the child is enqueued and the parent continues.
+\subsection{Cerberus: USB4 Controller Present}
 
 \begin{table}[htbp]
 \centering
-\caption{Continuation stealing (work-first) vs.\ child stealing comparison}
-\label{tab:stealing}
-\begin{tabular}{@{}lll@{}}
+\caption{Cerberus USB4/Thunderbolt hardware}
+\label{tab:cerberus-usb4}
+\begin{tabular}{@{}ll@{}}
 \toprule
-\textbf{Property} & \textbf{Continuation Stealing} & \textbf{Child Stealing} \\
+\textbf{Property} & \textbf{Value} \\
 \midrule
-On spawn & Execute child, enqueue continuation & Enqueue child, continue parent \\
-Execution order & Depth-first (mimics serial) & Breadth-first divergence \\
-Space bound & $O(S_1 \cdot P)$ -- provably bounded & Unbounded in worst case \\
-Cache behavior & Preserves serial access pattern & Departs from serial locality \\
-Implementation & Requires compiler support & Works as a library \\
-Steal overhead & Higher (continuation is heavier) & Lower (child is lighter) \\
+Controller & ASMedia ASM4242 \\
+PCI ID & \texttt{1b21:2426} (host), \texttt{1b21:2425} (downstream) \\
+Kernel module & \texttt{thunderbolt} (loaded) \\
+Sysfs domain & \texttt{domain0}, device \texttt{0-0} \\
+USB4 device name & ASM4242 \\
+Kernel & 6.17.0-14-generic \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The space bound is critical: continuation stealing guarantees that $P$ processors use at most $P$ times the single-processor stack space~\cite{blumofe1999workstealing}. Child stealing provides no such guarantee---fork-heavy loops can grow work queues without bound.
+Cerberus has a fully functional USB4 controller. The \texttt{thunderbolt} kernel module loaded automatically, and the ASM4242 controller registered as \texttt{domain0} in \texttt{/sys/bus/thunderbolt/devices/}. The controller supports USB4 tunneling including IP networking via \texttt{thunderbolt-net}.
 
-%=============================================================================
-\section{CPU Scheduling: Work-Stealing Mechanics}
-\label{sec:cpu}
-%=============================================================================
-
-\subsection{The Blumofe-Leiserson Theorem}
-
-Blumofe and Leiserson~\cite{blumofe1999workstealing} proved that randomized work-stealing executes a fully strict computation in expected time satisfying Equation~\ref{eq:workstealing}. This is optimal to within a constant factor of the lower bound $\max(T_1/P, T_\infty)$.
-
-Each processor maintains a double-ended queue (deque) of ready tasks:
-
-\begin{enumerate}
-    \item A worker pushes and pops from the \textbf{bottom} of its own deque (depth-first, following serial order).
-    \item When idle, a worker becomes a \textbf{thief} and steals from the \textbf{top} of a randomly chosen victim's deque (oldest/shallowest tasks).
-    \item Stealing the shallowest task maximizes the amount of work obtained per steal, minimizing total steal count.
-\end{enumerate}
-
-The expected number of steals is $O(P \cdot T_\infty)$---proportional to the critical path, not the total work. Since $T_\infty \ll T_1$ for well-parallelized programs, steals are rare events. This is why the work-first principle pays off: the fast path (no steal) runs almost all the time.
-
-\subsection{Work-First vs.\ Help-First in Practice}
-
-Guo et al.~\cite{guo2009workfirst} formalized the distinction between work-first and help-first (breadth-first) policies for async-finish task parallelism. Their key finding: neither policy universally dominates.
-
-\begin{itemize}
-    \item \textbf{Work-first wins} for deep recursion with good temporal locality (e.g., divide-and-conquer, tree traversals).
-    \item \textbf{Help-first wins} for broad fork-join with many short-lived tasks where the continuation is cheaper than the child.
-\end{itemize}
-
-This motivated SLAW~\cite{guo2010slaw}, which selects the policy per-task at runtime based on locality hints---an adaptive approach that directly parallels our WFA tensor classifier selecting transport strategies per-tensor based on access patterns.
-
-%=============================================================================
-\section{Memory Scheduling: Cache and NUMA Implications}
-\label{sec:memory}
-%=============================================================================
-
-\subsection{Cache Miss Analysis}
-
-Acar, Blelloch, and Blumofe~\cite{acar2002locality} analyzed the parallel cache complexity under work-stealing:
-
-\begin{equation}
-    Q_P \leq Q_1 + O\!\left(\frac{P \cdot T_\infty \cdot M}{B}\right)
-    \label{eq:cachemiss}
-\end{equation}
-
-where $Q_1$ is the serial cache complexity, $M$ is cache size, and $B$ is cache line size. The additive term represents cache misses caused by steal operations disrupting locality---each steal can flush up to $M/B$ cache lines.
-
-The work-first principle minimizes this penalty because:
-
-\begin{enumerate}
-    \item \textbf{Depth-first execution preserves serial locality}. A worker follows the same memory access pattern as the serial program until a steal occurs.
-    \item \textbf{Steals are rare} ($O(P \cdot T_\infty)$ total). Each steal incurs a bounded cache disruption, but there are few of them.
-    \item \textbf{Stolen tasks are large}. Stealing the shallowest continuation yields the most work, amortizing the cache refill cost over more computation.
-\end{enumerate}
-
-However, the bound can be tight in adversarial cases. Acar et al.\ showed that a computation with $O(n)$ work and $O(1)$ cache misses on one processor can incur $\Omega(n)$ cache misses on just two processors when a steal destroys critical cache state.
-
-\subsection{NUMA-Aware Work-Stealing}
-
-Standard randomized work-stealing is \textbf{locality-oblivious}: a thief steals from a uniformly random victim regardless of NUMA topology. On modern multi-socket systems with non-uniform memory access costs, this causes unnecessary cross-socket traffic.
-
-SLAW~\cite{guo2010slaw} addresses this by grouping workers into ``places'' aligned with the NUMA topology. Workers preferentially steal from within their place (same socket, shared LLC) before attempting remote steals. The adaptive policy selection further reduces NUMA penalties: work-first policy keeps data close to the producer (good for intra-socket), while help-first distributes work across sockets when local queues are saturated.
-
-\subsection{Space Bounds and Stack Management}
-
-The $O(S_1 \cdot P)$ space bound under continuation stealing~\cite{blumofe1999workstealing} has a direct memory scheduling consequence: each processor's stack grows at the same rate as the serial execution. No processor accumulates unbounded pending work.
-
-Under child stealing, a parallel \texttt{for} loop spawning $n$ iterations immediately enqueues $n$ tasks, consuming $O(n)$ space regardless of $P$. This is why systems like Intel TBB and .NET's Task Parallel Library (which use child stealing) require work-limiting heuristics to avoid memory exhaustion---a scheduling concern that continuation stealing avoids by construction.
-
-%=============================================================================
-\section{Fleury's Lane Model: Multi-Core by Default}
-\label{sec:fleury}
-%=============================================================================
-
-Ryan Fleury~\cite{fleury2025multicore} proposes inverting the traditional parallelism model: instead of writing single-threaded code with special multi-core carve-outs, start with all $N$ cores executing the same entry function parameterized by thread index. Serial sections use \texttt{if(LaneIdx() == 0)}.
-
-This ``multi-core by default'' model resembles GPU shader programming more than traditional CPU threading. The key primitives:
-
-\begin{itemize}
-    \item \textbf{\texttt{LaneRange(count)}}: Uniformly distributes iteration ranges across threads, handling remainders.
-    \item \textbf{\texttt{LaneSync()}}: Barrier synchronization between threads in a group.
-    \item \textbf{\texttt{LaneSyncU64()}}: Broadcasts small values across threads for data sharing without persistent statics.
-\end{itemize}
-
-\subsection{Connection to Work-First Scheduling}
-
-Fleury's model is implicitly work-first: every core begins with work (the full program), and the distribution primitives (\texttt{LaneRange}) partition work uniformly without a steal mechanism. This works because:
-
-\begin{enumerate}
-    \item \textbf{Uniform work}: When tasks have similar cost, static partitioning matches work-stealing's steady state (where steals are rare because queues stay balanced).
-    \item \textbf{Variable work}: Fleury uses atomic counters for dynamic assignment---functionally equivalent to a centralized work queue, which converges to work-stealing behavior under contention.
-    \item \textbf{Few expensive tasks}: Requires algorithmic redesign (Fleury switched from comparison sort to radix sort). This parallels the work-first insight that reducing $T_1$ matters more than reducing coordination overhead.
-\end{enumerate}
-
-The model trades the generality of work-stealing (handles arbitrary task graphs) for simplicity (SPMD execution with barriers). For LLM inference, where the computation graph is known at compile time and tasks within a layer are homogeneous, this trade-off favors the lane model.
-
-\subsection{Memory Implications of the Lane Model}
-
-The lane model has favorable memory scheduling properties:
-
-\begin{itemize}
-    \item \textbf{No deque overhead}: No per-thread task queues to manage. Memory footprint is purely the thread stacks plus shared data.
-    \item \textbf{Predictable access patterns}: Each thread's data partition is known statically, enabling NUMA-aware allocation.
-    \item \textbf{Stack as thread-local storage}: Each thread's stack is available throughout execution, avoiding heap allocation for per-thread state.
-\end{itemize}
-
-These properties align with RDMA buffer management, where memory regions must be pre-registered with the NIC and pinned in physical memory. Predictable access patterns enable pre-registration of the exact memory regions each thread will touch.
-
-%=============================================================================
-\section{Mapping to RDMA Tensor Transport}
-\label{sec:rdma}
-%=============================================================================
-
-The work-first principle translates directly to distributed tensor transport decisions.
-
-\subsection{The Tensor Transport Analogy}
-
-In distributed LLM inference, the ``work'' is GPU computation on tensor data, and the ``coordination overhead'' is RDMA transfer between nodes. The work-first principle says: \emph{minimize overhead on the computation-critical path, even at the expense of the transfer coordination path}.
+\subsection{Chimera: USB 3.2 Only}
 
 \begin{table}[htbp]
 \centering
-\caption{Work-first principle mapped to tensor transport}
-\label{tab:analogy}
-\begin{tabular}{@{}lll@{}}
+\caption{Chimera USB controller hardware}
+\label{tab:chimera-usb4}
+\begin{tabular}{@{}ll@{}}
 \toprule
-\textbf{Cilk Concept} & \textbf{Tensor Transport Analog} & \textbf{Implementation} \\
+\textbf{Property} & \textbf{Value} \\
 \midrule
-Work ($T_1$) & GPU compute on tensors & Kernel execution time \\
-Span ($T_\infty$) & Longest pipeline stage & Critical-path layer \\
-Fast clone & HOT path: dedicated QP, polled & Zero-copy RDMA read \\
-Slow clone & COLD path: batched, compressed & Sparse-encoded bulk transfer \\
-Steal (rare event) & Cross-node transfer & RDMA send/recv \\
-Depth-first execution & Compute before transfer & Overlap compute with prefetch \\
-Deque (bottom = local) & Local GPU memory & No transfer needed \\
-Deque (top = stealable) & Registered RDMA buffers & Available for remote read \\
+Controller & ASMedia ASM3242 \\
+PCI ID & \texttt{1b21:3242} \\
+Protocol & USB 3.2 Gen 2$\times$2 (20 Gbps) \\
+Kernel driver & \texttt{xhci\_hcd} \\
+Thunderbolt & \textbf{Not detected} \\
+Motherboard & ASRock TRX40 Creator (TR 3960X) \\
+TB3 header & Present on board (unpopulated) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{WFA Classifier as Scheduling Policy}
+Chimera's ASM3242 is a USB 3.2 host controller---not USB4/Thunderbolt. The \texttt{thunderbolt} kernel module loaded without error but detected no devices in \texttt{/sys/bus/thunderbolt/devices/}. The ASRock TRX40 Creator motherboard has an onboard Thunderbolt 3 header (Intel Titan Ridge compatible), but this requires an add-in card (AIC) that is not currently installed.
 
-The WFA tensor classifier (Update~10) implements an adaptive scheduling policy analogous to SLAW~\cite{guo2010slaw}:
+\subsection{Protocol Mismatch Analysis}
 
-\begin{itemize}
-    \item \textbf{HOT tensors} ($\text{access\_count} > \theta_2$): Dedicated queue pair, polled completions, pinned memory. This is the ``fast clone''---minimal per-transfer overhead on the critical path.
-    \item \textbf{WARM tensors} ($\theta_1 < \text{access\_count} \leq \theta_2$): Shared queue pair, event-driven completions. Moderate overhead, balancing resource usage.
-    \item \textbf{COLD tensors} ($\text{access\_count} \leq \theta_1$): Batched transfers, compression enabled. This is the ``slow clone''---higher per-transfer overhead, but these tensors are off the critical path.
-\end{itemize}
-
-The classifier's idle timeout ($t_\text{idle}$) implements demotion: tensors that stop being accessed cool down from HOT to WARM to COLD, freeing dedicated resources. This mirrors how work-stealing reclaims idle processors---an idle worker becomes a thief rather than holding resources.
-
-\subsection{Continuation Stealing over RDMA}
-
-Shiina and Taura~\cite{shiina2022continuation} demonstrated distributed continuation stealing over MPI-3 RMA (one-sided RDMA operations). Their findings are directly relevant:
+USB4 networking via \texttt{thunderbolt-net} requires a Thunderbolt/USB4 tunnel between both endpoints. The tunnel negotiation fails when:
 
 \begin{enumerate}
-    \item \textbf{Continuation stealing outperformed child stealing} in distributed settings. The depth-first locality advantage of continuation stealing is amplified by the high cost of remote memory access over RDMA---each ``cache miss'' is now a network round trip.
-    \item \textbf{Space efficiency matters more over RDMA}. The $O(S_1 \cdot P)$ space bound prevents RDMA buffer exhaustion. Under child stealing, unbounded task queues translate to unbounded memory registration, which exhausts NIC resources.
-    \item \textbf{Uni-address thread management} reduces virtual memory consumption, making RDMA-based work-stealing feasible at scale.
+    \item The remote device does not have a USB4/Thunderbolt controller (current situation).
+    \item The cable does not support USB4 signaling (passive USB-C cables may lack Thunderbolt support).
+    \item The Thunderbolt security policy rejects the remote device (managed by the \texttt{bolt} daemon).
 \end{enumerate}
 
-\subsection{Cache Hierarchy $\to$ Memory Hierarchy $\to$ Network Hierarchy}
+In our case, condition (1) is the blocking issue: Cerberus has USB4 (ASM4242) but Chimera has only USB 3.2 (ASM3242). No Thunderbolt tunnel can be established, and therefore no \texttt{thunderbolt-net} interface will appear.
 
-The cache miss analysis from Section~\ref{sec:memory} extends across the full memory hierarchy:
+\section{Attempted Configuration}
+
+Despite the hardware mismatch, the following steps were attempted to verify the diagnosis:
+
+\begin{lstlisting}[language=bash,caption={USB4 networking setup attempt}]
+# Cerberus: Thunderbolt modules (already loaded)
+sudo modprobe thunderbolt
+sudo modprobe thunderbolt-net
+
+# Verify controller
+ls /sys/bus/thunderbolt/devices/
+# Output: 0-0  domain0  (local controller only)
+
+# Chimera: Thunderbolt modules loaded
+sudo modprobe thunderbolt
+sudo modprobe thunderbolt-net
+# Module loaded but: no devices in sysfs
+
+# Check for USB gadget alternative
+ls /sys/class/udc/
+# Empty -- no USB Device Controller available
+# Desktop xHCI controllers support host mode only
+
+# Attempted g_ncm (USB NCM gadget)
+sudo modprobe g_ncm
+# Module loaded but cannot bind without UDC
+\end{lstlisting}
+
+\paragraph{USB gadget networking.}
+An alternative approach---USB NCM/ECM gadget networking---was also investigated. This requires one machine to act as a USB device (gadget) via a USB Device Controller (UDC). Desktop machines with standard xHCI host controllers do not support gadget mode; OTG or device-capable USB controllers are required. The \texttt{dummy\_hcd} virtual UDC module was not available on kernel 6.17.0-14.
+
+\section{Expected Performance (Projected)}
+
+Based on USB4 20~Gbps specifications and SoftRoCE overhead characteristics:
 
 \begin{table}[htbp]
 \centering
-\caption{Work-first locality benefits across the memory hierarchy}
-\label{tab:hierarchy}
-\begin{tabular}{@{}llrl@{}}
+\caption{Projected USB4 RDMA performance vs.\ current 2.5~GbE baseline}
+\label{tab:usb4-projected}
+\begin{tabular}{@{}lrrl@{}}
 \toprule
-\textbf{Level} & \textbf{``Cache Miss'' Cost} & \textbf{Latency} & \textbf{Work-First Benefit} \\
+\textbf{Metric} & \textbf{2.5 GbE (actual)} & \textbf{USB4 20G (projected)} & \textbf{Improvement} \\
 \midrule
-L1 $\to$ L2 & CPU cache miss & $\sim$5 ns & Serial access pattern preserved \\
-L2 $\to$ DRAM & LLC miss & $\sim$100 ns & Depth-first reduces working set \\
-DRAM $\to$ GPU & PCIe/NVLink transfer & $\sim$1 $\mu$s & Prefetch on critical path only \\
-GPU $\to$ remote GPU & RDMA transfer & $\sim$1--5 $\mu$s & HOT tensors get dedicated QP \\
+Raw link rate & 2.5 Gbps & 20 Gbps & 8$\times$ \\
+\texttt{ib\_write\_bw} & 0.91 Gbps & 10--15 Gbps & 11--16$\times$ \\
+UCX \texttt{tag\_bw} (1 MB) & 0.89 Gbps & 8--12 Gbps & 9--13$\times$ \\
+Latency (1 byte) & $>$100 $\mu$s & 15--50 $\mu$s & 2--7$\times$ \\
+Max MTU & 1500 B & 65,520 B & 44$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-At each level, the work-first principle says the same thing: optimize the common case (data is local) and accept higher overhead on the rare case (data must be fetched). The ratio of common-to-rare improves at each level because deeper transfers are more expensive, making the optimization more valuable.
-
-%=============================================================================
-\section{Implications for the Middleware}
-\label{sec:implications}
-%=============================================================================
-
-\subsection{Scheduling Policy Selection}
-
-SLAW's adaptive policy selection~\cite{guo2010slaw} suggests the WFA classifier should not use a single fixed strategy. Different tensor types benefit from different scheduling policies:
-
-\begin{table}[htbp]
-\centering
-\caption{Tensor type to scheduling policy mapping}
-\label{tab:policy}
-\begin{tabular}{@{}llll@{}}
-\toprule
-\textbf{Tensor Type} & \textbf{Access Pattern} & \textbf{Policy} & \textbf{Rationale} \\
-\midrule
-Attention KV (induction) & Sparse, long-range & Work-first & Critical path, cache-sensitive \\
-Attention KV (local) & Dense, sequential & Lane (static) & Predictable, NUMA-friendly \\
-MLP activations & Batch-uniform & Lane (static) & Homogeneous across tokens \\
-Gradient all-reduce & Bulk, periodic & Help-first & Distribute across all links \\
-Pipeline activations & Sequential, per-stage & Work-first & Depth-first minimizes bubbles \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{NUMA-Aware Buffer Placement}
-
-The NUMA-aware extensions to work-stealing have a direct analog in RDMA buffer placement. On our ConnectX-4 setup, the NIC is attached to a specific NUMA node. RDMA buffers should be allocated on the NIC's local NUMA node to avoid cross-socket penalties on the critical path~\cite{shiina2022continuation}.
-
-For the two-tower setup:
+\paragraph{Key assumptions.}
 \begin{itemize}
-    \item \textbf{Tower 1} (Windows, 5070 Ti): Single-socket, no NUMA concern. TCP/gRPC fallback means buffer placement affects PCIe locality only.
-    \item \textbf{Tower 2} (Linux, 2$\times$ V100): Multi-GPU with ConnectX-4. RDMA buffers must be on the NUMA node closest to the NIC. GPU tensors for GPUDirect RDMA must be on the GPU whose PCIe root port shares the NIC's NUMA domain.
+    \item MTU 65,520 bytes reduces per-packet overhead by $\sim$44$\times$ compared to standard Ethernet, significantly benefiting large tensor transfers.
+    \item SoftRoCE CPU overhead remains the primary bottleneck; both machines have high-core-count CPUs (48 logical cores on Cerberus, 48 on Chimera) to absorb this.
+    \item The USB4 link is point-to-point with no competing traffic, unlike the shared 2.5~GbE LAN.
+    \item GPUDirect RDMA is not possible over SoftRoCE regardless of link speed; all transfers must transit system memory.
 \end{itemize}
 
-\subsection{Space-Bounded Transfer Queues}
+\section{Resolution Path}
 
-The $O(S_1 \cdot P)$ space bound under continuation stealing motivates bounded RDMA transfer queues. Rather than allowing unbounded outstanding RDMA operations (which exhaust NIC send/receive queue entries), the middleware should:
+\subsection{Option A: Thunderbolt 3 AIC for Chimera (Recommended)}
+
+The ASRock TRX40 Creator has a dedicated Thunderbolt 3 header. Installing a compatible Thunderbolt 3 Add-In Card (e.g., ASRock Thunderbolt 3 AIC R2.0 or GC-Titan Ridge) would:
 
 \begin{enumerate}
-    \item Maintain a fixed-depth queue per QP, sized proportionally to the pipeline depth.
-    \item Use back-pressure (completion polling) when the queue fills, rather than allocating more entries.
-    \item Prioritize draining the queue (completing in-flight transfers) over posting new operations---the work-first principle applied to the NIC itself.
+    \item Add an Intel Titan Ridge (JHL7540) Thunderbolt 3 controller to Chimera.
+    \item Enable USB4/Thunderbolt tunnel negotiation with Cerberus's ASM4242.
+    \item Create a \texttt{thunderbolt-net} interface on both machines.
+    \item Allow SoftRoCE to bind to the high-speed tunnel interface.
 \end{enumerate}
 
-%=============================================================================
-\section{Quantitative Analysis}
-\label{sec:quantitative}
-%=============================================================================
+\textbf{Estimated cost:} \$30--60 for a Thunderbolt 3 AIC.
 
-\subsection{Steal Frequency in Tensor Transport}
+\subsection{Option B: Direct 10 GbE Cabling}
 
-From Equation~\ref{eq:workstealing}, the number of steals is $O(P \cdot T_\infty)$. For pipeline-parallel inference with $L$ layers distributed across $P$ nodes:
-
-\begin{equation}
-    T_\infty = L \cdot t_\text{layer} + (P-1) \cdot t_\text{transfer}
-\end{equation}
-
-With $L = 32$ layers, $P = 2$ nodes, $t_\text{layer} \approx 5$~ms, and $t_\text{transfer} \approx 0.5$~ms (12~KB activation at 100~Gbps), the transfer overhead is $<$3\% of the critical path. The work-first principle predicts that optimizing the 97\% (compute) matters far more than optimizing the 3\% (transfer coordination).
-
-However, the transfer latency is not the full cost. Each cross-node transfer incurs:
+Both machines have 10~GbE NICs (Intel X710 on Cerberus, Aquantia AQC107 on Chimera). A direct DAC/SFP+ cable between them would provide:
 
 \begin{itemize}
-    \item \textbf{Registration cost}: $\sim$10~$\mu$s for on-demand \texttt{ibv\_reg\_mr}. Pre-registration (HOT path) eliminates this.
-    \item \textbf{Cache pollution}: Incoming RDMA writes invalidate CPU cache lines. DMA-coherent buffers avoid this.
-    \item \textbf{Synchronization}: Completion notification adds $\sim$1~$\mu$s (polled) to $\sim$10~$\mu$s (event-driven). HOT path uses polling.
+    \item 10~Gbps full-duplex bandwidth.
+    \item Native iWARP RDMA on the X710 side (Aquantia side still requires SoftRoCE).
+    \item No additional hardware purchase required if a 10GbE DAC cable is available.
 \end{itemize}
 
-The total per-transfer overhead on the fast path (HOT, pre-registered, polled) is $\sim$2~$\mu$s. On the slow path (COLD, on-demand registration, event-driven) it is $\sim$25~$\mu$s. The 12$\times$ difference justifies the WFA classifier's resource allocation: dedicating QPs and pre-registered buffers to HOT tensors is the work-first principle in action.
+\subsection{Option C: USB 3.2 Gadget Networking}
 
-%=============================================================================
-\section{Connection to Prior Updates}
-\label{sec:connection}
-%=============================================================================
+If a USB OTG-capable adapter or bridge cable is available, USB 3.2 Gen 2$\times$2 networking could provide 20~Gbps. However:
+\begin{itemize}
+    \item Requires either a USB bridge cable (e.g., Plugable USB3-TRAN) or USB OTG support.
+    \item Standard desktop USB controllers do not support gadget mode.
+    \item Performance would be limited by the USB 3.2 protocol overhead.
+\end{itemize}
 
-\begin{table}[htbp]
-\centering
-\caption{Work-first concepts mapped to existing middleware components}
-\label{tab:connection}
-\begin{tabular}{@{}lll@{}}
-\toprule
-\textbf{WFA Concept} & \textbf{Middleware Component} & \textbf{Update} \\
-\midrule
-Fast clone (zero overhead path) & HOT tensor: dedicated QP, polled & Update 10 \\
-Slow clone (coordination path) & COLD tensor: batched, compressed & Update 10 \\
-Adaptive policy selection (SLAW) & WFA classifier $\theta_1$/$\theta_2$ thresholds & Update 10 \\
-Depth-first cache locality & Prefetch FSM following access chains & Update 10 \\
-Composition-aware priority & Composition-weighted WFA & Update 11 \\
-NUMA-aware stealing & NIC-local buffer placement & Update 8 \\
-Space-bounded queues & Fixed-depth QP send queues & \texttt{transport.rs} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The WFA tensor classifier was designed empirically in Update~10 and given circuit-awareness in Update~11. This update provides the \textbf{theoretical foundation}: the hot/warm/cold classification is an instance of the work-first principle applied to a memory hierarchy that extends from CPU cache through GPU memory to RDMA network transfers. The thresholds $\theta_1$ and $\theta_2$ correspond to the boundary between ``common case'' (local, fast) and ``rare case'' (remote, slow) in the work-stealing framework.
-
-%=============================================================================
 \section{Conclusions}
-\label{sec:conclusions}
-%=============================================================================
-
-The work-first principle provides a unifying framework for understanding the scheduling decisions in the RDMA middleware:
 
 \begin{enumerate}
-    \item \textbf{CPU scheduling}: Work-stealing with continuation stealing minimizes overhead on the serial path. The WFA classifier's HOT/WARM/COLD tiers implement the same principle for tensor transport---zero overhead on the critical compute path, higher overhead acceptable for non-critical transfers.
+    \item \textbf{USB4 RDMA is architecturally sound}: SoftRoCE over \texttt{thunderbolt-net} is a valid approach that requires no kernel patches---only standard modules (\texttt{thunderbolt}, \texttt{thunderbolt-net}, \texttt{rdma\_rxe}).
 
-    \item \textbf{Memory scheduling}: Depth-first execution under work-first preserves cache locality. The middleware's prefetch FSM follows the same principle---prefetch along the depth-first computation path (layer-by-layer pipeline), not breadth-first across all possible future accesses.
+    \item \textbf{Hardware gap identified}: Chimera lacks a USB4/Thunderbolt controller. The ASM3242 USB 3.2 controller cannot establish Thunderbolt tunnels. The TRX40 Creator's onboard TB3 header provides a clear upgrade path via an inexpensive AIC.
 
-    \item \textbf{Network scheduling}: The $O(S_1 \cdot P)$ space bound motivates bounded RDMA transfer queues. NUMA-aware work-stealing maps to NIC-local buffer placement. The steal frequency bound $O(P \cdot T_\infty)$ predicts that cross-node transfers are rare relative to local computation, justifying aggressive optimization of the local (fast) path.
+    \item \textbf{Projected 8--16$\times$ improvement}: USB4 20~Gbps with MTU 65,520 should deliver 10--15~Gbps RDMA bandwidth, compared to 0.91~Gbps on the current 2.5~GbE path.
 
-    \item \textbf{Adaptive policy}: SLAW's per-task policy selection validates the WFA classifier's per-tensor strategy assignment. Neither work-first nor help-first universally dominates; the classifier selects based on observed access patterns, just as SLAW selects based on locality hints.
+    \item \textbf{Next step}: Acquire a Thunderbolt 3 AIC for Chimera, install it on the TRX40 Creator's TB3 header, then repeat the SoftRoCE/UCX test suite over the \texttt{thunderbolt-net} interface.
 \end{enumerate}
 
-Fleury's lane model~\cite{fleury2025multicore} provides an alternative framing for the homogeneous-work case common in LLM inference: when all tokens in a batch undergo identical computation, static SPMD partitioning with barrier synchronization is simpler and equally efficient. The middleware should use lane-style scheduling within a pipeline stage (homogeneous token processing) and work-first stealing between stages (heterogeneous pipeline scheduling).
+\section{Setup Script (For Future Deployment)}
+\label{sec:usb4-setup-script}
 
-\bibliographystyle{plain}
+The following script will configure USB4 RDMA once both endpoints have compatible controllers:
+
+\begin{lstlisting}[language=bash,caption={USB4 SoftRoCE setup script}]
+#!/bin/bash
+# usb4-rdma-setup.sh -- Run on BOTH machines
+set -e
+
+HOSTNAME=$(hostname)
+if [ "$HOSTNAME" = "cerberus" ]; then
+    MY_IP="10.10.10.1"; PEER_IP="10.10.10.2"
+elif [ "$HOSTNAME" = "chimera" ]; then
+    MY_IP="10.10.10.2"; PEER_IP="10.10.10.1"
+fi
+
+# Load modules
+sudo modprobe thunderbolt
+sudo modprobe thunderbolt-net
+sudo modprobe rdma_rxe
+
+# Authorize Thunderbolt device
+sudo apt install -y bolt
+for dev in $(boltctl list -a | grep -oP '[a-f0-9-]{36}'); do
+    boltctl enroll "$dev" --policy auto 2>/dev/null || true
+done
+
+# Find thunderbolt-net interface
+sleep 3
+TB_IFACE=""
+for iface in $(ls /sys/class/net/); do
+    driver=$(readlink -f /sys/class/net/$iface/device/driver \
+             2>/dev/null || echo "")
+    if echo "$driver" | grep -q "thunderbolt-net"; then
+        TB_IFACE=$iface; break
+    fi
+done
+[ -z "$TB_IFACE" ] && { echo "No TB interface"; exit 1; }
+
+# Configure network with max MTU
+sudo ip link set "$TB_IFACE" mtu 65520
+sudo ip addr flush dev "$TB_IFACE"
+sudo ip addr add "$MY_IP/24" dev "$TB_IFACE"
+sudo ip link set "$TB_IFACE" up
+
+# Add SoftRoCE
+sudo rdma link delete rxe0 2>/dev/null || true
+sudo rdma link add rxe0 type rxe netdev "$TB_IFACE"
+
+echo "Ready. Test: ping $PEER_IP"
+echo "RDMA:  ib_write_bw -d rxe0 --report_gbits $PEER_IP"
+echo "UCX:   UCX_NET_DEVICES=$TB_IFACE ucx_perftest $PEER_IP"
+\end{lstlisting}
+
 \bibliography{update12}
+\bibliographystyle{plainnat}
 
 \end{document}

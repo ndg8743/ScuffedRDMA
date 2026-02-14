@@ -1,170 +1,88 @@
-% Transformer Circuits Thread -- Core Papers
-@article{elhage2021framework,
-    title={A Mathematical Framework for Transformer Circuits},
-    author={Elhage, Nelson and Nanda, Neel and Olsson, Catherine and Henighan, Tom and Joseph, Nicholas and Mann, Ben and Askell, Amanda and Bai, Yuntao and Chen, Anna and Conerly, Tom and DasSarma, Nova and Drain, Dawn and Ganguli, Deep and Hatfield-Dodds, Zac and Hernandez, Danny and Jones, Andy and Kernion, Jackson and Lovitt, Liane and Ndousse, Kamal and Amodei, Dario and Brown, Tom and Clark, Jack and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
-    journal={Transformer Circuits Thread},
-    year={2021},
-    url={https://transformer-circuits.pub/2021/framework/index.html}
+% Work-First Algorithm -- Original Cilk Papers
+@inproceedings{frigo1998cilk5,
+    title={The Implementation of the {Cilk-5} Multithreaded Language},
+    author={Frigo, Matteo and Leiserson, Charles E. and Randall, Keith H.},
+    booktitle={ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI)},
+    pages={212--223},
+    year={1998},
+    url={https://dl.acm.org/doi/10.1145/277652.277725}
 }
 
-@article{olsson2022induction,
-    title={In-context Learning and Induction Heads},
-    author={Olsson, Catherine and Elhage, Nelson and Nanda, Neel and Joseph, Nicholas and DasSarma, Nova and Henighan, Tom and Mann, Ben and Askell, Amanda and Bai, Yuntao and Chen, Anna and Conerly, Tom and Drain, Dawn and Ganguli, Deep and Hatfield-Dodds, Zac and Hernandez, Danny and Johnston, Scott and Jones, Andy and Kernion, Jackson and Lovitt, Liane and Ndousse, Kamal and Amodei, Dario and Brown, Tom and Clark, Jack and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
-    journal={Transformer Circuits Thread},
+@article{blumofe1999workstealing,
+    title={Scheduling Multithreaded Computations by Work Stealing},
+    author={Blumofe, Robert D. and Leiserson, Charles E.},
+    journal={Journal of the ACM},
+    volume={46},
+    number={5},
+    pages={720--748},
+    year={1999},
+    url={https://dl.acm.org/doi/10.1145/324133.324234}
+}
+
+% Work-First vs Help-First
+@inproceedings{guo2009workfirst,
+    title={Work-First and Help-First Scheduling Policies for Async-Finish Task Parallelism},
+    author={Guo, Yi and Barik, Rajkishore and Raman, Raghavan and Sarkar, Vivek},
+    booktitle={IEEE International Parallel and Distributed Processing Symposium (IPDPS)},
+    year={2009},
+    url={https://ieeexplore.ieee.org/document/5161079}
+}
+
+% SLAW -- Adaptive Locality-Aware Work-Stealing
+@inproceedings{guo2010slaw,
+    title={{SLAW}: A Scalable Locality-Aware Adaptive Work-Stealing Scheduler},
+    author={Guo, Yi and Zhao, Jisheng and Cave, Vincent and Sarkar, Vivek},
+    booktitle={IEEE International Parallel and Distributed Processing Symposium (IPDPS)},
+    year={2010},
+    url={https://www.cs.rice.edu/~vs3/PDF/Guo-et-al-IPDPS-2010.pdf}
+}
+
+% Cache Miss Analysis of Work-Stealing
+@article{acar2002locality,
+    title={The Data Locality of Work Stealing},
+    author={Acar, Umut A. and Blelloch, Guy E. and Blumofe, Robert D.},
+    journal={Theory of Computing Systems},
+    volume={35},
+    number={3},
+    pages={321--347},
+    year={2002},
+    url={https://dl.acm.org/doi/10.1145/341800.341801}
+}
+
+% Distributed Continuation Stealing over RDMA
+@inproceedings{shiina2022continuation,
+    title={Distributed Continuation Stealing is More Scalable than You Might Think},
+    author={Shiina, Shumpei and Taura, Kenjiro},
+    booktitle={IEEE International Conference on Cluster Computing (Cluster)},
     year={2022},
-    url={https://transformer-circuits.pub/2022/in-context-learning-and-induction-heads/index.html}
+    url={https://ieeexplore.ieee.org/document/9912701/}
 }
 
-@article{elhage2022superposition,
-    title={Toy Models of Superposition},
-    author={Elhage, Nelson and Henighan, Tristan and Kravec, Shauna and Hatfield-Dodds, Zac and Lasenby, Robert and Song, Dawn and Mukobi, Gabe and Hume, Tom and Brown, Tom and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
-    journal={Transformer Circuits Thread},
-    year={2022},
-    url={https://transformer-circuits.pub/2022/toy_model/index.html}
+% Fast Distributed DL over RDMA
+@inproceedings{xue2019fast,
+    title={Fast Distributed Deep Learning over {RDMA}},
+    author={Xue, Jilong and others},
+    booktitle={European Conference on Computer Systems (EuroSys)},
+    year={2019},
+    url={https://dl.acm.org/doi/abs/10.1145/3302424.3303975}
 }
 
-@article{bricken2023monosemantic,
-    title={Towards Monosemanticity: Decomposing Language Models With Dictionary Learning},
-    author={Bricken, Trenton and Templeton, Adly and Batson, Joshua and Chen, Brian and Jermyn, Adam and Conerly, Tom and Turner, Nick and Carter, Shan and Olah, Chris},
-    journal={Transformer Circuits Thread},
-    year={2023},
-    url={https://transformer-circuits.pub/2023/monosemantic-features/index.html}
-}
-
-@article{templeton2024scaling,
-    title={Scaling Monosemanticity: Extracting Interpretable Features from {Claude} 3 {Sonnet}},
-    author={Templeton, Adly and Conerly, Tom and Marcus, Jonathan and Lindsey, Jack and Bricken, Trenton and Chen, Brian and Pearce, Adam and Citro, Craig and Ameisen, Emmanuel and Jones, Andy and Cunningham, Hoagy and Turner, Nicholas L and McDougall, Callum and MacDiarmid, Monte and Tamkin, Alex and Durmus, Esin and Hume, Tristan and Mosconi, Francesco and Freeman, C. Daniel and Sumers, Theodore R. and Rees, Edward and Batson, Joshua and Jermyn, Adam and Carter, Shan and Olah, Chris and Henighan, Tom},
-    journal={Transformer Circuits Thread},
-    year={2024},
-    url={https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html}
-}
-
-% Circuit Tracing and Biology (2025)
-@article{lindsey2025biology,
-    title={On the Biology of a Large Language Model},
-    author={Lindsey, Jack and Gurnee, Wes and Ameisen, Emmanuel and others},
-    journal={Transformer Circuits Thread},
+% Fleury -- Multi-Core by Default
+@online{fleury2025multicore,
+    title={Multi-Core by Default},
+    author={Fleury, Ryan},
     year={2025},
-    url={https://transformer-circuits.pub/2025/attribution-graphs/biology.html}
+    url={https://www.rfleury.com/p/multi-core-by-default}
 }
 
-@article{ameisen2025tracing,
-    title={Circuit Tracing: Revealing Computational Graphs in Language Models},
-    author={Ameisen, Emmanuel and Lindsey, Jack and Pearce, Adam and Gurnee, Wes and Turner, Nicholas L and Chen, Brian and Citro, Craig and others},
-    journal={Transformer Circuits Thread},
-    year={2025},
-    url={https://transformer-circuits.pub/2025/attribution-graphs/methods.html}
-}
-
-% Attention and Features (2025)
-@article{kamath2025attention,
-    title={Tracing Attention Computation Through Feature Interactions},
-    author={Kamath, Usha and others},
-    journal={Transformer Circuits Thread},
-    year={2025},
-    url={https://transformer-circuits.pub/2025/attention-qk/index.html}
-}
-
-@article{lindsey2025introspection,
-    title={Emergent Introspective Awareness in Large Language Models},
-    author={Lindsey, Jack},
-    journal={Transformer Circuits Thread},
-    year={2025},
-    url={https://transformer-circuits.pub/2025/introspection/index.html}
-}
-
-% Crosscoders and Model Diffing
-@article{anthropic2024crosscoders,
-    title={Sparse Crosscoders for Cross-Layer Features and Model Diffing},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2024},
-    url={https://transformer-circuits.pub/2024/crosscoders/index.html}
-}
-
-@article{anthropic2024modeldiffing,
-    title={Stage-Wise Model Diffing},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2024},
-    url={https://transformer-circuits.pub/2024/model-diffing/index.html}
-}
-
-% Composition and Superposition
-@article{anthropic2023composition,
-    title={Distributed Representations: Composition and Superposition},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2023},
-    url={https://transformer-circuits.pub/2023/superposition-composition/index.html}
-}
-
-@article{anthropic2023privileged,
-    title={Privileged Bases in the Transformer Residual Stream},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2023},
-    url={https://transformer-circuits.pub/2023/privileged-basis/index.html}
-}
-
-% MOLT and Faithfulness (2025)
-@article{anthropic2025molt,
-    title={Sparse Mixtures of Linear Transforms},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2025},
-    url={https://transformer-circuits.pub/2025/bulk-update/index.html}
-}
-
-@article{anthropic2025faithfulness,
-    title={A Toy Model of Mechanistic (Un)Faithfulness},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2025},
-    url={https://transformer-circuits.pub/2025/faithfulness-toy-model/index.html}
-}
-
-@article{gurnee2025manifolds,
-    title={When Models Manipulate Manifolds: The Geometry of a Counting Task},
-    author={Gurnee, Wes and others},
-    journal={Transformer Circuits Thread},
-    year={2025},
-    url={https://transformer-circuits.pub/2025/linebreaks/index.html}
-}
-
-@article{anthropic2025interference,
-    title={A Toy Model of Interference Weights},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2025},
-    url={https://transformer-circuits.pub/2025/interference-weights/index.html}
-}
-
-% Features as Classifiers
-@article{anthropic2024classifiers,
-    title={Using Dictionary Learning Features as Classifiers},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2024},
-    url={https://transformer-circuits.pub/2024/features-as-classifiers/index.html}
-}
-
-% SoLU
-@article{anthropic2022solu,
-    title={Softmax Linear Units},
-    author={{Anthropic}},
-    journal={Transformer Circuits Thread},
-    year={2022},
-    url={https://transformer-circuits.pub/2022/solu/index.html}
-}
-
-% Original Distill Circuits
-@article{olah2020circuits,
-    title={Zoom In: An Introduction to Circuits},
-    author={Olah, Chris and Cammarata, Nick and Schubert, Ludwig and Goh, Gabriel and Petrov, Michael and Carter, Shan},
-    journal={Distill},
-    year={2020},
-    url={https://distill.pub/2020/circuits/zoom-in/}
+% Frigo PhD Thesis
+@phdthesis{frigo1999portable,
+    title={Portable High-Performance Programs},
+    author={Frigo, Matteo},
+    school={Massachusetts Institute of Technology},
+    year={1999},
+    note={MIT-LCS-TR-785},
+    url={https://dspace.mit.edu/bitstream/handle/1721.1/149898/MIT-LCS-TR-785.pdf}
 }
 
 % Existing thesis references

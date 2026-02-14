@@ -1,91 +1,40 @@
-% Work-First Algorithm -- Original Cilk Papers
-@inproceedings{frigo1998cilk5,
-    title={The Implementation of the {Cilk-5} Multithreaded Language},
-    author={Frigo, Matteo and Leiserson, Charles E. and Randall, Keith H.},
-    booktitle={ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI)},
-    pages={212--223},
-    year={1998},
-    url={https://dl.acm.org/doi/10.1145/277652.277725}
-}
+% USB4 and Thunderbolt References
 
-@article{blumofe1999workstealing,
-    title={Scheduling Multithreaded Computations by Work Stealing},
-    author={Blumofe, Robert D. and Leiserson, Charles E.},
-    journal={Journal of the ACM},
-    volume={46},
-    number={5},
-    pages={720--748},
-    year={1999},
-    url={https://dl.acm.org/doi/10.1145/324133.324234}
-}
-
-% Work-First vs Help-First
-@inproceedings{guo2009workfirst,
-    title={Work-First and Help-First Scheduling Policies for Async-Finish Task Parallelism},
-    author={Guo, Yi and Barik, Rajkishore and Raman, Raghavan and Sarkar, Vivek},
-    booktitle={IEEE International Parallel and Distributed Processing Symposium (IPDPS)},
-    year={2009},
-    url={https://ieeexplore.ieee.org/document/5161079}
-}
-
-% SLAW -- Adaptive Locality-Aware Work-Stealing
-@inproceedings{guo2010slaw,
-    title={{SLAW}: A Scalable Locality-Aware Adaptive Work-Stealing Scheduler},
-    author={Guo, Yi and Zhao, Jisheng and Cave, Vincent and Sarkar, Vivek},
-    booktitle={IEEE International Parallel and Distributed Processing Symposium (IPDPS)},
-    year={2010},
-    url={https://www.cs.rice.edu/~vs3/PDF/Guo-et-al-IPDPS-2010.pdf}
-}
-
-% Cache Miss Analysis of Work-Stealing
-@article{acar2002locality,
-    title={The Data Locality of Work Stealing},
-    author={Acar, Umut A. and Blelloch, Guy E. and Blumofe, Robert D.},
-    journal={Theory of Computing Systems},
-    volume={35},
-    number={3},
-    pages={321--347},
-    year={2002},
-    url={https://dl.acm.org/doi/10.1145/341800.341801}
-}
-
-% Distributed Continuation Stealing over RDMA
-@inproceedings{shiina2022continuation,
-    title={Distributed Continuation Stealing is More Scalable than You Might Think},
-    author={Shiina, Shumpei and Taura, Kenjiro},
-    booktitle={IEEE International Conference on Cluster Computing (Cluster)},
-    year={2022},
-    url={https://ieeexplore.ieee.org/document/9912701/}
-}
-
-% Fast Distributed DL over RDMA
-@inproceedings{xue2019fast,
-    title={Fast Distributed Deep Learning over {RDMA}},
-    author={Xue, Jilong and others},
-    booktitle={European Conference on Computer Systems (EuroSys)},
+@misc{usb4-spec,
+    title={Universal Serial Bus 4 (USB4) Specification},
+    author={{USB Implementers Forum}},
     year={2019},
-    url={https://dl.acm.org/doi/abs/10.1145/3302424.3303975}
+    url={https://www.usb.org/document-library/usb4-specification}
 }
 
-% Fleury -- Multi-Core by Default
-@online{fleury2025multicore,
-    title={Multi-Core by Default},
-    author={Fleury, Ryan},
-    year={2025},
-    url={https://www.rfleury.com/p/multi-core-by-default}
+@misc{thunderbolt-kernel,
+    title={Thunderbolt/USB4 in the Linux Kernel},
+    author={{Linux Kernel Documentation}},
+    year={2024},
+    url={https://docs.kernel.org/admin-guide/thunderbolt.html}
 }
 
-% Frigo PhD Thesis
-@phdthesis{frigo1999portable,
-    title={Portable High-Performance Programs},
-    author={Frigo, Matteo},
-    school={Massachusetts Institute of Technology},
-    year={1999},
-    note={MIT-LCS-TR-785},
-    url={https://dspace.mit.edu/bitstream/handle/1721.1/149898/MIT-LCS-TR-785.pdf}
+@misc{rdma-rxe-kernel,
+    title={Soft-RoCE (RXE) Driver Documentation},
+    author={{Linux Kernel Documentation}},
+    year={2024},
+    url={https://docs.kernel.org/infiniband/rxe.html}
 }
 
-% Existing thesis references
+@misc{ucx,
+    title={Unified Communication X (UCX)},
+    author={{UCX Consortium}},
+    year={2024},
+    url={https://openucx.org/}
+}
+
+@misc{bolt-daemon,
+    title={Bolt: Thunderbolt Device Manager},
+    author={{GNOME Project}},
+    year={2024},
+    url={https://gitlab.freedesktop.org/bolt/bolt}
+}
+
 @misc{scuffedrdma-repo,
     title={ScuffedRDMA: Adaptive RDMA Optimization for Distributed LLM Workloads},
     author={Gopee, Nathan},

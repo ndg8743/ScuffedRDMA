@@ -1,796 +1,176 @@
-% =============================================================================
-% Update 10: Unified Bibliography
-% Adaptive RDMA Optimization for Distributed LLM Workloads
-% ~60 entries: Update 8 base + Updates 2-7 inline + new preamble citations
-% =============================================================================
-
-% ---- NLP Foundations (Section 1) ----
-
-@article{mikolov2013word2vec,
-  author    = {Mikolov, T. and Chen, K. and Corrado, G. and Dean, J.},
-  title     = {Efficient Estimation of Word Representations in Vector Space},
-  journal   = {arXiv preprint arXiv:1301.3781},
-  year      = {2013},
-}
-
-@inproceedings{pennington2014glove,
-  author    = {Pennington, J. and Socher, R. and Manning, C. D.},
-  title     = {{GloVe}: Global Vectors for Word Representation},
-  booktitle = {Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
-  year      = {2014},
-  pages     = {1532--1543},
-}
-
-@inproceedings{sutskever2014sequence,
-  author    = {Sutskever, I. and Vinyals, O. and Le, Q. V.},
-  title     = {Sequence to Sequence Learning with Neural Networks},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2014},
-}
-
-@article{bahdanau2014attention,
-  author    = {Bahdanau, D. and Cho, K. and Bengio, Y.},
-  title     = {Neural Machine Translation by Jointly Learning to Align and Translate},
-  journal   = {arXiv preprint arXiv:1409.0473},
-  year      = {2014},
-}
-
-% ---- Transformer Architecture (Section 2) ----
-
-@inproceedings{vaswani2017attention,
-  author    = {Vaswani, A. and Shazeer, N. and Parmar, N. and Uszkoreit, J. and Jones, L. and Gomez, A. N. and Kaiser, \L. and Polosukhin, I.},
-  title     = {Attention Is All You Need},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2017},
-}
-
-@article{dao2022flashattention,
-  author    = {Dao, T. and Fu, D. Y. and Ermon, S. and Rudra, A. and R\'{e}, C.},
-  title     = {{FlashAttention}: Fast and Memory-Efficient Exact Attention with {IO}-Awareness},
-  journal   = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2022},
-}
-
-@article{dao2023flashattention2,
-  author    = {Dao, T.},
-  title     = {{FlashAttention-2}: Faster Attention with Better Parallelism and Work Partitioning},
-  journal   = {arXiv preprint arXiv:2307.08691},
-  year      = {2023},
-}
-
-@article{shah2024flashattention3,
-  author    = {Shah, J. and Bikshandi, G. and Zhang, Y. and Thakkar, V. and Ramani, P. and Dao, T.},
-  title     = {{FlashAttention-3}: Fast and Accurate Attention with Asynchrony and Low-Precision},
-  journal   = {arXiv preprint arXiv:2407.08608},
-  year      = {2024},
-}
-
-@article{kwon2023pagedattention,
-  author    = {Kwon, W. and Li, Z. and Zhuang, S. and Sheng, Y. and Zheng, L. and Yu, C. H. and Gonzalez, J. E. and Zhang, H. and Stoica, I.},
-  title     = {Efficient Memory Management for Large Language Model Serving with {PagedAttention}},
-  journal   = {Proceedings of the 29th ACM Symposium on Operating Systems Principles (SOSP)},
-  year      = {2023},
-}
-
-% ---- Scheduling, Scaling, and MoE (Section 3) ----
-
-@article{zhong2025quantum,
-  author    = {Zhong, Z. and others},
-  title     = {Efficient Quantum Circuit Scheduling with Batch-Buffered Overlap and Dependency-Aware Contraction},
-  journal   = {arXiv preprint arXiv:2509.04955},
-  year      = {2025},
-}
-
-@article{gpu-scheduling-survey,
-  author    = {Chab, R. and Li, F. and Setia, S.},
-  title     = {Algorithmic Techniques for {GPU} Scheduling: A Comprehensive Survey},
-  journal   = {Algorithms},
-  volume    = {18},
-  number    = {7},
-  pages     = {385},
-  year      = {2025},
-  doi       = {10.3390/a18070385},
-}
-
-@inproceedings{tiresias2019,
-  author    = {Gu, J. and Chowdhury, M. and Shin, K. G. and Zhu, Y. and Jeon, M. and Qian, J. and Liu, H. and Guo, C.},
-  title     = {Tiresias: A {GPU} Cluster Manager for Distributed Deep Learning},
-  booktitle = {Proceedings of the 16th USENIX Symposium on Networked Systems Design and Implementation (NSDI)},
-  year      = {2019},
-  pages     = {485--500},
-}
-
-@inproceedings{gavel2020,
-  author    = {Narayanan, D. and Santhanam, K. and Kazhamiaka, F. and Phanishayee, A. and Zaharia, M.},
-  title     = {Heterogeneity-Aware Cluster Scheduling Policies for Deep Learning Workloads},
-  booktitle = {Proceedings of the 14th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
-  year      = {2020},
-  pages     = {481--498},
-}
-
-@inproceedings{gandiva2018,
-  author    = {Xiao, W. and Bhardwaj, R. and Ramjee, R. and Sivathanu, M. and Kwatra, N. and Han, Z. and Patel, P. and Peng, X. and Zhao, H. and Zhang, Q. and others},
-  title     = {Gandiva: Introspective Cluster Scheduling for Deep Learning},
-  booktitle = {Proceedings of the 13th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
-  year      = {2018},
-  pages     = {595--610},
-}
-
-@inproceedings{deeprm2016,
-  author    = {Mao, H. and Alizadeh, M. and Menache, I. and Kandula, S.},
-  title     = {Resource Management with Deep Reinforcement Learning},
-  booktitle = {Proceedings of the 15th ACM Workshop on Hot Topics in Networks},
-  year      = {2016},
-  pages     = {50--56},
-}
-
-@inproceedings{decima2019,
-  author    = {Mao, H. and Schwarzkopf, M. and Venkatakrishnan, S. B. and Meng, Z. and Alizadeh, M.},
-  title     = {Learning Scheduling Algorithms for Data Processing Clusters},
-  booktitle = {Proceedings of ACM SIGCOMM},
-  year      = {2019},
-}
-
-@inproceedings{themis2020,
-  author    = {Mahajan, K. and Balasubramanian, A. and Singhvi, A. and Venkataraman, S. and Akella, A. and Phanishayee, A. and Chawla, S.},
-  title     = {Themis: Fair and Efficient {GPU} Cluster Scheduling},
-  booktitle = {Proceedings of the 17th USENIX Symposium on Networked Systems Design and Implementation (NSDI)},
-  year      = {2020},
-  pages     = {289--304},
-}
-
-@inproceedings{pollux2021,
-  author    = {Qiao, A. and Choe, S. K. and Subramanya, S. J. and Neiswanger, W. and Ho, Q. and Zhang, H. and Ganger, G. R. and Xing, E. P.},
-  title     = {Pollux: Co-Adaptive Cluster Scheduling for Goodput-Optimized Deep Learning},
-  booktitle = {Proceedings of the 15th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
-  year      = {2021},
-}
-
-@article{kaplan2020scaling,
-  author    = {Kaplan, J. and McCandlish, S. and Henighan, T. and Brown, T. B. and Chess, B. and Child, R. and Gray, S. and Radford, A. and Wu, J. and Amodei, D.},
-  title     = {Scaling Laws for Neural Language Models},
-  journal   = {arXiv preprint arXiv:2001.08361},
-  year      = {2020},
-}
-
-@article{hoffmann2022chinchilla,
-  author    = {Hoffmann, J. and Borgeaud, S. and Mensch, A. and Buchatskaya, E. and Cai, T. and Rutherford, E. and de Las Casas, D. and Hendricks, L. A. and Welbl, J. and Clark, A. and others},
-  title     = {Training Compute-Optimal Large Language Models},
-  journal   = {arXiv preprint arXiv:2203.15556},
-  year      = {2022},
-}
-
-@article{fedus2021switch,
-  author    = {Fedus, W. and Zoph, B. and Shazeer, N.},
-  title     = {Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity},
-  journal   = {Journal of Machine Learning Research},
-  volume    = {23},
-  number    = {120},
-  pages     = {1--39},
-  year      = {2022},
-}
-
-@article{lepikhin2020gshard,
-  author    = {Lepikhin, D. and Lee, H. and Xu, Y. and Chen, D. and Firat, O. and Huang, Y. and Krikun, M. and Shazeer, N. and Chen, Z.},
-  title     = {{GShard}: Scaling Giant Models with Conditional Computation and Automatic Sharding},
-  journal   = {arXiv preprint arXiv:2006.16668},
-  year      = {2020},
-}
-
-% ---- RDMA and Communication (Section 4 + existing) ----
-
-@article{infiniband-rdma,
-  author    = {Pfister, G. F.},
-  title     = {An Introduction to the {InfiniBand} Architecture},
-  journal   = {High Performance Mass Storage and Parallel I/O},
-  year      = {2001},
-  publisher = {IEEE Press},
-}
-
-@misc{nccl,
-  author       = {NVIDIA},
-  title        = {{NCCL}: {NVIDIA} Collective Communications Library},
-  year         = {2024},
-  howpublished = {\url{https://github.com/NVIDIA/nccl}},
-}
-
-@misc{ucx,
-  author       = {{OpenUCX Consortium}},
-  title        = {{UCX}: Unified Communication {X}},
-  year         = {2024},
-  howpublished = {\url{https://github.com/openucx/ucx}},
-}
-
-@misc{ucc,
-  author       = {{OpenUCX Consortium}},
-  title        = {{UCC}: Unified Collective Communication},
-  year         = {2024},
-  howpublished = {\url{https://github.com/openucx/ucc}},
-}
-
-@misc{gdrcopy,
-  author       = {NVIDIA},
-  title        = {{GDRCopy}: A Low-Latency {GPU} Memory Copy Library},
-  year         = {2024},
-  howpublished = {\url{https://github.com/NVIDIA/gdrcopy}},
-}
-
-@misc{nixl,
-  author       = {NVIDIA},
-  title        = {{NIXL}: {NVIDIA} Inference Xfer Library},
-  year         = {2025},
-  howpublished = {\url{https://github.com/NVIDIA/nixl}},
-}
-
-@misc{hpcx,
-  author       = {NVIDIA},
-  title        = {{HPC-X} v2.15 Documentation},
-  year         = {2024},
-  howpublished = {\url{https://docs.nvidia.com/networking/display/hpcxv215}},
-}
-
-@misc{gpudirect-rdma-redhat,
-  author       = {{Red Hat}},
-  title        = {{GPUDirect RDMA} on {OpenShift AI}: Enabling Remote {GPU} Memory Access for Accelerated Computing},
-  year         = {2024},
-  howpublished = {\url{https://www.redhat.com/en/blog/gpudirect-rdma-openshift-ai-enabling-remote-gpu-memory-access-for-accelerated-computing}},
-}
-
-@misc{uec2025,
-  title        = {{Ultra Ethernet Consortium} 1.0 Specification},
-  author       = {{Ultra Ethernet Consortium}},
-  year         = {2025},
-  howpublished = {\url{https://ultraethernet.org/}},
-}
-
-@misc{ocp-falcon,
-  author       = {{Open Compute Project}},
-  title        = {{OCP} Falcon Networking Specification},
-  year         = {2025},
-  howpublished = {\url{https://github.com/opencomputeproject/OCP-NET-Falcon}},
-}
-
-@misc{rdma-core,
-  author       = {{Linux RDMA}},
-  title        = {rdma-core Documentation},
-  year         = {2024},
-  howpublished = {\url{https://github.com/linux-rdma/rdma-core}},
-}
-
-@misc{mofed-docs,
-  author       = {{Mellanox Technologies}},
-  title        = {{NVIDIA} {MLNX\_OFED} Documentation},
-  year         = {2024},
-  howpublished = {\url{https://docs.nvidia.com/networking/display/MLNXOFEDv24010331/}},
-}
-
-@misc{ttpoe-repo,
-  author       = {{Tesla, Inc.}},
-  title        = {{TTPoe}: Time-Triggered Protocol over Ethernet},
-  year         = {2024},
-  howpublished = {\url{https://github.com/teslamotors/ttpoe}},
-}
-
-@misc{ttpoe-hotchips,
-  author       = {{Tesla}},
-  title        = {{TTPoE} at Hot Chips 2024: Replacing {TCP} for Low Latency Applications},
-  year         = {2024},
-  howpublished = {Hot Chips 2024},
-}
-
-@misc{perftest,
-  author       = {{Linux RDMA}},
-  title        = {perftest -- {RDMA} Performance Tests},
-  year         = {2024},
-  howpublished = {\url{https://github.com/linux-rdma/perftest}},
-}
-
-% ---- vLLM and Inference Frameworks ----
-
-@misc{vllm-tp-pp-discussion,
-  author       = {{vLLM Contributors}},
-  title        = {Discussion \#10118: Tensor Parallelism vs Pipeline Parallelism Trade-offs},
-  year         = {2024},
-  howpublished = {\url{https://github.com/vllm-project/vllm/discussions/10118}},
-}
-
-@misc{vllm-ucc-rfc,
-  author       = {{vLLM Contributors}},
-  title        = {{RFC}: {UCC} Integration for Collective Communication ({PR} \#30930)},
-  year         = {2025},
-  howpublished = {\url{https://github.com/vllm-project/vllm/pull/30930}},
-}
-
-@misc{vllm-gptoss,
-  author       = {{vLLM Project}},
-  title        = {gpt-oss on {vLLM}},
-  year         = {2025},
-  howpublished = {\url{https://blog.vllm.ai/2025/08/05/gpt-oss.html}},
-}
-
-@misc{vllm-blackwell-issue,
-  author       = {{vLLM}},
-  title        = {Issue \#22279: {FlashAttention} 3 Fails on Blackwell {GPUs}},
-  year         = {2026},
-  howpublished = {\url{https://github.com/vllm-project/vllm/issues/22279}},
-}
-
-@misc{vllm-docs,
-  author       = {{vLLM Team}},
-  title        = {{vLLM} Documentation},
-  year         = {2024},
-  howpublished = {\url{https://docs.vllm.ai/}},
-}
-
-@misc{flashinfer,
-  author       = {{FlashInfer}},
-  title        = {{FlashInfer}: Kernel Library for {LLM} Serving},
-  year         = {2025},
-  howpublished = {\url{https://github.com/flashinfer-ai/flashinfer}},
-}
-
-@misc{gptoss-hf,
-  author       = {{OpenAI}},
-  title        = {gpt-oss-120b Model Card},
-  year         = {2025},
-  howpublished = {\url{https://huggingface.co/openai/gpt-oss-120b}},
-}
-
-@misc{exo-github,
-  author       = {exo-explore},
-  title        = {exo: Run Your Own {AI} Cluster at Home with Everyday Devices},
-  year         = {2025},
-  howpublished = {\url{https://github.com/exo-explore/exo}},
-}
-
-@misc{ray-docs,
-  author       = {{Anyscale}},
-  title        = {Ray Documentation},
-  year         = {2024},
-  howpublished = {\url{https://docs.ray.io/}},
-}
-
-@misc{pyverbs-docs,
-  author       = {{Linux RDMA}},
-  title        = {pyverbs -- Python Bindings for rdma-core},
-  year         = {2024},
-  howpublished = {\url{https://github.com/linux-rdma/rdma-core/tree/master/pyverbs}},
-}
-
-% ---- GPU Architecture and AMD ----
-
-@misc{patel2025tensorcore,
-  author       = {Patel, D. and Chen, K.},
-  title        = {{NVIDIA} Tensor Core Evolution: From Volta to Blackwell},
-  year         = {2025},
-  month        = {June},
-  howpublished = {SemiAnalysis},
-  note         = {Accessed February 2026},
-}
-
-@misc{amd-moe-guide,
-  author       = {{AMD}},
-  title        = {{ROCm} {vLLM} Mixture-of-Experts Guide},
-  year         = {2024},
-  howpublished = {\url{https://rocm.blogs.amd.com/software-tools-optimization/vllm-moe-guide/README.html}},
-}
-
-% ---- Precision and Quantization ----
-
-@article{micikevicius2018mixed,
-  author    = {Micikevicius, P. and Narang, S. and Alben, J. and Diamos, G. and Elsen, E. and Garcia, D. and Ginsburg, B. and Houston, M. and Kuchaiev, O. and Venkatesh, G. and Wu, H.},
-  title     = {Mixed Precision Training},
-  journal   = {International Conference on Learning Representations (ICLR)},
-  year      = {2018},
-}
-
-@article{rouhani2023mxfp4,
-  author    = {Rouhani, B. D. and others},
-  title     = {Microscaling Data Formats for Deep Learning},
-  journal   = {arXiv preprint arXiv:2310.10537},
-  year      = {2023},
-}
-
-% ---- Neumann and SAE ----
-
-@misc{neumann-repo,
-  author       = {Ackroyd, L.},
-  title        = {Neumann: A Unified Tensor-Based Runtime},
-  year         = {2025},
-  howpublished = {\url{https://github.com/Shadylukin/Neumann}},
-}
-
-@article{cunningham2023sae,
-  author    = {Cunningham, H. and Ewart, A. and Riggs, L. and Huben, R. and Sharkey, L.},
-  title     = {Sparse Autoencoders Find Highly Interpretable Features in Language Models},
-  journal   = {arXiv preprint arXiv:2309.08600},
-  year      = {2023},
-}
-
-@article{openai-sae-scaling,
-  author    = {Gao, L. and others},
-  title     = {Scaling and Evaluating Sparse Autoencoders},
-  journal   = {arXiv preprint arXiv:2406.04093},
-  year      = {2024},
-}
-
-@misc{sae-collection,
-  author       = {Apre, D.~L.},
-  title        = {Sparse Autoencoders Collection},
-  year         = {2024},
-  howpublished = {\url{https://huggingface.co/collections/dlouapre/sparse-autoencoders-675d1a2fe35e70ef80bde8f9}},
-}
-
-@misc{eiffel-tower-llama,
-  author       = {Louapre, David},
-  title        = {The Eiffel Tower {Llama}: Recreating Golden Gate Claude with Open-Source {SAE} Steering},
-  year         = {2025},
-  howpublished = {\url{https://huggingface.co/spaces/dlouapre/eiffel-tower-llama}},
-}
-
-@misc{golden-gate-claude,
-  author       = {{Anthropic}},
-  title        = {Golden Gate Claude},
-  year         = {2024},
-  month        = {May},
-  howpublished = {\url{https://www.anthropic.com/news/golden-gate-claude}},
-}
-
-@article{templeton2024scaling,
-  author       = {Templeton, Adly and Conerly, Tom and Marcus, Jonathan and Lindsey, Jack and Bricken, Trenton and Chen, Brian and Pearce, Adam and Citro, Craig and Ameisen, Emmanuel and Jones, Andy and Cunningham, Hoagy and Turner, Nicholas L. and McDougall, Callum and MacDiarmid, Monte and Freeman, C. Daniel and Sumers, Theodore R. and Rees, Edward and Batson, Joshua and Jermyn, Adam and Carter, Shan and Olah, Chris and Henighan, Tom},
-  title        = {Scaling Monosemanticity: Extracting Interpretable Features from {Claude} 3 {Sonnet}},
-  journal      = {Transformer Circuits Thread},
-  year         = {2024},
-  howpublished = {\url{https://transformer-circuits.pub/2024/scaling-monosemanticity/}},
-}
-
-% ---- Distributed Training and Serving ----
-
-@article{megatron2020,
-  author    = {Shoeybi, M. and Patwary, M. and Puri, R. and LeGresley, P. and Casper, J. and Catanzaro, B.},
-  title     = {{Megatron-LM}: Training Multi-Billion Parameter Language Models Using Model Parallelism},
-  journal   = {arXiv preprint arXiv:1909.08053},
-  year      = {2020},
-}
-
-@article{hetis2024,
-  author    = {Peng, B. and others},
-  title     = {{Hetis}: Heterogeneous {GPU}-Cluster Scheduling for Efficient Large Language Model Fine-Tuning},
-  journal   = {Proceedings of the 2024 USENIX Annual Technical Conference},
-  year      = {2024},
-}
-
-@article{deepseekv2,
-  author    = {{DeepSeek AI}},
-  title     = {{DeepSeek-V2}: A Strong, Economical, and Efficient Mixture-of-Experts Language Model},
-  journal   = {arXiv preprint arXiv:2405.04434},
-  year      = {2024},
-}
-
-@article{mooncake2024,
-  author    = {{Moonshot AI}},
-  title     = {{Mooncake}: A {KVCache}-centric Disaggregated Architecture for {LLM} Serving},
-  journal   = {arXiv preprint arXiv:2407.00079},
-  year      = {2024},
-}
-
-% ---- Tools and Utilities ----
-
-@misc{stability-matrix,
-  author       = {{LykosAI}},
-  title        = {{StabilityMatrix}: Multi-Platform Package Manager for Stable Diffusion},
-  year         = {2025},
-  howpublished = {\url{https://github.com/LykosAI/StabilityMatrix}},
-}
-
-% ---- Additional References from Research ----
-
-@misc{vllm-anatomy,
-  author       = {{vLLM Team}},
-  title        = {Anatomy of {vLLM}},
-  year         = {2025},
-  howpublished = {\url{https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html}},
-}
-
-@misc{nvidia-dynamo,
-  author       = {NVIDIA},
-  title        = {{Dynamo}: A Disaggregated {LLM} Inference Framework},
-  year         = {2025},
-  howpublished = {\url{https://github.com/NVIDIA/Dynamo}},
-}
-
-@misc{lmcache,
-  author       = {{LMCache}},
-  title        = {{LMCache}: {KV} Cache Engine for {LLM} Serving},
-  year         = {2025},
-  howpublished = {\url{https://github.com/LMCache/lmcache}},
-}
-
-@misc{llm-d,
-  author       = {{llm-d}},
-  title        = {llm-d: Distributed {LLM} Inference Daemon},
-  year         = {2025},
-  howpublished = {\url{https://github.com/llm-d/llm-d}},
-}
-
-@misc{ttpoe-chipsandcheese,
-  author       = {{Chips and Cheese}},
-  title        = {Tesla's {TTPoE} at Hot Chips 2024: Replacing {TCP} for Low Latency Applications},
-  year         = {2024},
-  howpublished = {\url{https://chipsandcheese.com/p/teslas-ttpoe-at-hot-chips-2024-replacing-tcp-for-low-latency-applications}},
-}
-
-@misc{vllm-disagg-prefill,
-  author       = {{vLLM Team}},
-  title        = {Disaggregated Prefill Documentation},
-  year         = {2025},
-  howpublished = {\url{https://docs.vllm.ai/en/latest/features/disagg_prefill/}},
-}
-
-@misc{lmcache-nixl,
-  author       = {{LMCache}},
-  title        = {{LMCache} + {vLLM} v1 + {NIXL} Integration},
-  year         = {2025},
-  howpublished = {\url{https://blog.lmcache.ai/2025-04-11-lmcache-vllmv1-nixl/}},
-}
-
-@misc{vllm-sr-iris,
-  author       = {{vLLM Team}},
-  title        = {{vLLM} Speculative Reasoning with {IRIS}},
-  year         = {2026},
-  howpublished = {\url{https://blog.vllm.ai/2026/01/05/vllm-sr-iris.html}},
-}
-
-@misc{gpudirect-cuda-docs,
-  author       = {NVIDIA},
-  title        = {{GPUDirect RDMA} Programming Guide},
-  year         = {2024},
-  howpublished = {\url{https://docs.nvidia.com/cuda/gpudirect-rdma/index.html}},
-}
-
-@misc{nccl-env-docs,
-  author       = {NVIDIA},
-  title        = {{NCCL} Environment Variables},
-  year         = {2024},
-  howpublished = {\url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html}},
-}
-
-@misc{nvidia-mixed-precision-guide,
-  author       = {NVIDIA},
-  title        = {Mixed Precision Training: Best Practices},
-  year         = {2024},
-  howpublished = {\url{https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/index.html}},
-}
-
-@misc{nvidia-gpu-perf-background,
-  author       = {NVIDIA},
-  title        = {{GPU} Performance Background},
-  year         = {2024},
-  howpublished = {\url{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html}},
-}
-
-@misc{scuffedrdma-repo,
-  author       = {Gopee, N.},
-  title        = {{ScuffedRDMA}: Adaptive {RDMA} Optimization for Distributed {LLM} Workloads},
-  year         = {2025},
-  howpublished = {\url{https://github.com/ndg8743/ScuffedRDMA}},
-}
-
-@misc{exo-rdma-pr,
-  author       = {Gopee, N.},
-  title        = {{PR} \#1284: {RDMA} Transport Integration for exo},
-  year         = {2025},
-  howpublished = {\url{https://github.com/exo-explore/exo/pull/1284}},
-}
-
-@misc{x99-rebar,
-  author       = {Gopee, N.},
-  title        = {x99-udp4-rebar: Resizable {BAR} Patch for X99 Motherboards},
-  year         = {2025},
-  howpublished = {\url{https://github.com/ndg8743/x99-udp4-rebar}},
-}
-
-@misc{llama4-meta,
-  author       = {{Meta AI}},
-  title        = {{Llama} 4: Multimodal Intelligence},
-  year         = {2025},
-  howpublished = {\url{https://ai.meta.com/blog/llama-4-multimodal-intelligence/}},
-}
-
-@misc{vllm-rdma-benchmark-discussion,
-  author       = {{vLLM Community}},
-  title        = {{vLLM} Benchmarking: Why Is {GPUDirect RDMA} Not Outperforming Standard {RDMA}?},
-  year         = {2025},
-  howpublished = {\url{https://discuss.vllm.ai/t/vllm-benchmarking-why-is-gpudirect-rdma-not-outperforming-standard-rdma-in-a-pipeline-parallel-setup/1377}},
-}
-
-@misc{rdma-sideway,
-  author       = {{RDMA-Rust}},
-  title        = {Sideway: {RDMA} Communication Library in Rust},
-  year         = {2024},
-  howpublished = {\url{https://github.com/RDMA-Rust/sideway}},
-}
-
-% ---- Security ----
-
-@inproceedings{bedrock2022,
-  author    = {Xing, J. and Hsu, K. and Qiu, Y. and Yang, Z. and Liu, H. and Chen, A.},
-  title     = {Bedrock: Programmable Network Support for Secure {RDMA} Systems},
-  booktitle = {Proceedings of the 31st USENIX Security Symposium},
-  year      = {2022},
-}
-
-@inproceedings{redmark2021,
-  author    = {Rothenberger, B. and Taranov, K. and Perrig, A. and Hoefler, T.},
-  title     = {{ReDMArk}: Bypassing {RDMA} Security Mechanisms},
-  booktitle = {Proceedings of the 30th USENIX Security Symposium},
-  year      = {2021},
-}
-
-% ---- Distributed Training Systems ----
-
-@inproceedings{meta-rdma2024,
-  author    = {Gangidi, A. and Miao, R. and Zheng, S. and others},
-  title     = {{RDMA} over Ethernet for Distributed {AI} Training at Meta Scale},
-  booktitle = {Proceedings of ACM SIGCOMM},
-  year      = {2024},
-}
-
-@misc{nvidia-nim,
-  author       = {{NVIDIA Corporation}},
-  title        = {{NVIDIA NIM} for {LLMs}: Benchmarking},
-  year         = {2024},
-  howpublished = {\url{https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html}},
-}
-
-@inproceedings{byteps2020,
-  author    = {Jiang, Y. and Zhu, Y. and Lan, C. and others},
-  title     = {{BytePS}: A Unified Architecture for Accelerating Distributed {DNN} Training},
-  booktitle = {Proceedings of the 14th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
-  year      = {2020},
-}
-
-@inproceedings{zero2020,
-  author    = {Rajbhandari, S. and Rasley, J. and Ruwase, O. and He, Y.},
-  title     = {{ZeRO}: Memory Optimizations Toward Training Trillion Parameter Models},
-  booktitle = {Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis (SC)},
-  year      = {2020},
-}
-
-@inproceedings{p3-2019,
-  author    = {Jayarajan, A. and Wei, J. and Gibson, G. and others},
-  title     = {Priority-based Parameter Propagation for Distributed {DNN} Training},
-  booktitle = {Proceedings of MLSys},
-  year      = {2019},
-}
-
-@inproceedings{powersgd2019,
-  author    = {Vogels, T. and Karimireddy, S. and Jaggi, M.},
-  title     = {{PowerSGD}: Practical Low-Rank Gradient Compression for Distributed Optimization},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2019},
-}
-
-@inproceedings{accordion2021,
-  author    = {Agarwal, S. and Wang, H. and Lee, K. and others},
-  title     = {Accordion: Adaptive Gradient Communication via Critical Learning Regime Identification},
-  booktitle = {Proceedings of MLSys},
-  year      = {2021},
-}
-
-@article{sglang2023,
-  author    = {Zheng, L. and Yin, L. and Xie, Z. and others},
-  title     = {{SGLang}: Efficient Execution of Structured Language Model Programs},
-  journal   = {arXiv preprint arXiv:2312.07104},
-  year      = {2023},
-}
-
-@article{distserve2024,
-  author    = {Zhong, Y. and Liu, S. and Chen, J. and others},
-  title     = {{DistServe}: Disaggregating Prefill and Decoding for {LLM} Serving},
-  journal   = {arXiv preprint arXiv:2401.09670},
-  year      = {2024},
-}
-
-% ---- RAM Coffers ----
-
-@misc{boudreaux2025ramcoffers,
-  author    = {Boudreaux, Scott},
-  title     = {{RAM Coffers}: Conditional Memory via {NUMA}-Distributed Weight Banking for {LLM} Inference},
-  year      = {2026},
-  month     = {January},
-  doi       = {10.6084/m9.figshare.31093429.v1},
-  howpublished = {figshare},
-  note      = {Software. \url{https://doi.org/10.6084/m9.figshare.31093429.v1}},
-}
-
-@misc{exo-cuda2025,
-  author    = {Boudreaux, S.},
-  title     = {{exo-cuda}: Distributed {LLM} Inference with {NVIDIA} {CUDA} Support via tinygrad},
-  year      = {2025},
-  howpublished = {\url{https://github.com/Scottcjn/exo-cuda}},
-  note      = {Fork of exo with CUDA acceleration for NVIDIA GPUs},
-}
-
-% ---- DeepSeek-V3 ----
-
-@article{deepseekv3,
-  author    = {{DeepSeek-AI}},
-  title     = {{DeepSeek-V3} Technical Report},
-  journal   = {arXiv preprint arXiv:2412.19437},
-  year      = {2024},
-}
-
-% ---- Transformer Circuits Thread (Update 11) ----
-
+% Transformer Circuits Thread -- Core Papers
 @article{elhage2021framework,
-  author    = {Elhage, Nelson and Nanda, Neel and Olsson, Catherine and Henighan, Tom and Joseph, Nicholas and Mann, Ben and Askell, Amanda and Bai, Yuntao and Chen, Anna and Conerly, Tom and DasSarma, Nova and Drain, Dawn and Ganguli, Deep and Hatfield-Dodds, Zac and Hernandez, Danny and Jones, Andy and Kernion, Jackson and Lovitt, Liane and Ndousse, Kamal and Amodei, Dario and Brown, Tom and Clark, Jack and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
-  title     = {A Mathematical Framework for Transformer Circuits},
-  journal   = {Transformer Circuits Thread},
-  year      = {2021},
-  url       = {https://transformer-circuits.pub/2021/framework/index.html},
+    title={A Mathematical Framework for Transformer Circuits},
+    author={Elhage, Nelson and Nanda, Neel and Olsson, Catherine and Henighan, Tom and Joseph, Nicholas and Mann, Ben and Askell, Amanda and Bai, Yuntao and Chen, Anna and Conerly, Tom and DasSarma, Nova and Drain, Dawn and Ganguli, Deep and Hatfield-Dodds, Zac and Hernandez, Danny and Jones, Andy and Kernion, Jackson and Lovitt, Liane and Ndousse, Kamal and Amodei, Dario and Brown, Tom and Clark, Jack and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
+    journal={Transformer Circuits Thread},
+    year={2021},
+    url={https://transformer-circuits.pub/2021/framework/index.html}
 }
 
 @article{olsson2022induction,
-  author    = {Olsson, Catherine and Elhage, Nelson and Nanda, Neel and Joseph, Nicholas and DasSarma, Nova and Henighan, Tom and Mann, Ben and Askell, Amanda and Bai, Yuntao and Chen, Anna and Conerly, Tom and Drain, Dawn and Ganguli, Deep and Hatfield-Dodds, Zac and Hernandez, Danny and Johnston, Scott and Jones, Andy and Kernion, Jackson and Lovitt, Liane and Ndousse, Kamal and Amodei, Dario and Brown, Tom and Clark, Jack and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
-  title     = {In-context Learning and Induction Heads},
-  journal   = {Transformer Circuits Thread},
-  year      = {2022},
-  url       = {https://transformer-circuits.pub/2022/in-context-learning-and-induction-heads/index.html},
+    title={In-context Learning and Induction Heads},
+    author={Olsson, Catherine and Elhage, Nelson and Nanda, Neel and Joseph, Nicholas and DasSarma, Nova and Henighan, Tom and Mann, Ben and Askell, Amanda and Bai, Yuntao and Chen, Anna and Conerly, Tom and Drain, Dawn and Ganguli, Deep and Hatfield-Dodds, Zac and Hernandez, Danny and Johnston, Scott and Jones, Andy and Kernion, Jackson and Lovitt, Liane and Ndousse, Kamal and Amodei, Dario and Brown, Tom and Clark, Jack and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
+    journal={Transformer Circuits Thread},
+    year={2022},
+    url={https://transformer-circuits.pub/2022/in-context-learning-and-induction-heads/index.html}
 }
 
 @article{elhage2022superposition,
-  author    = {Elhage, Nelson and Henighan, Tristan and Kravec, Shauna and Hatfield-Dodds, Zac and Lasenby, Robert and Song, Dawn and Mukobi, Gabe and Hume, Tom and Brown, Tom and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
-  title     = {Toy Models of Superposition},
-  journal   = {Transformer Circuits Thread},
-  year      = {2022},
-  url       = {https://transformer-circuits.pub/2022/toy_model/index.html},
+    title={Toy Models of Superposition},
+    author={Elhage, Nelson and Henighan, Tristan and Kravec, Shauna and Hatfield-Dodds, Zac and Lasenby, Robert and Song, Dawn and Mukobi, Gabe and Hume, Tom and Brown, Tom and Kaplan, Jared and McCandlish, Sam and Olah, Chris},
+    journal={Transformer Circuits Thread},
+    year={2022},
+    url={https://transformer-circuits.pub/2022/toy_model/index.html}
 }
 
 @article{bricken2023monosemantic,
-  author    = {Bricken, Trenton and Templeton, Adly and Batson, Joshua and Chen, Brian and Jermyn, Adam and Conerly, Tom and Turner, Nick and Carter, Shan and Olah, Chris},
-  title     = {Towards Monosemanticity: Decomposing Language Models With Dictionary Learning},
-  journal   = {Transformer Circuits Thread},
-  year      = {2023},
-  url       = {https://transformer-circuits.pub/2023/monosemantic-features/index.html},
+    title={Towards Monosemanticity: Decomposing Language Models With Dictionary Learning},
+    author={Bricken, Trenton and Templeton, Adly and Batson, Joshua and Chen, Brian and Jermyn, Adam and Conerly, Tom and Turner, Nick and Carter, Shan and Olah, Chris},
+    journal={Transformer Circuits Thread},
+    year={2023},
+    url={https://transformer-circuits.pub/2023/monosemantic-features/index.html}
 }
 
+@article{templeton2024scaling,
+    title={Scaling Monosemanticity: Extracting Interpretable Features from {Claude} 3 {Sonnet}},
+    author={Templeton, Adly and Conerly, Tom and Marcus, Jonathan and Lindsey, Jack and Bricken, Trenton and Chen, Brian and Pearce, Adam and Citro, Craig and Ameisen, Emmanuel and Jones, Andy and Cunningham, Hoagy and Turner, Nicholas L and McDougall, Callum and MacDiarmid, Monte and Tamkin, Alex and Durmus, Esin and Hume, Tristan and Mosconi, Francesco and Freeman, C. Daniel and Sumers, Theodore R. and Rees, Edward and Batson, Joshua and Jermyn, Adam and Carter, Shan and Olah, Chris and Henighan, Tom},
+    journal={Transformer Circuits Thread},
+    year={2024},
+    url={https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html}
+}
+
+% Circuit Tracing and Biology (2025)
 @article{lindsey2025biology,
-  author    = {Lindsey, Jack and Gurnee, Wes and Ameisen, Emmanuel and others},
-  title     = {On the Biology of a Large Language Model},
-  journal   = {Transformer Circuits Thread},
-  year      = {2025},
-  url       = {https://transformer-circuits.pub/2025/attribution-graphs/biology.html},
+    title={On the Biology of a Large Language Model},
+    author={Lindsey, Jack and Gurnee, Wes and Ameisen, Emmanuel and others},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/attribution-graphs/biology.html}
 }
 
 @article{ameisen2025tracing,
-  author    = {Ameisen, Emmanuel and Lindsey, Jack and Pearce, Adam and Gurnee, Wes and Turner, Nicholas L. and Chen, Brian and Citro, Craig and others},
-  title     = {Circuit Tracing: Revealing Computational Graphs in Language Models},
-  journal   = {Transformer Circuits Thread},
-  year      = {2025},
-  url       = {https://transformer-circuits.pub/2025/attribution-graphs/methods.html},
+    title={Circuit Tracing: Revealing Computational Graphs in Language Models},
+    author={Ameisen, Emmanuel and Lindsey, Jack and Pearce, Adam and Gurnee, Wes and Turner, Nicholas L and Chen, Brian and Citro, Craig and others},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/attribution-graphs/methods.html}
 }
 
+% Attention and Features (2025)
+@article{kamath2025attention,
+    title={Tracing Attention Computation Through Feature Interactions},
+    author={Kamath, Usha and others},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/attention-qk/index.html}
+}
+
+@article{lindsey2025introspection,
+    title={Emergent Introspective Awareness in Large Language Models},
+    author={Lindsey, Jack},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/introspection/index.html}
+}
+
+% Crosscoders and Model Diffing
 @article{anthropic2024crosscoders,
-  author    = {{Anthropic}},
-  title     = {Sparse Crosscoders for Cross-Layer Features and Model Diffing},
-  journal   = {Transformer Circuits Thread},
-  year      = {2024},
-  url       = {https://transformer-circuits.pub/2024/crosscoders/index.html},
+    title={Sparse Crosscoders for Cross-Layer Features and Model Diffing},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2024},
+    url={https://transformer-circuits.pub/2024/crosscoders/index.html}
+}
+
+@article{anthropic2024modeldiffing,
+    title={Stage-Wise Model Diffing},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2024},
+    url={https://transformer-circuits.pub/2024/model-diffing/index.html}
+}
+
+% Composition and Superposition
+@article{anthropic2023composition,
+    title={Distributed Representations: Composition and Superposition},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2023},
+    url={https://transformer-circuits.pub/2023/superposition-composition/index.html}
 }
 
 @article{anthropic2023privileged,
-  author    = {{Anthropic}},
-  title     = {Privileged Bases in the Transformer Residual Stream},
-  journal   = {Transformer Circuits Thread},
-  year      = {2023},
-  url       = {https://transformer-circuits.pub/2023/privileged-basis/index.html},
+    title={Privileged Bases in the Transformer Residual Stream},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2023},
+    url={https://transformer-circuits.pub/2023/privileged-basis/index.html}
 }
 
+% MOLT and Faithfulness (2025)
 @article{anthropic2025molt,
-  author    = {{Anthropic}},
-  title     = {Sparse Mixtures of Linear Transforms},
-  journal   = {Transformer Circuits Thread},
-  year      = {2025},
-  url       = {https://transformer-circuits.pub/2025/bulk-update/index.html},
+    title={Sparse Mixtures of Linear Transforms},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/bulk-update/index.html}
+}
+
+@article{anthropic2025faithfulness,
+    title={A Toy Model of Mechanistic (Un)Faithfulness},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/faithfulness-toy-model/index.html}
+}
+
+@article{gurnee2025manifolds,
+    title={When Models Manipulate Manifolds: The Geometry of a Counting Task},
+    author={Gurnee, Wes and others},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/linebreaks/index.html}
+}
+
+@article{anthropic2025interference,
+    title={A Toy Model of Interference Weights},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2025},
+    url={https://transformer-circuits.pub/2025/interference-weights/index.html}
+}
+
+% Features as Classifiers
+@article{anthropic2024classifiers,
+    title={Using Dictionary Learning Features as Classifiers},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2024},
+    url={https://transformer-circuits.pub/2024/features-as-classifiers/index.html}
+}
+
+% SoLU
+@article{anthropic2022solu,
+    title={Softmax Linear Units},
+    author={{Anthropic}},
+    journal={Transformer Circuits Thread},
+    year={2022},
+    url={https://transformer-circuits.pub/2022/solu/index.html}
+}
+
+% Original Distill Circuits
+@article{olah2020circuits,
+    title={Zoom In: An Introduction to Circuits},
+    author={Olah, Chris and Cammarata, Nick and Schubert, Ludwig and Goh, Gabriel and Petrov, Michael and Carter, Shan},
+    journal={Distill},
+    year={2020},
+    url={https://distill.pub/2020/circuits/zoom-in/}
+}
+
+% Existing thesis references
+@misc{scuffedrdma-repo,
+    title={ScuffedRDMA: Adaptive RDMA Optimization for Distributed LLM Workloads},
+    author={Gopee, Nathan},
+    year={2025},
+    url={https://github.com/ndg8743/ScuffedRDMA}
 }

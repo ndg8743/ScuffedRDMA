@@ -7,3 +7,6 @@
 [submodule "ram-coffers"]
 	path = ram-coffers
 	url = https://github.com/Scottcjn/ram-coffers.git
+[submodule "ucx"]
+	path = ucx
+	url = https://github.com/openucx/ucx.git
