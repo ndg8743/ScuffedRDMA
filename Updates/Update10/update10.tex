@@ -28,7 +28,7 @@ Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
 
 \begin{abstract}
 \noindent
-This update bridges Anthropic's Transformer Circuits research program (2021--2025) with the adaptive RDMA middleware developed in Updates~2--10. By analyzing how transformers actually compute internally---which layers matter, how features compose across layers, and how sparse activations really are---we identify concrete gaps in the current middleware design and propose circuit-aware optimizations. The key finding is that mechanistic interpretability provides the missing ``why'' behind our WFA tensor classifier: feature sparsity, cross-layer composition, and induction head access patterns give principled reasons for the hot/warm/cold routing decisions that Update~10 makes heuristically.
+This update bridges Anthropic's Transformer Circuits research program (2021--2025) with the adaptive RDMA middleware for distributed LLM workloads. By analyzing how transformers actually compute internally---which layers matter, how features compose across layers, and how sparse activations really are---we identify concrete gaps in the current middleware design and propose circuit-aware optimizations. The key finding is that mechanistic interpretability provides the missing ``why'' behind the WFA tensor classifier: feature sparsity, cross-layer composition, and induction head access patterns give principled reasons for the hot/warm/cold routing decisions that the classifier makes heuristically.
 \end{abstract}
 
 \tableofcontents
@@ -152,7 +152,7 @@ This directly supports \textbf{delta-based tensor transport}: send a base repres
 
 Scaling Monosemanticity~\cite{templeton2024scaling} demonstrates that clamping individual SAE features predictably modifies model behavior---from making Claude obsess about the Golden Gate Bridge to overriding RLHF safety training. Features are not correlational artifacts; they are causally significant computational units.
 
-For our SAE feature steering work (Update~10 Section~12), this validates that the sparse feature representation we use for gradient-free behavioral modification is operating on the same fundamental units that Anthropic's mechanistic interpretability identifies.
+For the SAE feature steering work in the middleware, this validates that the sparse feature representation used for gradient-free behavioral modification is operating on the same fundamental units that Anthropic's mechanistic interpretability identifies.
 
 \subsection{The Biology of Computation}
 
@@ -170,7 +170,7 @@ Circuit tracing on Claude 3.5 Haiku~\cite{lindsey2025biology} reveals how a prod
 \label{sec:gaps}
 %=============================================================================
 
-Mapping Circuits findings against the current Update~10 middleware design reveals five concrete gaps.
+Mapping Circuits findings against the current middleware design reveals five concrete gaps.
 
 \subsection{Gap 1: WFA Classification is Heuristic, Not Circuit-Aware}
 
@@ -188,7 +188,7 @@ Heads with high composition strength but low direct attribution are ``invisible 
 
 \subsection{Gap 2: Precision Management Ignores Superposition Phase}
 
-\textbf{Current state}: The precision pipeline (Update~10 Section~10) adapts between FP16/BF16/FP8/MXFP4 based on tensor type (weights, activations, gradients) and hardware (V100 FP16, 5070~Ti BF16).
+\textbf{Current state}: The precision pipeline adapts between FP16/BF16/FP8/MXFP4 based on tensor type (weights, activations, gradients) and hardware (V100 FP16, 5070~Ti BF16).
 
 \textbf{What Circuits reveals}: Precision requirements depend on the \textbf{superposition phase} of the features being transferred:
 \begin{itemize}
@@ -217,7 +217,7 @@ Additionally, privileged basis outlier dimensions~\cite{anthropic2023privileged}
 
 \subsection{Gap 4: KV Cache Prefetching is Pattern-Blind}
 
-\textbf{Current state}: The prefetch FSM (Update~10 Section~10.5) uses a simple state machine (Idle $\to$ Prefetching $\to$ Ready) driven by the WFA classifier. It does not know \emph{which} KV cache entries will be needed.
+\textbf{Current state}: The prefetch FSM uses a simple state machine (Idle $\to$ Prefetching $\to$ Ready) driven by the WFA classifier. It does not know \emph{which} KV cache entries will be needed.
 
 \textbf{What Circuits reveals}: KV cache access patterns are predictable from circuit structure:
 \begin{itemize}

@@ -10,20 +10,6 @@
 \usepackage{array}
 \usepackage{tabularx}
 \usepackage{xcolor}
-\usepackage{listings}
-\lstset{
-    basicstyle=\ttfamily\small,
-    breaklines=true,
-    frame=single,
-    backgroundcolor=\color{gray!10},
-    keywordstyle=\color{blue},
-    commentstyle=\color{green!50!black},
-    stringstyle=\color{red!70!black},
-    numbers=left,
-    numberstyle=\tiny\color{gray},
-    numbersep=5pt,
-}
-
 \usepackage{amsmath}
 \usepackage[hyphens]{url}
 \usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
@@ -56,7 +42,7 @@ This update investigates the feasibility of RDMA communication over USB4 network
 
 \section{Motivation}
 
-Test~1 established SoftRoCE-based RDMA between Cerberus and Chimera over 2.5~GbE Realtek interfaces, achieving 0.91~Gbps via \texttt{ib\_write\_bw} and 111.86~MB/s via UCX \texttt{tag\_bw}. While sufficient for protocol validation, the 2.5~GbE bottleneck limits practical tensor transfer throughput to $\sim$38\% of even the Realtek's theoretical line rate.
+Baseline SoftRoCE-based RDMA testing between Cerberus and Chimera over 2.5~GbE Realtek interfaces achieved 0.91~Gbps via \texttt{ib\_write\_bw} and 111.86~MB/s via UCX \texttt{tag\_bw}. While sufficient for protocol validation, the 2.5~GbE bottleneck limits practical tensor transfer throughput to $\sim$38\% of even the Realtek's theoretical line rate.
 
 USB4 offers a potential 20~Gbps point-to-point link---an 8$\times$ bandwidth improvement over the current 2.5~GbE path. If SoftRoCE can be layered over a USB4 network interface, the resulting RDMA channel could approach the throughput of the 10~GbE NICs (Intel X710, Aquantia AQC107) without requiring direct NIC-to-NIC cabling.
 
@@ -150,32 +136,13 @@ In our case, condition (1) is the blocking issue: Cerberus has USB4 (ASM4242) bu
 
 Despite the hardware mismatch, the following steps were attempted to verify the diagnosis:
 
-\begin{lstlisting}[language=bash,caption={USB4 networking setup attempt}]
-# Cerberus: Thunderbolt modules (already loaded)
-sudo modprobe thunderbolt
-sudo modprobe thunderbolt-net
+\begin{enumerate}
+    \item \textbf{Cerberus}: The \texttt{thunderbolt} and \texttt{thunderbolt-net} kernel modules were loaded (the former was already auto-loaded). Inspecting \texttt{/sys/bus/thunderbolt/devices/} confirmed the local ASM4242 controller (\texttt{domain0}, device \texttt{0-0}) but no remote peer device.
 
-# Verify controller
-ls /sys/bus/thunderbolt/devices/
-# Output: 0-0  domain0  (local controller only)
+    \item \textbf{Chimera}: Both modules loaded without error, but \texttt{/sys/bus/thunderbolt/devices/} was empty---confirming that the ASM3242 does not register as a Thunderbolt device.
 
-# Chimera: Thunderbolt modules loaded
-sudo modprobe thunderbolt
-sudo modprobe thunderbolt-net
-# Module loaded but: no devices in sysfs
-
-# Check for USB gadget alternative
-ls /sys/class/udc/
-# Empty -- no USB Device Controller available
-# Desktop xHCI controllers support host mode only
-
-# Attempted g_ncm (USB NCM gadget)
-sudo modprobe g_ncm
-# Module loaded but cannot bind without UDC
-\end{lstlisting}
-
-\paragraph{USB gadget networking.}
-An alternative approach---USB NCM/ECM gadget networking---was also investigated. This requires one machine to act as a USB device (gadget) via a USB Device Controller (UDC). Desktop machines with standard xHCI host controllers do not support gadget mode; OTG or device-capable USB controllers are required. The \texttt{dummy\_hcd} virtual UDC module was not available on kernel 6.17.0-14.
+    \item \textbf{USB gadget alternative}: Inspecting \texttt{/sys/class/udc/} showed no USB Device Controllers available. The \texttt{g\_ncm} (USB NCM gadget) module loaded but could not bind without a UDC. Desktop xHCI controllers support host mode only; OTG or device-capable USB controllers are required. The \texttt{dummy\_hcd} virtual UDC module was not available on kernel 6.17.0-14.
+\end{enumerate}
 
 \section{Expected Performance (Projected)}
 
@@ -252,62 +219,25 @@ If a USB OTG-capable adapter or bridge cable is available, USB 3.2 Gen 2$\times$
     \item \textbf{Next step}: Acquire a Thunderbolt 3 AIC for Chimera, install it on the TRX40 Creator's TB3 header, then repeat the SoftRoCE/UCX test suite over the \texttt{thunderbolt-net} interface.
 \end{enumerate}
 
-\section{Setup Script (For Future Deployment)}
-\label{sec:usb4-setup-script}
+\section{Deployment Procedure (For Future Deployment)}
+\label{sec:usb4-setup}
 
-The following script will configure USB4 RDMA once both endpoints have compatible controllers:
+Once both endpoints have compatible USB4/Thunderbolt controllers, the deployment procedure is:
 
-\begin{lstlisting}[language=bash,caption={USB4 SoftRoCE setup script}]
-#!/bin/bash
-# usb4-rdma-setup.sh -- Run on BOTH machines
-set -e
+\begin{enumerate}
+    \item \textbf{Module loading}: Load \texttt{thunderbolt}, \texttt{thunderbolt-net}, and \texttt{rdma\_rxe} kernel modules on both machines.
 
-HOSTNAME=$(hostname)
-if [ "$HOSTNAME" = "cerberus" ]; then
-    MY_IP="10.10.10.1"; PEER_IP="10.10.10.2"
-elif [ "$HOSTNAME" = "chimera" ]; then
-    MY_IP="10.10.10.2"; PEER_IP="10.10.10.1"
-fi
+    \item \textbf{Thunderbolt authorization}: Install the \texttt{bolt} daemon and enroll all discovered Thunderbolt devices with \texttt{boltctl enroll} using an \texttt{auto} security policy. This authorizes the peer controller for tunnel establishment.
 
-# Load modules
-sudo modprobe thunderbolt
-sudo modprobe thunderbolt-net
-sudo modprobe rdma_rxe
+    \item \textbf{Interface discovery}: After a brief settling period (${\sim}3$~s), scan \texttt{/sys/class/net/} for the \texttt{thunderbolt-net}-backed interface by following each device's driver symlink.
 
-# Authorize Thunderbolt device
-sudo apt install -y bolt
-for dev in $(boltctl list -a | grep -oP '[a-f0-9-]{36}'); do
-    boltctl enroll "$dev" --policy auto 2>/dev/null || true
-done
+    \item \textbf{Network configuration}: Set MTU to 65,520 bytes (the \texttt{thunderbolt-net} driver maximum), assign point-to-point IP addresses (e.g., 10.10.10.1/24 and 10.10.10.2/24), and bring the interface up.
 
-# Find thunderbolt-net interface
-sleep 3
-TB_IFACE=""
-for iface in $(ls /sys/class/net/); do
-    driver=$(readlink -f /sys/class/net/$iface/device/driver \
-             2>/dev/null || echo "")
-    if echo "$driver" | grep -q "thunderbolt-net"; then
-        TB_IFACE=$iface; break
-    fi
-done
-[ -z "$TB_IFACE" ] && { echo "No TB interface"; exit 1; }
+    \item \textbf{SoftRoCE binding}: Create an \texttt{rxe0} RDMA device bound to the Thunderbolt network interface via \texttt{rdma link add rxe0 type rxe netdev <iface>}.
 
-# Configure network with max MTU
-sudo ip link set "$TB_IFACE" mtu 65520
-sudo ip addr flush dev "$TB_IFACE"
-sudo ip addr add "$MY_IP/24" dev "$TB_IFACE"
-sudo ip link set "$TB_IFACE" up
+    \item \textbf{Validation}: Verify connectivity with \texttt{ping}, then run \texttt{ib\_write\_bw -d rxe0 --report\_gbits} and \texttt{ucx\_perftest} with \texttt{UCX\_NET\_DEVICES} pinned to the Thunderbolt interface.
+\end{enumerate}
 
-# Add SoftRoCE
-sudo rdma link delete rxe0 2>/dev/null || true
-sudo rdma link add rxe0 type rxe netdev "$TB_IFACE"
-
-echo "Ready. Test: ping $PEER_IP"
-echo "RDMA:  ib_write_bw -d rxe0 --report_gbits $PEER_IP"
-echo "UCX:   UCX_NET_DEVICES=$TB_IFACE ucx_perftest $PEER_IP"
-\end{lstlisting}
-
-\bibliography{update12}
-\bibliographystyle{plainnat}
+% No citations in this update
 
 \end{document}

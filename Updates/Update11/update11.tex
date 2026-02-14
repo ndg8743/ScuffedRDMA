@@ -27,7 +27,7 @@ Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
 
 \begin{abstract}
 \noindent
-This update examines the Work-First Algorithm (WFA) from its origins in Cilk's work-stealing scheduler through its implications for CPU scheduling, memory hierarchy management, and distributed tensor transport over RDMA. The work-first principle---minimize overhead on the serial execution path at the expense of the parallel coordination path---provides the theoretical grounding for the WFA tensor classifier introduced in Update~10. We connect Frigo, Leiserson, and Randall's continuation-stealing strategy to Ryan Fleury's lane-based multi-core model, analyze the memory scheduling consequences (cache locality, NUMA awareness, space bounds), and show how these ideas map onto RDMA transport decisions for distributed LLM inference.
+This update examines the Work-First Algorithm (WFA) from its origins in Cilk's work-stealing scheduler through its implications for CPU scheduling, memory hierarchy management, and distributed tensor transport over RDMA. The work-first principle---minimize overhead on the serial execution path at the expense of the parallel coordination path---provides the theoretical grounding for the WFA tensor classifier, which categorizes tensors as hot, warm, or cold based on access frequency and assigns dedicated RDMA transport resources accordingly. We connect Frigo, Leiserson, and Randall's continuation-stealing strategy to Ryan Fleury's lane-based multi-core model, analyze the memory scheduling consequences (cache locality, NUMA awareness, space bounds), and show how these ideas map onto RDMA transport decisions for distributed LLM inference.
 \end{abstract}
 
 \tableofcontents
@@ -227,7 +227,7 @@ Deque (top = stealable) & Registered RDMA buffers & Available for remote read \\
 
 \subsection{WFA Classifier as Scheduling Policy}
 
-The WFA tensor classifier (Update~10) implements an adaptive scheduling policy analogous to SLAW~\cite{guo2010slaw}:
+The WFA tensor classifier implements an adaptive scheduling policy analogous to SLAW~\cite{guo2010slaw}. The classifier assigns tensors to three tiers based on access frequency thresholds $\theta_1$ and $\theta_2$:
 
 \begin{itemize}
     \item \textbf{HOT tensors} ($\text{access\_count} > \theta_2$): Dedicated queue pair, polled completions, pinned memory. This is the ``fast clone''---minimal per-transfer overhead on the critical path.
@@ -341,30 +341,30 @@ However, the transfer latency is not the full cost. Each cross-node transfer inc
 The total per-transfer overhead on the fast path (HOT, pre-registered, polled) is $\sim$2~$\mu$s. On the slow path (COLD, on-demand registration, event-driven) it is $\sim$25~$\mu$s. The 12$\times$ difference justifies the WFA classifier's resource allocation: dedicating QPs and pre-registered buffers to HOT tensors is the work-first principle in action.
 
 %=============================================================================
-\section{Connection to Prior Updates}
-\label{sec:connection}
+\section{Mapping Work-First Concepts to Middleware Components}
+\label{sec:mapping}
 %=============================================================================
 
 \begin{table}[htbp]
 \centering
-\caption{Work-first concepts mapped to existing middleware components}
+\caption{Work-first concepts mapped to middleware components}
 \label{tab:connection}
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}ll@{}}
 \toprule
-\textbf{WFA Concept} & \textbf{Middleware Component} & \textbf{Update} \\
+\textbf{Work-First Concept} & \textbf{Middleware Component} \\
 \midrule
-Fast clone (zero overhead path) & HOT tensor: dedicated QP, polled & Update 10 \\
-Slow clone (coordination path) & COLD tensor: batched, compressed & Update 10 \\
-Adaptive policy selection (SLAW) & WFA classifier $\theta_1$/$\theta_2$ thresholds & Update 10 \\
-Depth-first cache locality & Prefetch FSM following access chains & Update 10 \\
-Composition-aware priority & Composition-weighted WFA & Update 11 \\
-NUMA-aware stealing & NIC-local buffer placement & Update 8 \\
-Space-bounded queues & Fixed-depth QP send queues & \texttt{transport.rs} \\
+Fast clone (zero overhead path) & HOT tensor: dedicated QP, polled completions \\
+Slow clone (coordination path) & COLD tensor: batched, compressed transfers \\
+Adaptive policy selection (SLAW) & WFA classifier $\theta_1$/$\theta_2$ thresholds \\
+Depth-first cache locality & Prefetch FSM following layer-by-layer access chains \\
+Composition-aware priority & Circuit-informed WFA weighting \\
+NUMA-aware stealing & NIC-local RDMA buffer placement \\
+Space-bounded queues & Fixed-depth QP send queues with back-pressure \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The WFA tensor classifier was designed empirically in Update~10 and given circuit-awareness in Update~11. This update provides the \textbf{theoretical foundation}: the hot/warm/cold classification is an instance of the work-first principle applied to a memory hierarchy that extends from CPU cache through GPU memory to RDMA network transfers. The thresholds $\theta_1$ and $\theta_2$ correspond to the boundary between ``common case'' (local, fast) and ``rare case'' (remote, slow) in the work-stealing framework.
+The WFA tensor classifier was designed empirically based on observed access patterns and later enhanced with circuit-awareness from mechanistic interpretability research. This update provides the \textbf{theoretical foundation}: the hot/warm/cold classification is an instance of the work-first principle applied to a memory hierarchy that extends from CPU cache through GPU memory to RDMA network transfers. The thresholds $\theta_1$ and $\theta_2$ correspond to the boundary between ``common case'' (local, fast) and ``rare case'' (remote, slow) in the work-stealing framework.
 
 %=============================================================================
 \section{Conclusions}

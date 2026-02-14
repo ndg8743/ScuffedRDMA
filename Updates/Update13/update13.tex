@@ -10,20 +10,6 @@
 \usepackage{array}
 \usepackage{tabularx}
 \usepackage{xcolor}
-\usepackage{listings}
-\lstset{
-    basicstyle=\ttfamily\small,
-    breaklines=true,
-    frame=single,
-    backgroundcolor=\color{gray!10},
-    keywordstyle=\color{blue},
-    commentstyle=\color{green!50!black},
-    stringstyle=\color{red!70!black},
-    numbers=left,
-    numberstyle=\tiny\color{gray},
-    numbersep=5pt,
-}
-
 \usepackage{amsmath,amssymb}
 \usepackage{tikz}
 \usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds}
@@ -62,7 +48,7 @@ This update presents a migration plan from the current Python-based RDMA middlew
 
 \section{Motivation: Why Leave Python}
 
-The current middleware prototype (on the \texttt{test} branch) implements five Python modules:
+The current middleware prototype implements five Python modules:
 
 \begin{table}[htbp]
 \centering
@@ -97,30 +83,7 @@ The Neumann tensor runtime (submodule, 400K+ lines of Rust) already implements s
 
 \subsection{Hybrid Logical Clock (\texttt{hlc.rs})}
 
-Lock-free timestamp generation using CAS loops:
-
-\begin{lstlisting}[language=Rust,caption={HLC compare-exchange loop (simplified from hlc.rs)}]
-loop {
-    let last = self.last_wall_ms.load(Ordering::SeqCst);
-    if current_wall > last {
-        match self.last_wall_ms.compare_exchange(
-            last, current_wall,
-            Ordering::SeqCst, Ordering::SeqCst
-        ) {
-            Ok(_) => {
-                self.logical.store(0, Ordering::SeqCst);
-                break HLCTimestamp::new(current_wall, 0, ..);
-            }
-            Err(_) => continue, // retry
-        }
-    } else {
-        let prev = self.logical.fetch_add(1, Ordering::SeqCst);
-        break HLCTimestamp::new(last, prev + 1, ..);
-    }
-}
-\end{lstlisting}
-
-This pattern---CAS retry with monotonic progress---directly maps to RDMA completion ordering.
+The HLC implementation (583 lines) generates causally ordered timestamps using a CAS (compare-and-swap) retry loop over two \texttt{AtomicU64} fields: \texttt{last\_wall\_ms} and \texttt{logical}. When the wall clock advances, the thread atomically swaps the stored wall time via \texttt{compare\_exchange} and resets the logical counter. On CAS failure (another thread won the race), it retries. When the wall clock has not advanced, it monotonically increments the logical counter via \texttt{fetch\_add}. Both paths use \texttt{SeqCst} ordering. This CAS-retry-with-monotonic-progress pattern directly maps to RDMA completion ordering, where multiple completion threads must agree on a global sequence number for work requests.
 
 \subsection{Raft Consensus Atomics (\texttt{raft.rs})}
 
@@ -183,34 +146,7 @@ The SPSC (Single-Producer/Single-Consumer) ring buffer is the central data struc
 
 \subsection{Cache-Line Layout}
 
-False sharing between producer and consumer indices is the primary performance killer in na\"ive ring buffer implementations~\cite{drepper2007memory}. The solution is to separate each index onto its own cache line:
-
-\begin{lstlisting}[language=Rust,caption={Cache-line-padded SPSC ring buffer}]
-use std::sync::atomic::{AtomicU64, Ordering};
-
-const CACHE_LINE: usize = 64;
-
-#[repr(C, align(64))]
-struct ProducerState {
-    head: AtomicU64,       // written by producer only
-    cached_tail: u64,      // local cache of consumer's tail
-    _pad: [u8; CACHE_LINE - 16],
-}
-
-#[repr(C, align(64))]
-struct ConsumerState {
-    tail: AtomicU64,       // written by consumer only
-    cached_head: u64,      // local cache of producer's head
-    _pad: [u8; CACHE_LINE - 16],
-}
-
-pub struct SpscRingBuffer<T> {
-    buffer: Box<[T]>,      // power-of-two sized
-    mask: u64,             // capacity - 1
-    producer: ProducerState,
-    consumer: ConsumerState,
-}
-\end{lstlisting}
+False sharing between producer and consumer indices is the primary performance killer in na\"ive ring buffer implementations~\cite{drepper2007memory}. The solution is to place each index on its own 64-byte cache line using \texttt{\#[repr(C, align(64))]} structs. The \texttt{ProducerState} contains the atomic \texttt{head} index (written only by the producer) and a thread-local \texttt{cached\_tail} copy of the consumer's position. The \texttt{ConsumerState} mirrors this with \texttt{tail} and \texttt{cached\_head}. Both structs are explicitly padded to 64 bytes so that they never share a cache line. The ring buffer itself holds a power-of-two-sized slot array and a bitmask (\texttt{capacity $-$ 1}) for index-to-slot conversion without modulo division.
 
 \subsection{Producer/Consumer Protocol}
 
@@ -224,30 +160,7 @@ pub struct SpscRingBuffer<T> {
 
 \subsection{RDMA Integration}
 
-The SPSC buffer slots hold RDMA work request descriptors rather than raw data:
-
-\begin{lstlisting}[language=Rust,caption={RDMA work request slot}]
-#[repr(C, align(64))]
-pub struct RdmaWorkSlot {
-    // Scatter-gather entry
-    pub addr: u64,          // registered MR address
-    pub length: u32,        // transfer size
-    pub lkey: u32,          // local memory key
-
-    // Remote target
-    pub remote_addr: u64,   // peer's MR address
-    pub rkey: u32,          // remote memory key
-
-    // Metadata
-    pub opcode: u8,         // WRITE, READ, SEND
-    pub classification: u8, // HOT=0, WARM=1, COLD=2
-    pub wr_id: u64,         // completion tracking
-    pub _pad: [u8; 14],     // pad to 64 bytes
-}
-// Static assert: size_of::<RdmaWorkSlot>() == 64
-\end{lstlisting}
-
-Each slot fits exactly one cache line (64 bytes). The producer (application thread) fills slots; the consumer (RDMA completion thread) posts them to the QP via \texttt{ibv\_post\_send}.
+The SPSC buffer slots hold RDMA work request descriptors rather than raw data. Each \texttt{RdmaWorkSlot} is a 64-byte cache-line-aligned struct containing: a scatter-gather entry (registered MR address, transfer length, local memory key), a remote target descriptor (peer MR address and remote key), and metadata (opcode for WRITE/READ/SEND, WFA classification, and a work request ID for completion tracking). The struct is explicitly padded to exactly 64 bytes so that each slot occupies one cache line with no false sharing between adjacent slots. The producer (application thread) fills slots; the consumer (RDMA completion thread) posts them to the QP via \texttt{ibv\_post\_send}.
 
 \section{Component Migration Plan}
 
@@ -278,34 +191,7 @@ The \texttt{rdma-sys} and \texttt{rdma} Rust crates provide raw FFI bindings to 
 
 \subsection{Phase 2: Lock-Free WFA Classifier}
 
-The WFA classifier migrates from Python dict lookups to a lock-free concurrent hash map:
-
-\begin{lstlisting}[language=Rust,caption={Lock-free WFA classifier}]
-use dashmap::DashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-pub struct LockFreeWFA {
-    state: DashMap<u64, TensorState>,
-    access_counters: DashMap<u64, AtomicU64>,
-    theta_hot: u64,
-    theta_warm: u64,
-}
-
-impl LockFreeWFA {
-    pub fn classify(&self, tensor_id: u64) -> Classification {
-        let count = self.access_counters
-            .entry(tensor_id)
-            .or_insert_with(|| AtomicU64::new(0))
-            .fetch_add(1, Ordering::Relaxed);
-
-        if count > self.theta_hot { Classification::Hot }
-        else if count > self.theta_warm { Classification::Warm }
-        else { Classification::Cold }
-    }
-}
-\end{lstlisting}
-
-\texttt{DashMap} uses sharded locking internally (same pattern as Neumann's \texttt{SlabRouter}), providing near-lock-free read performance under contention.
+The WFA classifier migrates from Python dict lookups to a lock-free concurrent hash map. The Rust implementation uses two \texttt{DashMap} instances: one for tensor state and one for per-tensor access counters (each an \texttt{AtomicU64}). Classification is a single atomic operation: \texttt{fetch\_add(1, Relaxed)} on the counter, followed by threshold comparison against $\theta_{\text{hot}}$ and $\theta_{\text{warm}}$. No locks are acquired on the classify hot path---\texttt{DashMap} uses sharded locking internally (the same pattern as Neumann's \texttt{SlabRouter}), so concurrent classifiers operating on different tensor IDs never contend. Under the Python prototype, classification took ${\sim}10$~$\mu$s per call due to dict locking and GIL acquisition; the Rust version targets sub-100~ns.
 
 \subsection{Phase 3: Dual-Path QP Router}
 
@@ -319,82 +205,43 @@ The hot/cold dual-path routing moves from Python lists to a lock-free work-steal
 
 \subsection{Phase 4: UCX/OpenMPI Integration}
 
-UCX provides transport-agnostic RDMA through the UCP (Protocol) layer. Integration points:
-
-\begin{lstlisting}[language=C,caption={UCX endpoint creation with tag matching}]
-// Create UCX worker (one per thread)
-ucp_worker_params_t params = {
-    .field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE,
-    .thread_mode = UCS_THREAD_MODE_MULTI,
-};
-ucp_worker_create(context, &params, &worker);
-
-// Tag-based send (maps to RDMA SEND with immediate)
-ucp_tag_send_nbx(ep, buffer, length, tag, &send_params);
-
-// Non-blocking tag receive into pre-registered buffer
-ucp_tag_recv_nbx(worker, recv_buf, length, tag, mask, &params);
-\end{lstlisting}
+UCX provides transport-agnostic RDMA through the UCP (Protocol) layer. UCX v1.17.0 is already installed on both Cerberus and Chimera at \texttt{/usr/local/ucx} (built with \texttt{--with-cuda}, \texttt{--with-verbs}, \texttt{--with-rdmacm}, \texttt{--enable-mt}). Integration uses the UCP worker API: one worker per thread in \texttt{UCS\_THREAD\_MODE\_MULTI}, with tag-based send/receive (\texttt{ucp\_tag\_send\_nbx}/\texttt{ucp\_tag\_recv\_nbx}) mapping to RDMA SEND with immediate data. Tags encode tensor ID and classification, enabling the receiver to route completions to the correct SPSC ring without additional demultiplexing.
 
 \textbf{OpenMPI integration}: Compile OpenMPI with \texttt{--with-ucx=/usr/local/ucx}. The middleware exposes a custom \texttt{MCA} component that routes tensor transfers through the lock-free SPSC buffers rather than OpenMPI's default eager/rendezvous protocol.
 
+\textbf{Baseline validation}: Cross-node UCX \texttt{tag\_bw} achieved 111.86~MB/s (0.89~Gbps) over 2.5~GbE SoftRoCE between Cerberus and Chimera, confirming that the UCX transport layer functions correctly with \texttt{UCX\_NET\_DEVICES} pinning required to avoid Kubernetes overlay interference.
+
 \subsection{Phase 5: vLLM C Extension}
 
-vLLM's KV cache connector interface accepts Python objects. The Rust middleware exposes a C-ABI shared library (\texttt{libscuffed\_rdma.so}) loaded via \texttt{ctypes} or \texttt{PyO3}:
-
-\begin{lstlisting}[language=Rust,caption={PyO3 bridge for vLLM}]
-#[pyclass]
-struct RdmaConnector {
-    inner: Arc<LockFreeTransport>,
-}
-
-#[pymethods]
-impl RdmaConnector {
-    #[new]
-    fn new(device: &str, num_qps: usize) -> PyResult<Self> { .. }
-
-    fn transfer_kv(&self, tensor: &PyArray<f16>,
-                    layer_id: u32) -> PyResult<()> {
-        let classification = self.inner.classify(layer_id);
-        self.inner.enqueue(tensor.as_ptr(), tensor.len(),
-                          classification);
-        Ok(())
-    }
-}
-\end{lstlisting}
+vLLM's KV cache connector interface accepts Python objects. The Rust middleware exposes a C-ABI shared library (\texttt{libscuffed\_rdma.so}) via PyO3~\cite{pyo3}. The Python-visible \texttt{RdmaConnector} class wraps an \texttt{Arc<LockFreeTransport>} and exposes two methods: \texttt{\_\_init\_\_(device, num\_qps)} for device setup and \texttt{transfer\_kv(tensor, layer\_id)} for KV cache transfers. The \texttt{transfer\_kv} method classifies the tensor via the lock-free WFA, then enqueues the raw pointer and length into the appropriate SPSC ring---crossing from Python into Rust with a single PyO3 boundary crossing and no data copy. This replaces the current \texttt{vllm\_connector.py} (30 lines) which uses pyverbs \texttt{MR} allocation on every transfer.
 
 \section{Build System}
 
-\begin{lstlisting}[language=bash,caption={Project structure}]
-scuffed-rdma/
-  Cargo.toml              # Rust workspace
-  crates/
-    rdma-verbs/           # libibverbs FFI + safe wrappers
-    spsc-ring/            # Cache-line-aligned SPSC buffer
-    wfa-classifier/       # Lock-free WFA tensor classifier
-    dual-path-router/     # Hot/cold QP routing
-    transport-bridge/     # UCX/OpenMPI integration
-    pyo3-bridge/          # Python bindings (PyO3)
-  cpp/
-    nccl-plugin/          # NCCL transport plugin (C++)
-  tests/
-    loom/                 # Deterministic concurrency tests
-    criterion/            # Benchmarks
-  benches/
-    spsc_throughput.rs    # SPSC ring buffer benchmarks
-    verbs_latency.rs      # Raw verbs latency measurement
-\end{lstlisting}
+The project is organized as a Rust Cargo workspace with six crates and one C++ component:
 
-Dependencies:
-\begin{itemize}
-    \item \texttt{libibverbs-dev}, \texttt{librdmacm-dev} --- RDMA C libraries (FFI target)
-    \item \texttt{crossbeam} --- MPSC queue for cold path
-    \item \texttt{dashmap} --- Lock-free concurrent hash map (WFA state)
-    \item \texttt{loom} --- Deterministic concurrency testing
-    \item \texttt{criterion} --- Microbenchmarks
-    \item \texttt{pyo3} --- Python bindings for vLLM integration
-    \item UCX v1.17.0 --- Already installed on Cerberus/Chimera at \texttt{/usr/local/ucx}
-\end{itemize}
+\begin{table}[htbp]
+\centering
+\caption{Workspace crate organization}
+\label{tab:workspace-crates}
+\begin{tabular}{@{}llp{6.5cm}@{}}
+\toprule
+\textbf{Crate} & \textbf{Language} & \textbf{Purpose} \\
+\midrule
+\texttt{rdma-verbs} & Rust & libibverbs/librdmacm FFI with safe wrappers \\
+\texttt{spsc-ring} & Rust & Cache-line-aligned SPSC ring buffer \\
+\texttt{wfa-classifier} & Rust & Lock-free WFA tensor classifier (DashMap) \\
+\texttt{dual-path-router} & Rust & Hot/cold QP routing with MPSC cold queue \\
+\texttt{transport-bridge} & Rust & UCX and OpenMPI integration layer \\
+\texttt{pyo3-bridge} & Rust & Python bindings for vLLM (PyO3) \\
+\texttt{nccl-plugin} & C++ & NCCL collective transport plugin \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The workspace also includes loom-based concurrency tests for verifying lock-free correctness under all thread interleavings, and Criterion benchmarks for SPSC throughput and raw verbs latency measurement.
+
+\paragraph{Key dependencies.}
+System libraries: \texttt{libibverbs-dev} and \texttt{librdmacm-dev} (RDMA C FFI targets). Rust crates: \texttt{crossbeam}~\cite{crossbeam} (MPSC cold-path queue), \texttt{dashmap}~\cite{dashmap} (concurrent hash map for WFA state), \texttt{loom}~\cite{loom} (deterministic concurrency testing), \texttt{criterion} (microbenchmarks), and \texttt{pyo3}~\cite{pyo3} (Python bindings). UCX v1.17.0 is pre-installed on both cluster nodes at \texttt{/usr/local/ucx}.
 
 \section{Performance Targets}
 
@@ -439,25 +286,7 @@ Krizhanovsky~\cite{krizhanovsky-mpmc} presents a lock-free MPMC (Multi-Producer/
 Rather than CAS-based contention on a shared head pointer, each producer atomically reserves a slot using \texttt{\_\_sync\_fetch\_and\_add(\&head\_, 1)}. This single locked instruction both advances the global position and returns the caller's reserved index. The implicit memory barrier from the x86 \texttt{LOCK} prefix eliminates the need for explicit fences---a significant advantage on x86 where stores are already ordered with respect to other stores.
 
 \paragraph{Per-thread progress tracking.}
-Each thread maintains a \texttt{ThrPos} struct with volatile \texttt{head} and \texttt{tail} fields:
-
-\begin{lstlisting}[language=C++,caption={Per-thread position tracking (simplified from Krizhanovsky)}]
-struct ThrPos {
-    volatile unsigned long head, tail;
-};
-ThrPos thr_p_[MAX_THREADS]; // one entry per thread
-
-void push(T *ptr) {
-    thr_pos().head = __sync_fetch_and_add(&head_, 1);
-    // Spin until slot is available
-    while (thr_pos().head >= last_tail_ + Q_SIZE)
-        sched_yield();
-    ptr_array_[thr_pos().head & Q_MASK] = ptr;
-    thr_pos().head = ULONG_MAX; // signal completion
-}
-\end{lstlisting}
-
-After completing an operation, the thread writes \texttt{ULONG\_MAX} to its position entry, signaling that it is no longer blocking progress. Other threads scan the \texttt{thr\_p\_} array to determine the minimum in-flight position; any thread still holding a non-\texttt{ULONG\_MAX} value represents a potential stall point.
+Each thread maintains a \texttt{ThrPos} struct with volatile \texttt{head} and \texttt{tail} fields, stored in a thread-indexed array. During a push operation, a producer first reserves its slot via \texttt{fetch\_and\_add}, then spins (yielding via \texttt{sched\_yield}) until the reserved position is within the queue's capacity window. After writing the element into the ring buffer at the masked index, the thread writes \texttt{ULONG\_MAX} to its position entry, signaling that it is no longer blocking progress. Other threads scan the per-thread position array to determine the minimum in-flight position; any thread still holding a non-\texttt{ULONG\_MAX} value represents a potential stall point.
 
 \paragraph{Deliberate staleness in \texttt{last\_head\_}/\texttt{last\_tail\_}.}
 The design deliberately avoids CAS on the shared \texttt{last\_tail\_} and \texttt{last\_head\_} trackers. Multiple threads may write potentially stale (smaller) values concurrently. The worst case is a spurious \texttt{sched\_yield()} when a stale value makes the queue appear full---a benign performance cost compared to the overhead of CAS retry loops. This ``optimistic staleness'' pattern is directly applicable to our cold-path MPSC queue, where occasional unnecessary yields are preferable to CAS contention.
@@ -469,28 +298,9 @@ Our Phase~3 cold-path MPSC queue borrows two ideas from this design:
     \item \textbf{Per-thread progress arrays} for monitoring in-flight operations, enabling the batch-flush thread to determine when all pending cold-path work requests have been enqueued before issuing \texttt{ibv\_post\_send}.
 \end{enumerate}
 
-\section{Integration with Existing Test Branch}
+\section{Existing Prototype Validation}
 
-The \texttt{test} branch already contains:
-\begin{itemize}
-    \item \texttt{tests/foundry\_integration/spsc\_rdma\_bridge.exe} --- A Windows PE32+ binary implementing the SPSC RDMA bridge concept. Source to be ported to the cross-platform Rust crate.
-    \item \texttt{foundry\_runtime} and \texttt{logger\_foundry} submodules --- Runtime and logging infrastructure.
-    \item All Python middleware prototypes in \texttt{Updates/Update10/scripts/}.
-\end{itemize}
-
-The migration path is incremental: the Rust library exposes the same Python API via PyO3, allowing vLLM integration to remain in Python while the hot path executes in Rust.
-
-\section{Implementation Timeline}
-
-\begin{enumerate}
-    \item \textbf{Week 1--2}: \texttt{rdma-verbs} crate (libibverbs FFI, device/PD/MR/CQ/QP wrappers)
-    \item \textbf{Week 2--3}: \texttt{spsc-ring} crate (cache-line-padded ring buffer, loom tests, criterion benchmarks)
-    \item \textbf{Week 3--4}: \texttt{wfa-classifier} crate (DashMap-based lock-free WFA)
-    \item \textbf{Week 4--5}: \texttt{dual-path-router} crate (hot SPSC + cold MPSC, QP management)
-    \item \textbf{Week 5--6}: \texttt{transport-bridge} crate (UCX integration, OpenMPI MCA component)
-    \item \textbf{Week 6--7}: \texttt{pyo3-bridge} crate (vLLM connector, Python bindings)
-    \item \textbf{Week 7--8}: NCCL transport plugin (C++), end-to-end benchmarks
-\end{enumerate}
+An initial SPSC RDMA bridge prototype exists as a compiled binary demonstrating the concept of cache-line-aligned ring buffer communication between RDMA completion threads and application threads. The Python middleware prototypes (five modules totaling ${\sim}190$ lines) validated the WFA classification, dual-path routing, and transport selection architecture. The migration path is incremental: the Rust library exposes the same Python API via PyO3, allowing the vLLM integration layer to remain in Python while the hot path executes in Rust.
 
 \section{Conclusions}
 
