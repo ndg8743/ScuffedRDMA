@@ -23,7 +23,7 @@ from middleware.rdma_tensor_cache.cache import RdmaTensorCache
 from middleware.rdma_tensor_cache.prefetch import PrefetchEngine, AccessPattern
 from middleware.rdma_tensor_cache.quantization import AdaptiveQuantizer
 from middleware.rdma_tensor_cache.sae_steering import SAEFeatureStore, SparseVector, steer_model
-from middleware.rdma_tensor_cache.vllm_connector import NeumannKVCacheConnector, KVCacheBlock
+from middleware.rdma_tensor_cache.vllm_connector import RDMAKVCacheConnector, KVCacheBlock
 
 
 @dataclass
@@ -214,7 +214,7 @@ def benchmark_sae_features():
 def benchmark_kv_connector():
     """Benchmark KV cache connector pack/unpack cycle."""
     cache = RdmaTensorCache(wire_format=PrecisionFormat.FP16)
-    connector = NeumannKVCacheConnector(cache=cache)
+    connector = RDMAKVCacheConnector(cache=cache)
     rng = np.random.default_rng(42)
 
     num_layers = 24

@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-The RDMA Tensor Cache extends Neumann (a Rust distributed tensor runtime, 20 workspace crates) with a new `tensor_rdma` crate that provides precision-managed, prefetch-aware tensor transfer between heterogeneous GPU nodes connected via Mellanox ConnectX-4 100GbE adapters.
+The RDMA Tensor Cache extends the tensor database (a Rust distributed tensor runtime, 20 workspace crates) with a new `tensor_rdma` crate that provides precision-managed, prefetch-aware tensor transfer between heterogeneous GPU nodes connected via Mellanox ConnectX-4 100GbE adapters.
 
 ### 1.1 Physical Topology
 
@@ -13,7 +13,7 @@ The RDMA Tensor Cache extends Neumann (a Rust distributed tensor runtime, 20 wor
 |  RTX 5070 Ti  16GB VRAM               |      SoftRoCE target)       |  2x Tesla V100  32GB VRAM each        |
 |  - BF16 native compute                |                             |  - FP16 native compute                |
 |  - No GPUDirect RDMA (consumer)       |                             |  - GPUDirect RDMA (datacenter)        |
-|  - Coordinator role                   |                             |  - Neumann server runs here           |
+|  - Coordinator role                   |                             |  - Tensor database server runs here   |
 |                                       |                             |  - IP: 192.168.2.111                  |
 |  Mellanox ConnectX-4 100GbE           |                             |  Mellanox ConnectX-4 100GbE           |
 +---------------------------------------+                             +---------------------------------------+
@@ -21,7 +21,7 @@ The RDMA Tensor Cache extends Neumann (a Rust distributed tensor runtime, 20 wor
 
 ### 1.2 Inference Path
 
-The inference path prioritizes latency. Tensors flow from the Neumann store on Tower 2 to whichever GPU is running the active model layers. The prefetch engine hides transfer latency by predicting upcoming layer accesses.
+The inference path prioritizes latency. Tensors flow from the tensor database store on Tower 2 to whichever GPU is running the active model layers. The prefetch engine hides transfer latency by predicting upcoming layer accesses.
 
 ```
                           INFERENCE DATA FLOW
@@ -40,8 +40,8 @@ The inference path prioritizes latency. Tensors flow from the Neumann store on T
        |  (TCP fallback on Windows)
        v
   +--------------------+
-  | Tower 2 (Linux)    |       4. Neumann server looks up tensor
-  | Neumann Server     |       5. PrecisionRouter selects wire format:
+  | Tower 2 (Linux)    |       4. Tensor database server looks up tensor
+  | Tensor DB Server   |       5. PrecisionRouter selects wire format:
   | tensor_store       |          V100 target -> FP16
   | 2x V100 32GB      |          5070 Ti target -> BF16
   +--------------------+       6. Encode + send via transport
@@ -89,7 +89,7 @@ Fine-tuning adds gradient flow in the reverse direction. Master weights live in 
           \                    /
            v                  v
        +----------------------------+
-       | Tower 2: Neumann Server    |
+       | Tower 2: Tensor DB Server  |
        | FP32 master weight update  |
        | delta_replication.rs       |   <-- delta-compressed
        | broadcasts updated weights |       replication to
@@ -120,9 +120,9 @@ Fine-tuning adds gradient flow in the reverse direction. Master weights live in 
 
 ---
 
-## 2. Thesis Concept to Neumann Module Mapping
+## 2. Thesis Concept to Tensor Database Module Mapping
 
-| Thesis Concept | Neumann Module | Status | Gap |
+| Thesis Concept | Tensor Database Module | Status | Gap |
 |---|---|---|---|
 | Precision management | `tensor_rdma/precision.rs` | Implemented | MXFP4 format defined (4-bit, 2-bit exponent, 1-bit mantissa); encode/decode stubs present. No GPU kernel for MXFP4 compute. |
 | Stochastic rounding | `tensor_rdma/rounding.rs` | Implemented | CPU-side `half` crate implementation. Unbiased E[round(x)] = x property verified. GPU kernel version needed for in-pipeline rounding. |
@@ -139,7 +139,7 @@ Fine-tuning adds gradient flow in the reverse direction. Master weights live in 
 
 ### 3.1 Tower 2 (Linux / Proxmox) -- Primary Compute Node
 
-Tower 2 is the RDMA-capable node and runs the Neumann server process.
+Tower 2 is the RDMA-capable node and runs the tensor database server process.
 
 **GPU: 2x Tesla V100 32GB (SXM2 or PCIe)**
 - Datacenter-class GPU with full NVIDIA driver support for GPUDirect RDMA.
@@ -170,8 +170,8 @@ ibv_devinfo
 rdma link show
 ```
 
-**Neumann server deployment:**
-- `neumann_server` (gRPC via tonic) runs on Tower 2.
+**Tensor database server deployment:**
+- `database_server` (gRPC via tonic) runs on Tower 2.
 - tensor_rdma transport binds on `0.0.0.0:4791` for RDMA connections.
 - tensor_chain Raft node also runs here for consensus.
 - Both V100s registered as compute devices in `PrecisionRouter`.
@@ -189,7 +189,7 @@ Tower 1 orchestrates inference requests and contributes BF16 compute.
 **Network: Mellanox ConnectX-4 100GbE**
 - Windows has no rdma-core. No kernel verbs API. No SoftRoCE.
 - `TcpFallbackTransport` is the only viable transport on this node.
-- Future: gRPC streaming as an alternative to raw TCP, leveraging `neumann_server`'s existing tonic infrastructure.
+- Future: gRPC streaming as an alternative to raw TCP, leveraging `database_server`'s existing tonic infrastructure.
 
 **Role in the cluster:**
 - Coordinator: receives client requests, dispatches to Tower 2 via TCP/gRPC.
@@ -222,7 +222,7 @@ The `PrecisionRouter` resolves the FP16/BF16 mismatch:
 
 All tools below are open-source and target Tower 2 (Linux). Tower 1 has no access to these tools directly.
 
-| Tool | Purpose | Transport Modes | Relevance to Neumann |
+| Tool | Purpose | Transport Modes | Relevance to Tensor Database |
 |---|---|---|---|
 | **NCCL** | Collective communication (AllReduce, AllGather, Broadcast) | IB, RoCE, TCP, shared memory, NVLink | Multi-V100 collectives on Tower 2. Not used cross-tower (Windows incompatible). |
 | **UCX** | Point-to-point transport abstraction | RC, DC, UD, TCP, shared memory, CUDA | Candidate for `tensor_rdma` transport backend. Handles QP management, memory registration, and transport selection automatically. |
@@ -236,7 +236,7 @@ All tools below are open-source and target Tower 2 (Linux). Tower 1 has no acces
 
 ```
   +---------------------------------------------------------+
-  | Neumann tensor_rdma                                     |
+  | Tensor database tensor_rdma                              |
   |   RdmaTransport trait                                   |
   +---------------------------------------------------------+
        |               |                    |
@@ -281,7 +281,7 @@ NIXL (NVIDIA Inference eXchange Library) provides the transport-agnostic KV cach
           rdma-core       TCP socket
                |
                v
-  Neumann tensor_rdma
+  Tensor database tensor_rdma
   (registers NIXL buffers as RdmaTransport buffers)
 ```
 
@@ -289,7 +289,7 @@ NIXL (NVIDIA Inference eXchange Library) provides the transport-agnostic KV cach
 
 ## 5. SAE Feature Steering as Fine-Tuning Alternative
 
-Sparse Autoencoder (SAE) feature steering offers an alternative to gradient-based fine-tuning that maps naturally onto Neumann's existing sparse vector infrastructure and RDMA transfer.
+Sparse Autoencoder (SAE) feature steering offers an alternative to gradient-based fine-tuning that maps naturally onto the tensor database's existing sparse vector infrastructure and RDMA transfer.
 
 ### 5.1 Why SAE Features Fit This Architecture
 
@@ -305,16 +305,16 @@ SAE feature steering requires:
 - Feature clamping: add/subtract activation directions
 - No gradients, no backward pass, no weight modification
 
-### 5.2 Neumann SparseVector for SAE Features
+### 5.2 SparseVector for SAE Features
 
-Neumann's `SparseVector` (defined in `tensor_store/src/sparse_vector.rs`) stores only non-zero indices and values:
+The `SparseVector` type (defined in `tensor_store/src/sparse_vector.rs`) stores only non-zero indices and values:
 
 ```
   Dense activation vector (4096d):      16,384 bytes  (4096 x 4 bytes)
   SAE feature (99% sparse):                ~80 bytes  (indices + values for ~20 active features)
   Compression ratio:                         ~200x
 
-  Neumann SparseVector encoding:
+  Tensor database SparseVector encoding:
     positions: [42, 189, 512, 1024, 3891]
     values:    [0.73, -0.41, 0.22, 0.15, -0.88]
     dimension: 4096
@@ -391,9 +391,9 @@ The `TcpFallbackTransport` currently stubs `rdma_write` (records metrics, return
 **Current state:** `RdmaTensorCache` has get/store/prefetch operations. vLLM expects a `MooncakeConnector` or `NixlConnector` interface (Python).
 
 **Required work:**
-- Python shim (via `neumann-py` or standalone) that exposes `tensor_rdma` operations as a vLLM-compatible connector.
+- Python shim (via `tensor-db-py` or standalone) that exposes `tensor_rdma` operations as a vLLM-compatible connector.
 - Must implement: `register_kv_caches(kv_caches)`, `send_recv_kv_caches_pynixl(...)` or equivalent.
-- NIXL agent initialization with Neumann's transport as the underlying mechanism.
+- NIXL agent initialization with the tensor database's transport as the underlying mechanism.
 - KV cache block layout must match vLLM's `PagedAttention` block tables.
 
 ### 6.4 GPUDirect RDMA Setup on Tower 2

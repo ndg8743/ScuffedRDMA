@@ -67,7 +67,7 @@ LLM4Decompile connects to the thesis in two ways:
 
 \begin{enumerate}
     \item \textbf{WFA validation workload}: Decompilation inference exercises the full autoregressive generation pipeline (prefill + decode), producing real KV cache access patterns for WFA classifier validation.
-    \item \textbf{RISC-V assembly generation}: The same model architecture could be fine-tuned on RISC-V binaries using the heterogeneous training pipeline (V100 FP16 forward/backward, Neumann FP32 master weights, 5070~Ti BF16 validation), as described in the RISC-V assembly generation component of the thesis.
+    \item \textbf{RISC-V assembly generation} (Section~14.2 of Update~10): The same model architecture could be fine-tuned on RISC-V binaries using the heterogeneous training pipeline (V100 FP16 forward/backward, tensor database FP32 master weights, 5070~Ti BF16 validation).
 \end{enumerate}
 
 %=============================================================================

@@ -33,7 +33,7 @@
 \definecolor{rdmared}{RGB}{204,0,0}
 \definecolor{solutiongreen}{RGB}{40,167,69}
 \definecolor{layergray}{RGB}{240,240,240}
-\definecolor{neumannpurple}{RGB}{102,51,153}
+\definecolor{dbpurple}{RGB}{102,51,153}
 \definecolor{v100blue}{RGB}{30,90,180}
 \definecolor{tower1color}{RGB}{50,130,60}
 \definecolor{tower2color}{RGB}{130,50,50}
@@ -45,7 +45,7 @@
 \title{
     \vspace{-1cm}
     \textbf{Adaptive RDMA Optimization for Distributed LLM Workloads} \\[0.5em]
-    \large Update 8: RDMA Tensor Cache Architecture and Neumann Integration
+    \large Update 8: RDMA Tensor Cache Architecture and Database Design
 }
 
 \author{
@@ -64,7 +64,7 @@
 
 \begin{abstract}
 \noindent
-Heterogeneous GPU clusters present a precision mismatch problem that fundamentally limits distributed LLM training and inference. This update presents the RDMA Tensor Cache, a centralized precision management layer implemented within the Neumann tensor database, designed for a two-tower home lab: Tower~1 (Ryzen~9~7950X, RTX~5070~Ti~16GB, Windows) and Tower~2 (Proxmox/Linux, $2\times$ Tesla~V100~32GB). The V100s lack BF16 support, forcing FP16 computation with its narrow dynamic range; the 5070~Ti supports BF16 natively but runs on Windows without kernel RDMA. We resolve this with an RDMA-accessible FP32 master weight store in Neumann, stochastic rounding for precision-lossy conversions, predictive tensor prefetching, and a centralized KV cache that eliminates the per-rank duplication problem inherent to Multi-Latent Attention (MLA) and Multi-Query Attention (MQA) under tensor parallelism. We detail the \texttt{tensor\_rdma} crate architecture, present three experimental pillars for validation, and describe integration paths through UCX/UCC, SoftRoCEv2, and the emerging Ultra Ethernet Consortium (UEC) 1.0 standard.
+Heterogeneous GPU clusters present a precision mismatch problem that fundamentally limits distributed LLM training and inference. This update presents the RDMA Tensor Cache, a centralized precision management layer implemented within the tensor database, designed for a two-tower home lab: Tower~1 (Ryzen~9~7950X, RTX~5070~Ti~16GB, Windows) and Tower~2 (Proxmox/Linux, $2\times$ Tesla~V100~32GB). The V100s lack BF16 support, forcing FP16 computation with its narrow dynamic range; the 5070~Ti supports BF16 natively but runs on Windows without kernel RDMA. We resolve this with an RDMA-accessible FP32 master weight store in the tensor database, stochastic rounding for precision-lossy conversions, predictive tensor prefetching, and a centralized KV cache that eliminates the per-rank duplication problem inherent to Multi-Latent Attention (MLA) and Multi-Query Attention (MQA) under tensor parallelism. We detail the \texttt{tensor\_rdma} crate architecture, present three experimental pillars for validation, and describe integration paths through UCX/UCC, SoftRoCEv2, and the emerging Ultra Ethernet Consortium (UEC) 1.0 standard.
 \end{abstract}
 
 \tableofcontents
@@ -75,7 +75,7 @@ Heterogeneous GPU clusters present a precision mismatch problem that fundamental
 \label{sec:overview}
 %=============================================================================
 
-This update advances the thesis in three directions. First, we formalize the RDMA Tensor Cache architecture that bridges the precision gap between V100 and 5070~Ti GPUs by centralizing master weights in Neumann's \texttt{tensor\_rdma} crate. Second, we analyze the parallelism strategies available in vLLM and identify a structural limitation of tensor parallelism for MLA/MQA models that motivates our centralized KV cache design. Third, we introduce Sparse Auto-Encoders (SAEs) as an alternative to gradient-based fine-tuning, showing how SAE feature vectors map naturally to Neumann's \texttt{SparseVector} representation with 51$\times$ compression.
+This update advances the thesis in three directions. First, we formalize the RDMA Tensor Cache architecture that bridges the precision gap between V100 and 5070~Ti GPUs by centralizing master weights in the tensor database's \texttt{tensor\_rdma} crate. Second, we analyze the parallelism strategies available in vLLM and identify a structural limitation of tensor parallelism for MLA/MQA models that motivates our centralized KV cache design. Third, we introduce Sparse Auto-Encoders (SAEs) as an alternative to gradient-based fine-tuning, showing how SAE feature vectors map naturally to the tensor database's \texttt{SparseVector} representation with 51$\times$ compression.
 
 The home lab consists of two towers connected by Mellanox ConnectX-4 100GbE NICs:
 
@@ -100,7 +100,7 @@ IP & -- & 192.168.2.111 (South-Tower) \\
 \end{tabular}
 \end{table}
 
-The fundamental tension is that the V100 is a datacenter GPU with full GPUDirect RDMA support and Tensor Core FP16 compute but no BF16, while the 5070~Ti is a consumer GPU with BF16 native support but no RDMA stack on Windows. The RDMA Tensor Cache resolves this asymmetry by placing FP32 master weights in Neumann, accessible from both towers through different transport paths.
+The fundamental tension is that the V100 is a datacenter GPU with full GPUDirect RDMA support and Tensor Core FP16 compute but no BF16, while the 5070~Ti is a consumer GPU with BF16 native support but no RDMA stack on Windows. The RDMA Tensor Cache resolves this asymmetry by placing FP32 master weights in the tensor database, accessible from both towers through different transport paths.
 
 %=============================================================================
 \section{NVIDIA Open-Source Ecosystem}
@@ -155,7 +155,7 @@ NIXL (NVIDIA Inference Xfer Library)~\cite{nixl} provides point-to-point tensor 
 
 Megatron-LM~\cite{megatron2020} established the canonical model parallelism strategies (tensor parallelism, pipeline parallelism, data parallelism) that all subsequent distributed training frameworks reference. Its tensor parallelism implementation shards weight matrices column-wise or row-wise across GPUs, requiring AllReduce after each transformer layer. This communication pattern directly informs our prefetch engine design.
 
-Megatron-LM's approach to mixed precision training is particularly relevant: it maintains FP32 master weights on the optimizer node while broadcasting FP16 copies to compute nodes. Our RDMA Tensor Cache generalizes this pattern by placing the FP32 master store in Neumann (accessible via RDMA) rather than requiring it to reside in GPU memory on a designated node. This decoupling enables the heterogeneous V100/5070~Ti configuration where no single GPU type can serve as the universal master.
+Megatron-LM's approach to mixed precision training is particularly relevant: it maintains FP32 master weights on the optimizer node while broadcasting FP16 copies to compute nodes. Our RDMA Tensor Cache generalizes this pattern by placing the FP32 master store in the tensor database (accessible via RDMA) rather than requiring it to reside in GPU memory on a designated node. This decoupling enables the heterogeneous V100/5070~Ti configuration where no single GPU type can serve as the universal master.
 
 \subsection{InfiniBand RDMA Foundations}
 
@@ -255,7 +255,7 @@ This duplication wastes VRAM and increases the memory pressure on each GPU. For 
 MLA and MQA models cannot benefit from tensor parallelism for KV cache distribution. Each TP rank stores a full copy of the KV cache, negating the memory savings that motivated these attention variants.
 \end{challenge}
 
-Our solution is to externalize the KV cache to Neumann, accessed via RDMA. A single centralized copy serves all TP ranks through one-sided RDMA reads, eliminating duplication. Neumann's \texttt{rdma\_cache} module already provides the buffer registration and remote access semantics required (Section~\ref{sec:neumann-integration}).
+Our solution is to externalize the KV cache to the tensor database, accessed via RDMA. A single centralized copy serves all TP ranks through one-sided RDMA reads, eliminating duplication. The tensor database's \texttt{rdma\_cache} module already provides the buffer registration and remote access semantics required (Section~\ref{sec:database-architecture}).
 
 %=============================================================================
 \section{RDMA Tensor Cache Architecture}
@@ -270,7 +270,7 @@ The RDMA Tensor Cache mediates all tensor transfers between Tower~1 and Tower~2,
     node distance=0.6cm and 1.5cm,
     box/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small},
     tower/.style={rectangle, draw, thick, rounded corners, minimum width=5.5cm, minimum height=6cm, align=center},
-    neumann/.style={rectangle, draw, thick, rounded corners, fill=neumannpurple!15, minimum width=3cm, minimum height=0.8cm, align=center, font=\small},
+    db/.style={rectangle, draw, thick, rounded corners, fill=dbpurple!15, minimum width=3cm, minimum height=0.8cm, align=center, font=\small},
     link/.style={<->, >=stealth, very thick},
     arrow/.style={->, >=stealth, thick},
     label/.style={font=\footnotesize}
@@ -296,7 +296,7 @@ The RDMA Tensor Cache mediates all tensor transfers between Tower~1 and Tower~2,
 \node[box, fill=v100blue!20] (gpu2a) at (3.5, 2) {V100 32 GB\\(FP16)};
 \node[box, fill=v100blue!20] (gpu2b) at (5.5, 2) {V100 32 GB\\(FP16)};
 \node[box, fill=blue!15] (cpu2) at (4.5, 0.7) {Proxmox Host\\CPU + RAM};
-\node[neumann] (neu) at (4.5, -0.6) {Neumann\\tensor\_rdma};
+\node[db] (neu) at (4.5, -0.6) {Tensor\\Database};
 \node[box, fill=gray!20] (nic2) at (4.5, -1.9) {ConnectX-4\\100GbE};
 
 \draw[arrow] (gpu2a) -- (cpu2);
@@ -310,17 +310,17 @@ The RDMA Tensor Cache mediates all tensor transfers between Tower~1 and Tower~2,
 % 100GbE Link
 \draw[link, rdmared] (nic1.east) -- (nic2.west) node[midway, above, font=\small\bfseries] {100 GbE RDMA} node[midway, below, font=\tiny] {SoftRoCEv2 / RoCE v2};
 
-% Neumann detail
-\node[draw=neumannpurple, fill=neumannpurple!5, rounded corners, below=2.8cm of $(t1)!0.5!(t2)$, minimum width=12cm, minimum height=1.6cm, align=center] (detail) {};
-\node[above=0.05cm of detail.north, font=\small\bfseries\color{neumannpurple}] {Neumann RDMA Tensor Cache (FP32 Master Store)};
+% Tensor Database detail
+\node[draw=dbpurple, fill=dbpurple!5, rounded corners, below=2.8cm of $(t1)!0.5!(t2)$, minimum width=12cm, minimum height=1.6cm, align=center] (detail) {};
+\node[above=0.05cm of detail.north, font=\small\bfseries\color{dbpurple}] {RDMA Tensor Database (FP32 Master Store)};
 \node[font=\footnotesize, align=center] at (detail.center) {
     \texttt{precision.rs} \quad \texttt{rounding.rs} \quad \texttt{prefetch.rs} \quad \texttt{transport.rs} \quad \texttt{rdma\_cache.rs} \quad \texttt{config.rs}
 };
 
-\draw[arrow, neumannpurple, dashed] (neu) -- (detail.north);
+\draw[arrow, dbpurple, dashed] (neu) -- (detail.north);
 
 \end{tikzpicture}
-\caption{Two-tower system architecture. Neumann's \texttt{tensor\_rdma} crate runs on Tower~2, serving as the centralized FP32 master weight store. Tower~1 accesses tensors via gRPC/TCP fallback; Tower~2's V100s access them via GPUDirect RDMA through \texttt{nvidia-peermem}.}
+\caption{Two-tower system architecture. The tensor database's \texttt{tensor\_rdma} crate runs on Tower~2, serving as the centralized FP32 master weight store. Tower~1 accesses tensors via gRPC/TCP fallback; Tower~2's V100s access them via GPUDirect RDMA through \texttt{nvidia-peermem}.}
 \label{fig:system-arch}
 \end{figure}
 
@@ -365,7 +365,7 @@ The RDMA Tensor Cache resolves this through a three-stage precision pipeline:
 \node[op, right=1cm of v100] (rdma1) {RDMA Write\\100 GbE};
 
 % FP32 master
-\node[stage, fill=neumannpurple!15, right=1cm of rdma1] (master) {Neumann FP32\\Master Weights};
+\node[stage, fill=dbpurple!15, right=1cm of rdma1] (master) {Tensor DB FP32\\Master Weights};
 
 % Stochastic round
 \node[op, right=1cm of master] (sr) {Stochastic\\Rounding};
@@ -390,7 +390,7 @@ The RDMA Tensor Cache resolves this through a three-stage precision pipeline:
 };
 
 \end{tikzpicture}
-\caption{Precision pipeline. Gradients computed in V100 FP16 are accumulated into FP32 master weights stored in Neumann. Stochastic rounding converts to device-native precision for each GPU.}
+\caption{Precision pipeline. Gradients computed in V100 FP16 are accumulated into FP32 master weights stored in the tensor database. Stochastic rounding converts to device-native precision for each GPU.}
 \label{fig:precision-pipeline}
 \end{figure}
 
@@ -414,12 +414,12 @@ In the \texttt{tensor\_rdma} crate, stochastic rounding is implemented in \textt
 
 \subsection{Centralized KV Cache}
 
-The MLA/MQA duplication problem identified in Section~\ref{sec:mla-problem} is resolved by storing the KV cache in Neumann's \texttt{RdmaTensorCache}, keyed by layer index and sequence position. Each TP rank issues one-sided RDMA reads to fetch the KV entries it needs for its attention head shard, rather than maintaining a local copy.
+The MLA/MQA duplication problem identified in Section~\ref{sec:mla-problem} is resolved by storing the KV cache in the tensor database's \texttt{RdmaTensorCache}, keyed by layer index and sequence position. Each TP rank issues one-sided RDMA reads to fetch the KV entries it needs for its attention head shard, rather than maintaining a local copy.
 
 The RDMA read pattern for KV cache access is:
 \begin{enumerate}
     \item Prefetch engine predicts which layer/position entries will be needed next based on the current decoding step.
-    \item Transport layer issues RDMA Read to Neumann's registered buffer for the predicted entries.
+    \item Transport layer issues RDMA Read to the tensor database's registered buffer for the predicted entries.
     \item Attention computation proceeds on local GPU memory with the fetched KV data.
     \item New KV entries generated during decoding are written back via RDMA Write.
 \end{enumerate}
@@ -427,18 +427,18 @@ The RDMA read pattern for KV cache access is:
 For a model with $L$ layers and context length $C$, this reduces total KV memory across TP ranks from $\text{TP} \times 2LC \cdot d_{\text{kv}}$ to $2LC \cdot d_{\text{kv}} + \text{TP} \times \text{prefetch\_buffer}$. The prefetch buffer is typically 3--5 layers deep, a small fraction of the total cache.
 
 %=============================================================================
-\section{Neumann Integration}
-\label{sec:neumann-integration}
+\section{Tensor Database Architecture}
+\label{sec:database-architecture}
 %=============================================================================
 
-The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the Neumann unified tensor runtime. It depends on \texttt{tensor\_store} for local key-value storage and \texttt{tensor\_compress} for delta encoding. \Cref{fig:crate-deps} shows the dependency structure.
+The \texttt{tensor\_rdma} crate~\cite{scuffedrdma-repo} is a workspace member in the tensor database runtime. It depends on \texttt{tensor\_store} for local key-value storage and \texttt{tensor\_compress} for delta encoding. \Cref{fig:crate-deps} shows the dependency structure.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[
     node distance=1.2cm and 1.5cm,
     crate/.style={rectangle, draw, rounded corners, minimum width=2.8cm, minimum height=0.8cm, align=center, font=\small},
-    rdma/.style={crate, fill=neumannpurple!20, thick},
+    rdma/.style={crate, fill=dbpurple!20, thick},
     dep/.style={crate, fill=blue!10},
     ext/.style={crate, fill=gray!15, dashed},
     arrow/.style={->, >=stealth, thick}
@@ -452,12 +452,12 @@ The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the
 \node[dep, above right=1.5cm and 1cm of rdma] (compress) {tensor\_compress};
 
 % Modules within tensor_rdma
-\node[crate, fill=neumannpurple!10, below left=1.5cm and 2cm of rdma] (precision) {precision.rs};
-\node[crate, fill=neumannpurple!10, below left=1.5cm and 0cm of rdma] (rounding) {rounding.rs};
-\node[crate, fill=neumannpurple!10, below right=1.5cm and 0cm of rdma] (prefetch) {prefetch.rs};
-\node[crate, fill=neumannpurple!10, below right=1.5cm and 2cm of rdma] (transport) {transport.rs};
-\node[crate, fill=neumannpurple!10, below=3cm of rdma, xshift=-1.5cm] (cache) {rdma\_cache.rs};
-\node[crate, fill=neumannpurple!10, below=3cm of rdma, xshift=1.5cm] (config) {config.rs};
+\node[crate, fill=dbpurple!10, below left=1.5cm and 2cm of rdma] (precision) {precision.rs};
+\node[crate, fill=dbpurple!10, below left=1.5cm and 0cm of rdma] (rounding) {rounding.rs};
+\node[crate, fill=dbpurple!10, below right=1.5cm and 0cm of rdma] (prefetch) {prefetch.rs};
+\node[crate, fill=dbpurple!10, below right=1.5cm and 2cm of rdma] (transport) {transport.rs};
+\node[crate, fill=dbpurple!10, below=3cm of rdma, xshift=-1.5cm] (cache) {rdma\_cache.rs};
+\node[crate, fill=dbpurple!10, below=3cm of rdma, xshift=1.5cm] (config) {config.rs};
 
 % External crates
 \node[ext, above=2.5cm of rdma, xshift=-3cm] (half) {half};
@@ -474,12 +474,12 @@ The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the
 \draw[arrow] (compress) -- (rdma);
 
 % Arrows: modules
-\draw[arrow, neumannpurple] (rdma) -- (precision);
-\draw[arrow, neumannpurple] (rdma) -- (rounding);
-\draw[arrow, neumannpurple] (rdma) -- (prefetch);
-\draw[arrow, neumannpurple] (rdma) -- (transport);
-\draw[arrow, neumannpurple] (rdma) -- (cache);
-\draw[arrow, neumannpurple] (rdma) -- (config);
+\draw[arrow, dbpurple] (rdma) -- (precision);
+\draw[arrow, dbpurple] (rdma) -- (rounding);
+\draw[arrow, dbpurple] (rdma) -- (prefetch);
+\draw[arrow, dbpurple] (rdma) -- (transport);
+\draw[arrow, dbpurple] (rdma) -- (cache);
+\draw[arrow, dbpurple] (rdma) -- (config);
 
 % Module inter-deps
 \draw[arrow, dashed, gray, thin] (precision) -- (rounding);
@@ -490,7 +490,7 @@ The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the
 \draw[arrow, dashed, gray, thin] (config) -- (cache);
 
 \end{tikzpicture}
-\caption{Neumann \texttt{tensor\_rdma} crate dependency graph. The crate depends on \texttt{tensor\_store} for local caching and \texttt{tensor\_compress} for delta encoding. Six internal modules implement the RDMA Tensor Cache.}
+\caption{Tensor database \texttt{tensor\_rdma} crate dependency graph. The crate depends on \texttt{tensor\_store} for local caching and \texttt{tensor\_compress} for delta encoding. Six internal modules implement the RDMA Tensor Cache.}
 \label{fig:crate-deps}
 \end{figure}
 
@@ -573,7 +573,7 @@ We structure validation around three experimental pillars, each targeting a dist
     seq/.style={state, fill=solutiongreen!20},
     str/.style={state, fill=ucxblue!20},
     lsw/.style={state, fill=cudaorange!20},
-    adp/.style={state, fill=neumannpurple!20},
+    adp/.style={state, fill=dbpurple!20},
     rnd/.style={state, fill=gray!20},
     arrow/.style={->, >=stealth, thick},
     label/.style={font=\scriptsize, align=center}
@@ -700,12 +700,12 @@ We investigate two approaches to adapting LLMs on our heterogeneous cluster: tra
 The heterogeneous training pipeline assigns roles based on GPU capabilities:
 
 \begin{itemize}
-    \item \textbf{V100 pair (Tower 2):} Forward and backward passes in FP16 Tensor Cores. Gradients are produced in FP16 and transferred to Neumann via RDMA.
-    \item \textbf{Neumann (Tower 2 host):} Accumulates gradients into FP32 master weights. Applies optimizer updates (Adam) in full precision.
+    \item \textbf{V100 pair (Tower 2):} Forward and backward passes in FP16 Tensor Cores. Gradients are produced in FP16 and transferred to the tensor database via RDMA.
+    \item \textbf{Tensor Database (Tower 2 host):} Accumulates gradients into FP32 master weights. Applies optimizer updates (Adam) in full precision.
     \item \textbf{5070 Ti (Tower 1):} Receives BF16 weights via TCP/gRPC for inference validation during training. Can also run the optimizer in BF16 for tasks where BF16 dynamic range is sufficient.
 \end{itemize}
 
-This architecture mirrors the Hetis system~\cite{hetis2024}, which demonstrated 2.25$\times$ throughput improvement by assigning distinct stages of the training pipeline to different GPU types. In Hetis, heterogeneous GPUs handle prefill and decode stages separately. We adapt this idea to separate compute (V100 FP16) from precision management (Neumann FP32) and validation (5070~Ti BF16).
+This architecture mirrors the Hetis system~\cite{hetis2024}, which demonstrated 2.25$\times$ throughput improvement by assigning distinct stages of the training pipeline to different GPU types. In Hetis, heterogeneous GPUs handle prefill and decode stages separately. We adapt this idea to separate compute (V100 FP16) from precision management (Tensor DB FP32) and validation (5070~Ti BF16).
 
 \subsection{Sparse Auto-Encoder Feature Steering}
 \label{sec:sae}
@@ -734,11 +734,11 @@ where $\alpha$ controls the steering strength and $\mathbf{f}_{\max,i}$ is the m
 
 This modification is applied at inference time with no gradient computation, no backward pass, and no weight updates. The Eiffel Tower Llama demo~\cite{eiffel-tower-llama} demonstrates this: clamping the ``Eiffel Tower'' feature causes Llama to mention the Eiffel Tower in every response regardless of the prompt.
 
-\subsubsection{Mapping to Neumann}
+\subsubsection{Mapping to the Tensor Database}
 
-SAE feature vectors are a natural fit for Neumann's \texttt{SparseVector} type, which stores only non-zero indices and values. A typical SAE feature vector has 65,536 dimensions but only approximately 50 active features, which illustrates the storage advantage: the dense representation requires $65{,}536 \times 4 = 256$\,KB, while Neumann's \texttt{SparseVector} stores only the active index--value pairs, consuming roughly $50 \times (4 + 4) = 400$\,bytes---a 51$\times$ compression ratio. These sparse vectors are constructed from the list of active feature indices and their activation magnitudes, stored in Neumann under descriptive keys (e.g., \texttt{sae:layer\_12:eiffel\_tower}), and made available for RDMA access by both towers. A single feature vector at approximately 400~bytes fits well within a single RDMA read, far below the network MTU.
+SAE feature vectors are a natural fit for the tensor database's \texttt{SparseVector} type, which stores only non-zero indices and values. A typical SAE feature vector has 65,536 dimensions but only approximately 50 active features: the dense representation requires $65{,}536 \times 4 = 256$\,KB, while the \texttt{SparseVector} stores only the active index--value pairs, consuming roughly $50 \times (4 + 4) = 400$\,bytes---a 51$\times$ compression ratio. These sparse vectors are stored in the tensor database under descriptive keys (e.g., \texttt{sae:layer\_12:eiffel\_tower}) and made available for RDMA access by both towers. A single feature vector at approximately 400~bytes fits well within a single RDMA read, far below the network MTU.
 
-OpenAI's work on scaling SAEs~\cite{openai-sae-scaling} and the HuggingFace SAE collection~\cite{sae-collection} provide pre-trained SAEs for several open-weight models. These can be loaded into Neumann and served to both towers for inference-time steering.
+OpenAI's work on scaling SAEs~\cite{openai-sae-scaling} and the HuggingFace SAE collection~\cite{sae-collection} provide pre-trained SAEs for several open-weight models. These can be loaded into the tensor database and served to both towers for inference-time steering.
 
 \subsubsection{Advantages over Gradient-Based Fine-Tuning}
 
@@ -772,11 +772,68 @@ The Python prototype bridges the \texttt{tensor\_rdma} Rust crate with vLLM's di
 
 \subsection{Architecture}
 
-The \texttt{RDMATensorCacheMiddleware} class extends the ScuffedRDMA middleware with Neumann tensor cache access. On initialization, it establishes a transport connection and creates a \texttt{NeumannClient} pointing to the Neumann host at 192.168.2.111 on port 4791, along with a \texttt{PrecisionRouter} configured with the available device capabilities. The middleware exposes two primary data-path methods. The \texttt{get\_tensor} method fetches a tensor from Neumann by key: it determines the optimal wire format for the requesting device via the precision router, issues an RDMA read through the Neumann client, and decodes the raw bytes into a PyTorch tensor in the appropriate precision. The \texttt{put\_gradient} method performs the reverse operation, encoding a PyTorch gradient tensor from the source device's native format and writing it to Neumann via RDMA for FP32 master weight accumulation. A \texttt{get\_kv\_cache} convenience method provides batch access to centralized KV cache entries by constructing keys from the layer index and sequence positions and issuing a batched RDMA read to retrieve the requested entries from Neumann's store.
+\begin{lstlisting}[language=Python, caption={RDMA Tensor Cache middleware extension}]
+class RDMATensorCacheMiddleware:
+    """Extends the ScuffedRDMA middleware with RDMA tensor database access."""
+
+    def __init__(self, config: MiddlewareConfig):
+        self.transport = self._init_transport(config)
+        self.db_client = DatabaseClient(
+            host=config.db_host,  # 192.168.2.111
+            port=config.db_port,  # 4791
+        )
+        self.precision_router = PrecisionRouter(config.devices)
+
+    def get_tensor(self, key: str, device: DeviceCapability) -> torch.Tensor:
+        """Fetch tensor from the tensor database with automatic precision conversion."""
+        wire_format = self.precision_router.optimal_wire_format(device)
+        raw = self.db_client.rdma_read(key)
+        return self._decode_to_torch(raw, wire_format, device)
+
+    def put_gradient(self, key: str, gradient: torch.Tensor,
+                     source_device: DeviceCapability) -> None:
+        """Send gradient to the tensor database for FP32 master weight update."""
+        wire_data = self._encode_from_torch(gradient, source_device)
+        self.db_client.rdma_write(key, wire_data)
+
+    def get_kv_cache(self, layer_idx: int, seq_positions: List[int]
+                     ) -> torch.Tensor:
+        """Fetch KV cache entries from the centralized tensor database."""
+        keys = [f"kv:layer_{layer_idx}:pos_{p}" for p in seq_positions]
+        return self.db_client.batch_read(keys)
+\end{lstlisting}
 
 \subsection{vLLM Connector}
 
-The connector follows vLLM's existing patterns for distributed KV cache management. vLLM supports pluggable connectors (MooncakeConnector~\cite{mooncake2024}, NixlConnector~\cite{nixl}) through its transfer engine interface. Our \texttt{NeumannKVConnector} implements the same interface. It is initialized with a vLLM configuration and a role of either ``prefill'' or ``decode,'' and internally creates an \texttt{RDMATensorCacheMiddleware} instance. The \texttt{send\_kv\_caches\_and\_hidden\_states} method iterates over all layers' KV caches after prefill, writing each to Neumann under a key constructed from the request ID and layer index. The complementary \texttt{recv\_kv\_caches\_and\_hidden\_states} method, used during decode, reads KV caches back from Neumann for each layer using the middleware's \texttt{get\_kv\_cache} method, returning the assembled caches to vLLM's execution engine.
+The connector follows vLLM's existing patterns for distributed KV cache management. vLLM supports pluggable connectors (MooncakeConnector~\cite{mooncake2024}, NixlConnector~\cite{nixl}) through its transfer engine interface. Our connector implements the same interface:
+
+\begin{lstlisting}[language=Python, caption={vLLM RDMA connector skeleton}]
+class RDMAKVConnector:
+    """vLLM KV cache connector backed by the RDMA Tensor Database."""
+
+    def __init__(self, vllm_config, role: str):
+        self.role = role  # "prefill" or "decode"
+        self.middleware = RDMATensorCacheMiddleware(
+            MiddlewareConfig.from_vllm(vllm_config)
+        )
+
+    def send_kv_caches_and_hidden_states(
+        self, model_executable, model_input, kv_caches, hidden_states
+    ):
+        """Push KV caches to the tensor database after prefill."""
+        for layer_idx, kv in enumerate(kv_caches):
+            key = f"kv:req_{model_input.request_id}:layer_{layer_idx}"
+            self.middleware.db_client.rdma_write(key, kv)
+
+    def recv_kv_caches_and_hidden_states(self, model_executable, model_input):
+        """Pull KV caches from the tensor database for decode."""
+        kv_caches = []
+        for layer_idx in range(model_executable.num_layers):
+            key = f"kv:req_{model_input.request_id}:layer_{layer_idx}"
+            kv = self.middleware.get_kv_cache(layer_idx, model_input.positions)
+            kv_caches.append(kv)
+        return kv_caches, None
+\end{lstlisting}
 
 %=============================================================================
 \section{SoftRoCEv2 Baseline}

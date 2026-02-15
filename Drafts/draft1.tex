@@ -49,7 +49,7 @@
 \definecolor{problemred}{RGB}{220,53,69}
 \definecolor{solutiongreen}{RGB}{40,167,69}
 \definecolor{layergray}{RGB}{240,240,240}
-\definecolor{neumannpurple}{RGB}{102,51,153}
+\definecolor{dbpurple}{RGB}{102,51,153}
 \definecolor{v100blue}{RGB}{30,90,180}
 \definecolor{tower1color}{RGB}{50,130,60}
 \definecolor{tower2color}{RGB}{130,50,50}
@@ -100,7 +100,7 @@
 \textbf{Project Purpose.}
 When you run a large language model across multiple GPUs, those GPUs spend 30--60\% of their cycles waiting for data to arrive over the network. Existing communication libraries (NCCL, Gloo, UCX) route all tensor traffic through the same static channels, whether it is a small latency-sensitive KV cache page or a large bulk gradient synchronization. That creates \emph{head-of-line blocking}---big transfers hold up the small urgent ones, like a highway where sports cars and semi-trucks share a single lane. On top of that, different GPUs use different precision formats: V100s operate in FP16 while newer GPUs like the RTX 5070~Ti use BF16---same 16 bits, different exponent/mantissa trade-off. Current tools do not reconcile these mismatches on the fly, so mixed clusters waste cycles on manual conversion and risk silent precision drift.
 
-This project develops an adaptive RDMA middleware that addresses both problems. A Weighted Finite Automaton (WFA) classifier monitors tensor access patterns at runtime and categorizes each stream as hot, warm, or cold. Hot traffic (KV cache, attention scores) routes through dedicated low-latency Queue Pairs; cold traffic (weights, gradients) batches into throughput-optimized channels overlapped with computation. A centralized RDMA Tensor Cache in the Neumann runtime maintains FP32 master copies of shared tensors and applies stochastic rounding for precision conversion across heterogeneous GPU boundaries. The middleware supports pluggable transports (TCP, Soft-RoCE, hardware RoCEv2, Tesla TTPoe) and targets ${<}5$\% precision-switching overhead, ${>}90$\% prefetch hit rates, and $4\times$ bandwidth reduction via MXFP4 quantization---reducing communication-induced stalls by an order of magnitude over default NCCL on 100\,GbE fabrics.
+This project develops an adaptive RDMA middleware that addresses both problems. A Weighted Finite Automaton (WFA) classifier monitors tensor access patterns at runtime and categorizes each stream as hot, warm, or cold. Hot traffic (KV cache, attention scores) routes through dedicated low-latency Queue Pairs; cold traffic (weights, gradients) batches into throughput-optimized channels overlapped with computation. A centralized RDMA Tensor Database maintains FP32 master copies of shared tensors and applies stochastic rounding for precision conversion across heterogeneous GPU boundaries. The middleware supports pluggable transports (TCP, Soft-RoCE, hardware RoCEv2, Tesla TTPoe) and targets ${<}5$\% precision-switching overhead, ${>}90$\% prefetch hit rates, and $4\times$ bandwidth reduction via MXFP4 quantization---reducing communication-induced stalls by an order of magnitude over default NCCL on 100\,GbE fabrics.
 \end{abstract}
 
 \newpage
@@ -284,7 +284,7 @@ Modern LLM inference inverts this relationship. Autoregressive token generation 
 
 Volta (V100) introduced the first Tensor Cores, purpose-built Matrix-Multiply-Accumulate (MMA) units that operate on FP16 inputs with FP32 accumulation~\cite{patel2025tensorcore}. Each Tensor Core computes a $4 \times 4 \times 4$ fused multiply-add per cycle. The MMA instruction is \emph{warp-scoped}: a warp of 32 threads collectively feeds an $8 \times 8 \times 4$ matrix tile (shape \texttt{m8n8k4}) to the Tensor Cores, producing 1,024 FP16 FLOPs per cycle per SM.
 
-Volta's Tensor Cores delivered an order-of-magnitude improvement over CUDA cores for matrix operations, but they support only FP16 input $\to$ FP32 accumulate. Our V100 GPUs in Tower~2 inherit this limitation: tensors must be in IEEE FP16 format before Tensor Core execution. BF16 is not supported in hardware, which creates the precision mismatch with the RTX~5070~Ti (BF16-native) that motivates the RDMA Tensor Cache's stochastic rounding pipeline (Section~\ref{sec:neumann-integration}).
+Volta's Tensor Cores delivered an order-of-magnitude improvement over CUDA cores for matrix operations, but they support only FP16 input $\to$ FP32 accumulate. Our V100 GPUs in Tower~2 inherit this limitation: tensors must be in IEEE FP16 format before Tensor Core execution. BF16 is not supported in hardware, which creates the precision mismatch with the RTX~5070~Ti (BF16-native) that motivates the RDMA Tensor Cache's stochastic rounding pipeline (Section~\ref{sec:database-architecture}).
 
 \subsubsection{Turing and Ampere: Expanding Precision Support}
 
@@ -348,7 +348,7 @@ For our heterogeneous cluster, this has three direct consequences:
 \begin{enumerate}
     \item \textbf{Precision diversity:} The V100 supports only FP16 Tensor Core input; the 5070~Ti (Blackwell-class consumer) supports BF16 and FP8. Every tensor transferred between towers must undergo precision conversion. The RDMA Tensor Cache's FP32 master weights and stochastic rounding pipeline exist precisely because these GPUs cannot share a native precision format.
 
-    \item \textbf{Memory hierarchy depth:} Hopper and Blackwell add DSMEM and TMEM respectively, creating additional levels that tensor data must traverse. RDMA-delivered tensors land in HBM via GPUDirect; efficient kernels must then tile them through L2 $\to$ shared memory $\to$ TMEM/registers before Tensor Cores can consume them. The prefetch FSM (Section~\ref{sec:neumann-integration}) must account for this multi-level pipeline.
+    \item \textbf{Memory hierarchy depth:} Hopper and Blackwell add DSMEM and TMEM respectively, creating additional levels that tensor data must traverse. RDMA-delivered tensors land in HBM via GPUDirect; efficient kernels must then tile them through L2 $\to$ shared memory $\to$ TMEM/registers before Tensor Cores can consume them. The prefetch FSM (Section~\ref{sec:database-architecture}) must account for this multi-level pipeline.
 
     \item \textbf{Transfer size alignment:} Blackwell's \texttt{m256nNk16} tiles are $16\times$ larger than Volta's \texttt{m8n8k4}. RDMA transfer sizes should align with the destination GPU's tile granularity to avoid partial-tile stalls. The WFA classifier's hot/cold categorization implicitly captures this: small, latency-sensitive transfers (KV cache pages matching Volta's smaller tiles) take the hot path, while large weight tiles (matching Blackwell's larger MMA shapes) take the cold path with batching.
 \end{enumerate}
@@ -421,7 +421,7 @@ Hybrid & ms (heuristic) + periodic optimization & Strong practical & Flexible & 
 
 The survey identifies that no single paradigm dominates across all scenarios. \emph{Offline deterministic} workloads favor ILP/DP for optimal schedules. \emph{Online workloads with heavy-tailed transfer sizes}---typical of LLM inference where KV cache transfers are small and frequent while gradient syncs are large and periodic---benefit from queueing-theoretic policies like LAS or Gittins that balance fairness and mean response time. \emph{Heterogeneous resources} (our V100+5070~Ti cluster) require two-stage approaches: first matching transfers to resource classes, then applying standard scheduling within each class~\cite{gavel2020}. \emph{Multi-tenant cloud environments} demand fairness mechanisms; Themis~\cite{themis2020} uses partial-auction frameworks supplemented by SJF inner loops.
 
-Production systems converge on \emph{hybrid strategies}: lightweight heuristics for real-time dispatch, ILP or matching solvers for small-scale assignment tasks, and learning models for runtime and resource-usage prediction~\cite{gpu-scheduling-survey}. Our middleware adopts this hybrid pattern: the WFA classifier provides the heuristic real-time dispatch (hot/warm/cold in $O(1)$), periodic telemetry analysis provides the optimization feedback loop, and the prefetch engine's pattern classifier (Section~\ref{sec:neumann-integration}) provides the learned prediction component.
+Production systems converge on \emph{hybrid strategies}: lightweight heuristics for real-time dispatch, ILP or matching solvers for small-scale assignment tasks, and learning models for runtime and resource-usage prediction~\cite{gpu-scheduling-survey}. Our middleware adopts this hybrid pattern: the WFA classifier provides the heuristic real-time dispatch (hot/warm/cold in $O(1)$), periodic telemetry analysis provides the optimization feedback loop, and the prefetch engine's pattern classifier (Section~\ref{sec:database-architecture}) provides the learned prediction component.
 
 \subsubsection{Mapping to RDMA Tensor Scheduling}
 
@@ -448,7 +448,7 @@ Feedback-driven scaling~\cite{pollux2021} & GPU goodput optimization & Monitor Q
 }
 \end{table}
 
-The BBOP pattern is particularly relevant: during training, gradient tensors from completed layers can be batched into a single RDMA transfer while the next layer's forward pass proceeds. The prefetch engine (Section~\ref{sec:neumann-integration}) implements a variant of SMGP by issuing speculative RDMA reads for upcoming layers while the current layer computes. The feedback-driven approach from Pollux~\cite{pollux2021} informs our telemetry-based QP rebalancing: monitoring transfer completion rates per QP and reallocating capacity from underutilized cold-path channels to congested hot-path channels.
+The BBOP pattern is particularly relevant: during training, gradient tensors from completed layers can be batched into a single RDMA transfer while the next layer's forward pass proceeds. The prefetch engine (Section~\ref{sec:database-architecture}) implements a variant of SMGP by issuing speculative RDMA reads for upcoming layers while the current layer computes. The feedback-driven approach from Pollux~\cite{pollux2021} informs our telemetry-based QP rebalancing: monitoring transfer completion rates per QP and reallocating capacity from underutilized cold-path channels to congested hot-path channels.
 
 The survey's analysis of \emph{practical integration challenges}---resource-manager interfacing, distributed workload coordination, framework coupling, GPU-specific APIs, scheduler overhead, preemption cost, and monitoring overhead~\cite{gpu-scheduling-survey}---directly applies to our middleware. Our transport abstraction layer addresses framework coupling by providing a stable interface across vLLM, exo, and custom training loops. The container-aware communication broker (Section~\ref{sec:critical-issues}) addresses the deployment challenges that Chab et al.\ identify as a gap between algorithmic elegance and engineering practicality.
 
@@ -845,7 +845,7 @@ This thesis contributes:
     \item \textbf{Unified Telemetry Layer:} A monitoring system that instruments tensor transfers to collect access frequency, transfer size distributions, queue depth at RDMA endpoints, and latency percentiles.
     \item \textbf{WFA Tensor Classifier:} A Weighted Finite Automaton that classifies tensors into hot/warm/cold categories based on observed runtime access patterns, enabling intelligent routing.
     \item \textbf{Smart RDMA Routing:} Dual-path routing with dedicated Queue Pairs for latency-sensitive transfers and batched throughput-optimized channels for bulk data.
-    \item \textbf{RDMA Tensor Cache:} A centralized precision management layer in the Neumann runtime that resolves FP16/BF16 mismatches across heterogeneous GPUs.
+    \item \textbf{RDMA Tensor Cache:} A centralized precision management layer in the tensor database that resolves FP16/BF16 mismatches across heterogeneous GPUs.
     \item \textbf{Open-Source Middleware:} All code, configurations, and benchmark scripts released for community adoption.
 \end{enumerate}
 
@@ -1368,7 +1368,7 @@ The three modules (see \texttt{scripts/exo\_rdma\_integration.py}) implement: \t
 
 The vLLM connector (see \texttt{scripts/vllm\_connector.py}) follows the existing \texttt{KVConnectorBase} abstraction. The \texttt{AdaptiveRDMAConnector} combines the WFA classifier with dual-path routing to transparently optimize KV cache transfers---classifying each block by layer ID and access pattern before routing through the appropriate QP pool. The \texttt{InstrumentedKVCacheManager} wraps vLLM's \texttt{KVCacheManager} to collect nanosecond-resolution access timestamps that feed the WFA classifier.
 
-The \texttt{NeumannKVConnector} extends this further by pushing KV caches to Neumann after prefill and pulling them for decode, backed by the \texttt{RDMATensorCacheMiddleware} which handles precision conversion and transport selection transparently.
+The \texttt{RDMAKVConnector} extends this further by pushing KV caches to the tensor database after prefill and pulling them for decode, backed by the \texttt{RDMATensorCacheMiddleware} which handles precision conversion and transport selection transparently.
 
 %=============================================================================
 \section{Security Considerations}
@@ -1430,7 +1430,7 @@ The RDMA Tensor Cache resolves this through a three-stage precision pipeline:
 
 \node[stage, fill=v100blue!20] (v100) {V100 Forward Pass\\FP16 Tensor Cores};
 \node[op, right=1cm of v100] (rdma1) {RDMA Write\\100 GbE};
-\node[stage, fill=neumannpurple!15, right=1cm of rdma1] (master) {Neumann FP32\\Master Weights};
+\node[stage, fill=dbpurple!15, right=1cm of rdma1] (master) {Tensor DB FP32\\Master Weights};
 \node[op, right=1cm of master] (sr) {Stochastic\\Rounding};
 \node[stage, fill=tower1color!15, right=1cm of sr] (bf16) {5070 Ti\\BF16 Native};
 
@@ -1443,7 +1443,7 @@ The RDMA Tensor Cache resolves this through a three-stage precision pipeline:
 
 \end{tikzpicture}%
 }
-\caption{Precision pipeline. Gradients computed in V100 FP16 are accumulated into FP32 master weights stored in Neumann. Stochastic rounding converts to device-native precision for each GPU.}
+\caption{Precision pipeline. Gradients computed in V100 FP16 are accumulated into FP32 master weights stored in the tensor database. Stochastic rounding converts to device-native precision for each GPU.}
 \label{fig:precision-pipeline}
 \end{figure}
 
@@ -1455,10 +1455,10 @@ Standard round-to-nearest-even introduces systematic bias when converting FP32 t
 \end{equation}
 giving the unbiasedness property $\mathbb{E}[\text{round}(x)] = x$, which ensures gradient accumulation converges to the correct value despite precision loss in individual steps~\cite{micikevicius2018mixed}.
 
-\subsection{Neumann Integration}
-\label{sec:neumann-integration}
+\subsection{Tensor Database Architecture}
+\label{sec:database-architecture}
 
-The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the Neumann unified tensor runtime. It depends on \texttt{tensor\_store} for local key-value storage and \texttt{tensor\_compress} for delta encoding.
+The \texttt{tensor\_rdma} crate~\cite{scuffedrdma-repo} is a workspace member in the tensor database runtime. It depends on \texttt{tensor\_store} for local key-value storage and \texttt{tensor\_compress} for delta encoding.
 
 \begin{figure}[htbp]
 \centering
@@ -1466,7 +1466,7 @@ The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the
 \begin{tikzpicture}[
     node distance=1.2cm and 1.5cm,
     crate/.style={rectangle, draw, rounded corners, minimum width=2.8cm, minimum height=0.8cm, align=center, font=\small},
-    rdma/.style={crate, fill=neumannpurple!20, thick},
+    rdma/.style={crate, fill=dbpurple!20, thick},
     dep/.style={crate, fill=blue!10},
     ext/.style={crate, fill=gray!15, dashed},
     arrow/.style={->, >=stealth, thick}
@@ -1476,12 +1476,12 @@ The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the
 \node[dep, above left=1.5cm and 1cm of rdma] (store) {tensor\_store};
 \node[dep, above right=1.5cm and 1cm of rdma] (compress) {tensor\_compress};
 
-\node[crate, fill=neumannpurple!10, below left=1.5cm and 2cm of rdma] (precision) {precision.rs};
-\node[crate, fill=neumannpurple!10, below left=1.5cm and 0cm of rdma] (rounding) {rounding.rs};
-\node[crate, fill=neumannpurple!10, below right=1.5cm and 0cm of rdma] (prefetch) {prefetch.rs};
-\node[crate, fill=neumannpurple!10, below right=1.5cm and 2cm of rdma] (transport) {transport.rs};
-\node[crate, fill=neumannpurple!10, below=3cm of rdma, xshift=-1.5cm] (cache) {rdma\_cache.rs};
-\node[crate, fill=neumannpurple!10, below=3cm of rdma, xshift=1.5cm] (config) {config.rs};
+\node[crate, fill=dbpurple!10, below left=1.5cm and 2cm of rdma] (precision) {precision.rs};
+\node[crate, fill=dbpurple!10, below left=1.5cm and 0cm of rdma] (rounding) {rounding.rs};
+\node[crate, fill=dbpurple!10, below right=1.5cm and 0cm of rdma] (prefetch) {prefetch.rs};
+\node[crate, fill=dbpurple!10, below right=1.5cm and 2cm of rdma] (transport) {transport.rs};
+\node[crate, fill=dbpurple!10, below=3cm of rdma, xshift=-1.5cm] (cache) {rdma\_cache.rs};
+\node[crate, fill=dbpurple!10, below=3cm of rdma, xshift=1.5cm] (config) {config.rs};
 
 \node[ext, above=2.5cm of rdma, xshift=-3cm] (half) {half};
 \node[ext, above=2.5cm of rdma, xshift=0cm] (tokio) {tokio};
@@ -1492,16 +1492,16 @@ The \texttt{tensor\_rdma} crate~\cite{neumann-repo} is a workspace member in the
 \draw[arrow, gray] (dashmap) -- (rdma);
 \draw[arrow] (store) -- (rdma);
 \draw[arrow] (compress) -- (rdma);
-\draw[arrow, neumannpurple] (rdma) -- (precision);
-\draw[arrow, neumannpurple] (rdma) -- (rounding);
-\draw[arrow, neumannpurple] (rdma) -- (prefetch);
-\draw[arrow, neumannpurple] (rdma) -- (transport);
-\draw[arrow, neumannpurple] (rdma) -- (cache);
-\draw[arrow, neumannpurple] (rdma) -- (config);
+\draw[arrow, dbpurple] (rdma) -- (precision);
+\draw[arrow, dbpurple] (rdma) -- (rounding);
+\draw[arrow, dbpurple] (rdma) -- (prefetch);
+\draw[arrow, dbpurple] (rdma) -- (transport);
+\draw[arrow, dbpurple] (rdma) -- (cache);
+\draw[arrow, dbpurple] (rdma) -- (config);
 
 \end{tikzpicture}%
 }
-\caption{Neumann \texttt{tensor\_rdma} crate dependency graph. Six internal modules implement the RDMA Tensor Cache.}
+\caption{Tensor database \texttt{tensor\_rdma} crate dependency graph. Six internal modules implement the RDMA Tensor Cache.}
 \label{fig:crate-deps}
 \end{figure}
 
@@ -1532,7 +1532,7 @@ Multi-Latent Attention (MLA, DeepSeek-V2~\cite{deepseekv2}) and Multi-Query Atte
     \text{KV Memory (per rank, MQA)} = 2 \cdot L \cdot C \cdot d_{\text{kv}} \quad \text{(no reduction with TP)}
 \end{equation}
 
-Our solution externalizes the KV cache to Neumann, accessed via RDMA. A single centralized copy serves all TP ranks through one-sided RDMA reads, reducing total KV memory from $\text{TP} \times 2LC \cdot d_{\text{kv}}$ to $2LC \cdot d_{\text{kv}} + \text{TP} \times \text{prefetch\_buffer}$.
+Our solution externalizes the KV cache to the tensor database, accessed via RDMA. A single centralized copy serves all TP ranks through one-sided RDMA reads, reducing total KV memory from $\text{TP} \times 2LC \cdot d_{\text{kv}}$ to $2LC \cdot d_{\text{kv}} + \text{TP} \times \text{prefetch\_buffer}$.
 
 %=============================================================================
 \section{Benchmarking and Validation}
@@ -1874,8 +1874,8 @@ Both \texttt{ib\_write\_bw} and UCX achieve approximately 36--38\% of the theore
 
 The heterogeneous training pipeline assigns roles based on GPU capabilities:
 \begin{itemize}
-    \item \textbf{V100 pair (Tower 2):} Forward and backward passes in FP16 Tensor Cores. Gradients transferred to Neumann via RDMA.
-    \item \textbf{Neumann (Tower 2 host):} Accumulates gradients into FP32 master weights. Applies optimizer updates (Adam) in full precision.
+    \item \textbf{V100 pair (Tower 2):} Forward and backward passes in FP16 Tensor Cores. Gradients transferred to the tensor database via RDMA.
+    \item \textbf{Tensor Database (Tower 2 host):} Accumulates gradients into FP32 master weights. Applies optimizer updates (Adam) in full precision.
     \item \textbf{5070 Ti (Tower 1):} Receives BF16 weights via TCP/gRPC for inference validation during training.
 \end{itemize}
 
@@ -1889,7 +1889,7 @@ SAEs decompose a model's internal activation $\mathbf{a} \in \mathbb{R}^d$ into 
     \hat{\mathbf{a}} = W_{\text{dec}} \cdot \mathbf{f} + \mathbf{b}_{\text{dec}}
 \end{equation}
 
-Feature steering modifies behavior by clamping features: $\mathbf{f}'_i = \alpha \cdot \mathbf{f}_{\max,i}$. This requires no gradient computation and no backward pass---only a sparse vector read from Neumann. SAE feature vectors map to Neumann's \texttt{SparseVector} type with $\sim$655$\times$ compression (a 65536-dim vector with $\sim$50 active features: 256~KB dense $\to$ $\sim$400~bytes sparse, storing only non-zero index--value pairs).
+Feature steering modifies behavior by clamping features: $\mathbf{f}'_i = \alpha \cdot \mathbf{f}_{\max,i}$. This requires no gradient computation and no backward pass---only a sparse vector read from the tensor database. SAE feature vectors map to the \texttt{SparseVector} type with $\sim$655$\times$ compression (a 65536-dim vector with $\sim$50 active features: 256~KB dense $\to$ $\sim$400~bytes sparse, storing only non-zero index--value pairs).
 
 \begin{table}[htbp]
 \centering
@@ -2094,7 +2094,7 @@ We structure validation around three experimental pillars:
     seq/.style={state, fill=solutiongreen!20},
     str/.style={state, fill=ucxblue!20},
     lsw/.style={state, fill=cudaorange!20},
-    adp/.style={state, fill=neumannpurple!20},
+    adp/.style={state, fill=dbpurple!20},
     rnd/.style={state, fill=gray!20},
     arrow/.style={->, >=stealth, thick},
     label/.style={font=\scriptsize, align=center}
@@ -2197,7 +2197,7 @@ P4 & Transport Middleware & TransportBase abstraction, TCP/RoCE/TTPoe implementa
 P5 & EXO Integration & RDMADiscovery, RDMATransport, RDMATopologyManager (639 lines) & \S\ref{sec:architecture} \\
 P6 & Critical Issues Analysis & 7 blocking issues across NCCL/UCX/vLLM with proposed solutions & \S\ref{sec:critical-issues} \\
 P7 & System Architecture & WFA classifier, dual-path routing, RDMA Tensor Cache design & \S\ref{sec:architecture} \\
-P8 & Neumann Crate & \texttt{tensor\_rdma} Rust crate (116 tests, clean): precision, rounding, prefetch, transport, cache, config & \S\ref{sec:rdma-cache} \\
+P8 & Tensor Database & \texttt{tensor\_rdma} Rust crate (116 tests, clean): precision, rounding, prefetch, transport, cache, config & \S\ref{sec:rdma-cache} \\
 \bottomrule
 \end{tabular}%
 }
@@ -2230,7 +2230,7 @@ P16 & Thesis Writing & Consolidated report with all experimental results & Defen
 
 \subsection{Project Dependencies}
 
-Projects P9--P11 can proceed in parallel. P12 depends on P8 (Neumann crate). P13--P14 can proceed independently. P15 requires P9--P13. P16 runs continuously alongside all projects.
+Projects P9--P11 can proceed in parallel. P12 depends on P8 (tensor database). P13--P14 can proceed independently. P15 requires P9--P13. P16 runs continuously alongside all projects.
 
 %=============================================================================
 \section{Future Work and Conclusions}
@@ -2254,7 +2254,7 @@ This report consolidates the research progress from Updates 2--12, presenting a 
 \begin{enumerate}
     \item \textbf{Comprehensive issue analysis}: Seven critical blocking issues identified across NCCL, UCX, and vLLM, with proposed solutions for each.
     \item \textbf{Adaptive middleware}: A WFA-based tensor classifier with dual-path routing that differentiates latency-sensitive from throughput-sensitive transfers.
-    \item \textbf{RDMA Tensor Cache}: A precision management layer in Neumann that resolves heterogeneous GPU precision mismatches through FP32 master weight storage and stochastic rounding.
+    \item \textbf{RDMA Tensor Cache}: A precision management layer in the tensor database that resolves heterogeneous GPU precision mismatches through FP32 master weight storage and stochastic rounding.
     \item \textbf{Pluggable transport}: Support for TCP, Soft-RoCE, hardware RoCE, and TTPoe through a unified abstraction, with integration into both vLLM and exo frameworks.
     \item \textbf{Experimental validation framework}: Three-pillar methodology targeting precision overhead, prefetch effectiveness, and quantization quality, with concrete performance targets.
     \item \textbf{Circuit-aware transport}: Analysis of Anthropic's Transformer Circuits research identifies five concrete gaps in the middleware and proposes circuit-aware enhancements---composition-weighted WFA, phase-aware precision, sparse RDMA transfers, head-type prefetching, and delta-mode pipeline transport---with estimated 40--200$\times$ bandwidth compression on sparse-activation workloads.

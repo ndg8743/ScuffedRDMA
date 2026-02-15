@@ -125,13 +125,6 @@ class RDMAKVCacheConnector:
                  cache: Any = None,
                  wire_format: PrecisionFormat = PrecisionFormat.FP16,
                  classifier: Optional[TensorClassifier] = None):
-        """
-        Args:
-            transport: RDMA or TCP-sim transport backend.
-            cache: RdmaTensorCache instance for local buffering.
-            wire_format: Precision for KV data on the wire.
-            classifier: WFA tensor classifier for transport prioritization.
-        """
         self._transport = transport
         self._cache = cache
         self._wire_format = wire_format
@@ -142,18 +135,6 @@ class RDMAKVCacheConnector:
                       blocks: List[KVCacheBlock],
                       num_heads: int,
                       head_dim: int) -> KVCacheMetadata:
-        """
-        Send KV cache blocks to the remote decode node.
-
-        Args:
-            request_id: Unique request identifier.
-            blocks: List of per-layer KV cache blocks.
-            num_heads: Number of attention heads.
-            head_dim: Dimension per head.
-
-        Returns:
-            Metadata describing the transfer.
-        """
         if not blocks:
             raise ValueError("No KV cache blocks to send")
 
@@ -187,16 +168,6 @@ class RDMAKVCacheConnector:
 
     def recv_kv_cache(self, request_id: str,
                       meta: Optional[KVCacheMetadata] = None) -> List[KVCacheBlock]:
-        """
-        Receive KV cache blocks from the remote prefill node.
-
-        Args:
-            request_id: Request identifier to fetch.
-            meta: Optional metadata (if already received out-of-band).
-
-        Returns:
-            List of KV cache blocks per layer.
-        """
         if meta is None:
             meta = self._pending.get(request_id)
         if meta is None:
@@ -235,7 +206,6 @@ class RDMAKVCacheConnector:
     def _send_via_transport(self, meta: KVCacheMetadata,
                             blocks: List[KVCacheBlock],
                             priority: int = 2) -> None:
-        """Serialize and send KV data over the transport."""
         meta_bytes = meta.to_bytes()
         send = self._transport.send
         if hasattr(self._transport, 'send_with_priority'):
