@@ -1,12 +1,3 @@
-[submodule "Neumann"]
-	path = Neumann
-	url = https://github.com/ndg8743/Neumann.git
-[submodule "exo-cuda"]
-	path = exo-cuda
-	url = https://github.com/Scottcjn/exo-cuda.git
-[submodule "ram-coffers"]
-	path = ram-coffers
-	url = https://github.com/Scottcjn/ram-coffers.git
 [submodule "ucx"]
 	path = ucx
 	url = https://github.com/openucx/ucx.git
