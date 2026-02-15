@@ -225,6 +225,7 @@ Feb 15  Architecture comparison: AR vs Diffusion vs Mamba (Update 15)
 | **SR-IOV** | NIC virtualization for Proxmox | Designed, pending config |
 | **MDLM / SEDD** | Diffusion LLMs (no KV cache) | Pending download + test |
 | **Mamba** | SSM (constant-size state) | Pending download + test |
+| **LLM4Decompile** | Decompilation LLM (RISC-V fine-tuning, RDMA code analysis) | Pending fine-tuning ([#45](https://github.com/ndg8743/ScuffedRDMA/issues/45)) |
 
 ---
 
@@ -246,4 +247,5 @@ pdflatex update15.tex && bibtex update15 && pdflatex update15.tex && pdflatex up
 - [UCX (OpenUCX)](https://github.com/openucx/ucx)
 - [MDLM](https://github.com/kuleshov-group/mdlm)
 - [SEDD](https://github.com/louaaron/Score-Entropy-Discrete-Diffusion)
+- [LLM4Decompile](https://github.com/albertan017/LLM4Decompile) — fine-tuning target for RISC-V decompilation and RDMA code analysis
 - [Custom X99 BIOS with ReBAR](https://github.com/ndg8743/x99-udp4-rebar)
