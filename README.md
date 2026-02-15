@@ -26,9 +26,6 @@ This repository contains documentation, research, middleware prototypes, and dep
 |------|------|------|-----|------|
 | **Tower 1** (Windows) | RTX 5070 Ti | 16 GB | Mellanox ConnectX-4 100GbE | Hardware RoCEv2 |
 | **Tower 2** (Proxmox) | 2x Tesla V100 | 64 GB | Mellanox ConnectX-4 100GbE | Hardware RoCEv2, GPUDirect |
-
-### Total Cluster: 8 GPUs, 216 GB VRAM, mixed 10G/100G networking
-
 ---
 
 ## Repository Structure
