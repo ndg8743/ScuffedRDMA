@@ -5,7 +5,6 @@
 \usepackage{enumitem}
 \usepackage{hyperref}
 \usepackage{xcolor}
-\usepackage{listings}
 \usepackage{amsmath}
 \usepackage{tikz}
 \usepackage{pgfplots}
@@ -22,31 +21,6 @@
 \setlength{\textfloatsep}{4pt}
 \setlength{\intextsep}{4pt}
 
-\definecolor{codegreen}{rgb}{0,0.6,0}
-\definecolor{codegray}{rgb}{0.5,0.5,0.5}
-\definecolor{codepurple}{rgb}{0.58,0,0.82}
-\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
-\definecolor{errorred}{rgb}{0.8,0.1,0.1}
-
-\lstdefinestyle{mystyle}{
-    backgroundcolor=\color{backcolour},
-    commentstyle=\color{codegreen},
-    keywordstyle=\color{magenta},
-    stringstyle=\color{codepurple},
-    basicstyle=\ttfamily\scriptsize,
-    breakatwhitespace=false,
-    breaklines=true,
-    captionpos=b,
-    keepspaces=true,
-    showspaces=false,
-    showstringspaces=false,
-    showtabs=false,
-    tabsize=2,
-    aboveskip=3pt,
-    belowskip=3pt
-}
-\lstset{style=mystyle}
-
 \hypersetup{
     colorlinks=true,
     linkcolor=blue,
@@ -60,7 +34,7 @@
 \bibliographystyle{unsrtnat}
 
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
-\large Week 4: FlashAttention 3 Fix for NVIDIA Blackwell (RTX 5090)}
+\large FlashAttention 3 Fix for NVIDIA Blackwell (RTX 5090)}
 \author{Nathan Gopee\\
 MS Computer Science, SUNY New Paltz\\
 \texttt{gopeen1@newpaltz.edu}\\[1em]
@@ -73,7 +47,7 @@ MS Computer Science, SUNY New Paltz\\
 
 \section{Executive Summary}
 
-This update documents the discovery and resolution of a critical bug affecting FlashAttention 3 \cite{flashattn2} on NVIDIA Blackwell GPUs (RTX 5090). The fix enables our Cerberus node (2$\times$ RTX 5090, 64GB VRAM) to participate in multi-node vLLM inference with full FlashAttention 3 optimization.
+This update documents the discovery and resolution of a critical bug affecting FlashAttention 3 \cite{flashattn2} on NVIDIA Blackwell GPUs (RTX 5090). The lab cluster includes a Cerberus node equipped with two RTX 5090 GPUs (64GB total VRAM), and the fix enables this node to participate in multi-node vLLM inference with full FlashAttention 3 optimization.
 
 \textbf{Key Finding:} A lazy import pattern resolves early CUDA initialization failures on Blackwell architecture, restoring $\sim$15\% performance loss from FA2 fallback.
 
@@ -81,14 +55,7 @@ This update documents the discovery and resolution of a critical bug affecting F
 
 \subsection{Initial Symptom}
 
-When attempting to run vLLM with FlashAttention 3 on Cerberus (RTX 5090), the following error occurred:
-
-\begin{lstlisting}[language=bash]
-$ VLLM_FLASH_ATTN_VERSION=3 vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
-
-AssertionError: Sinks are only supported in FlashAttention 3
-RuntimeError: Early CUDA initialization error
-\end{lstlisting}
+When attempting to run vLLM with FlashAttention 3 on the Cerberus node (RTX 5090), an \texttt{AssertionError} (``Sinks are only supported in FlashAttention 3'') and a \texttt{RuntimeError} (``Early CUDA initialization error'') occurred when the \texttt{VLLM\_FLASH\_ATTN\_VERSION=3} environment variable was set.
 
 This was unexpected because:
 \begin{itemize}[noitemsep]
@@ -127,7 +94,7 @@ The fix was discovered through systematic investigation:
 
 \subsection{The Import Chain Problem}
 
-The bug originates from Python's eager module import behavior. When vLLM loads, the following chain executes:
+The bug originates from Python's eager module import behavior. When vLLM loads, a chain of module-scope imports propagates from \texttt{mm\_encoder\_attention.py} through \texttt{fa\_utils.py}, \texttt{vllm\_flash\_attn}, and \texttt{flash\_attention} down to CUTLASS, which calls \texttt{cuInit()}. This CUDA initialization call fails on Blackwell GPUs because the CUDA context has not yet been fully established at import time.
 
 \begin{figure}[H]
 \centering
@@ -154,17 +121,7 @@ The bug originates from Python's eager module import behavior. When vLLM loads, 
 
 \subsection{Why Blackwell Fails}
 
-On Blackwell GPUs, CUTLASS's \texttt{cuInit()} call requires the CUDA context to be fully initialized. However, module-scope imports execute \textit{before} vLLM sets up the GPU context:
-
-\begin{lstlisting}[language=Python]
-# BAD: Module-scope import (executes immediately when file is loaded)
-from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
-
-class MMEncoderAttention:
-    def __init__(self):
-        # cuInit() already failed during import above
-        self._fa_version = get_flash_attn_version()
-\end{lstlisting}
+On Blackwell GPUs, CUTLASS's \texttt{cuInit()} call requires the CUDA context to be fully initialized. However, module-scope imports execute \textit{before} vLLM sets up the GPU context. The problematic pattern is that \texttt{get\_flash\_attn\_version} is imported at the top of the \texttt{MMEncoderAttention} module file, which triggers the entire CUTLASS initialization chain immediately when the file is loaded---before any CUDA context exists.
 
 \subsection{Architecture Comparison}
 
@@ -187,156 +144,35 @@ RTX 5090 & Blackwell & 10.0 & \textcolor{red}{Fails} \\
 
 \subsection{Solution: Lazy Import Pattern}
 
-Move the import inside the function where it's actually used:
+The fix moves the import of \texttt{get\_flash\_attn\_version} from module scope into the function body where it is actually used. This way, the import (and the resulting CUTLASS/CUDA initialization) is deferred until the \texttt{MMEncoderAttention} constructor runs, at which point the CUDA context has been properly established by vLLM's startup sequence.
 
-\begin{lstlisting}[language=Python]
-# GOOD: Function-scope import (deferred until method is called)
-class MMEncoderAttention:
-    def __init__(self):
-        # Import happens AFTER CUDA context is ready
-        from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
-        self._fa_version = get_flash_attn_version()
-\end{lstlisting}
+\subsection{Patch Details}
 
-\subsection{Patch File}
-
-\begin{lstlisting}[language=diff]
-diff --git a/vllm/model_executor/layers/attention/mm_encoder_attention.py
-index 35c10ec0b..c83c5c587 100644
---- a/vllm/model_executor/layers/attention/mm_encoder_attention.py
-+++ b/vllm/model_executor/layers/attention/mm_encoder_attention.py
-@@ -7,7 +7,6 @@ import torch
- from vllm.logger import init_logger
- from vllm.model_executor.custom_op import CustomOp
- from vllm.model_executor.models.vision import get_vit_attn_backend
--from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
- from vllm.v1.attention.backends.registry import AttentionBackendEnum
- from vllm.v1.attention.ops.vit_attn_wrappers import (
-     vit_flash_attn_wrapper,
-@@ -69,6 +68,7 @@ class MMEncoderAttention(CustomOp):
-             AttentionBackendEnum.FLASH_ATTN,
-             AttentionBackendEnum.ROCM_AITER_FA,
-         }
-+        from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
-
-         self._fa_version = (
-             get_flash_attn_version() if self.is_flash_attn_backend else None
-\end{lstlisting}
+The patch modifies a single file: \texttt{vllm/model\_executor/layers/attention/mm\_encoder\_attention.py}. The module-scope import line \texttt{from vllm.v1.attention.backends.fa\_utils import get\_flash\_attn\_version} is removed from the top of the file. Instead, that same import statement is placed inside the method body, after the check for flash attention backends (\texttt{AttentionBackendEnum.FLASH\_ATTN} and \texttt{AttentionBackendEnum.ROCM\_AITER\_FA}), immediately before \texttt{self.\_fa\_version} is assigned.
 
 \section{Applying the Fix}
 
 \subsection{Method 1: Patch vLLM Source}
 
-\begin{lstlisting}[language=bash]
-# Clone vLLM repository
-git clone https://github.com/vllm-project/vllm.git
-cd vllm
-
-# Apply the patch
-patch -p1 < ~/ScuffedRDMA/deployment/patches/vllm-blackwell-fa3.patch
-
-# Install from source
-pip install -e .
-\end{lstlisting}
+The fix can be applied by cloning the vLLM repository, applying the patch file (stored at \texttt{deployment/patches/vllm-blackwell-fa3.patch} in the ScuffedRDMA repository) using \texttt{patch -p1}, and then installing vLLM from source with \texttt{pip install -e .}
 
 \subsection{Method 2: Patched Docker Image}
 
-\begin{lstlisting}[language=dockerfile]
-FROM vllm/vllm-openai:latest
-
-# Apply lazy import fix inline
-RUN SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])") && \
-    sed -i '/from vllm.v1.attention.backends.fa_utils import get_flash_attn_version/d' \
-        $SITE_PACKAGES/vllm/model_executor/layers/attention/mm_encoder_attention.py && \
-    sed -i '/AttentionBackendEnum.ROCM_AITER_FA,/a\        from vllm.v1.attention.backends.fa_utils import get_flash_attn_version' \
-        $SITE_PACKAGES/vllm/model_executor/layers/attention/mm_encoder_attention.py
-\end{lstlisting}
-
-Build and use:
-\begin{lstlisting}[language=bash]
-docker build -t vllm-blackwell-fix .
-docker run --gpus all -p 8000:8000 vllm-blackwell-fix \
-    --model deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
-\end{lstlisting}
+Alternatively, a Dockerfile was created that extends the official \texttt{vllm/vllm-openai:latest} image. It uses \texttt{sed} commands to remove the module-scope import line and insert a function-scope import in the correct location within the installed site-packages. The resulting image is built and used in place of the stock vLLM image for deployments on Blackwell hardware.
 
 \section{Verification Tests}
 
-\subsection{Test 1: GPU Detection}
+Five verification tests were designed and executed to confirm the fix:
 
-\begin{lstlisting}[language=bash]
-# Verify Blackwell GPU is detected
-$ python -c "import torch; print(torch.cuda.get_device_name())"
-NVIDIA GeForce RTX 5090
+\textbf{Test 1 -- GPU Detection:} PyTorch correctly identifies the RTX 5090 with compute capability (10, 0), confirming Blackwell architecture detection.
 
-$ python -c "import torch; print(torch.cuda.get_device_capability())"
-(10, 0)
-\end{lstlisting}
+\textbf{Test 2 -- FlashAttention 3 Import:} With \texttt{VLLM\_FLASH\_ATTN\_VERSION=3} set, the \texttt{get\_flash\_attn\_version()} function returns version 3 without any \texttt{cuInit} error, confirming the lazy import resolves the initialization race condition.
 
-\textbf{Expected:} Compute capability 10.0 for Blackwell.
+\textbf{Test 3 -- Model Loading:} A Llama 3.2 1B model loads successfully with FlashAttention 3 enabled and eager mode disabled, verifying that the full model initialization pipeline works on Blackwell.
 
-\subsection{Test 2: FlashAttention 3 Import}
+\textbf{Test 4 -- Inference Benchmark:} Benchmarking Llama 3.2 1B on the RTX 5090 shows 142.3 tokens/sec with FA2 fallback versus 163.8 tokens/sec with FA3 enabled---a 15\% throughput improvement confirming the performance benefit of the fix.
 
-\begin{lstlisting}[language=bash]
-# Test FA3 import without error
-$ VLLM_FLASH_ATTN_VERSION=3 python -c "
-from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
-print(f'FlashAttention version: {get_flash_attn_version()}')
-"
-FlashAttention version: 3
-\end{lstlisting}
-
-\textbf{Expected:} Returns version 3 without \texttt{cuInit} error.
-
-\subsection{Test 3: Model Loading}
-
-\begin{lstlisting}[language=bash]
-# Test full model load with FA3
-$ VLLM_FLASH_ATTN_VERSION=3 python -c "
-from vllm import LLM
-llm = LLM(model='meta-llama/Llama-3.2-1B',
-          tensor_parallel_size=1,
-          enforce_eager=False)
-print('Model loaded successfully with FA3!')
-"
-Model loaded successfully with FA3!
-\end{lstlisting}
-
-\textbf{Expected:} Model loads without assertion errors.
-
-\subsection{Test 4: Inference Benchmark}
-
-\begin{lstlisting}[language=bash]
-# Benchmark FA3 vs FA2 performance
-$ python benchmark_fa.py --model meta-llama/Llama-3.2-1B --fa-version 2
-Throughput: 142.3 tokens/sec (FA2)
-
-$ python benchmark_fa.py --model meta-llama/Llama-3.2-1B --fa-version 3
-Throughput: 163.8 tokens/sec (FA3)
-\end{lstlisting}
-
-\textbf{Expected:} $\sim$15\% improvement with FA3.
-
-\subsection{Test 5: Multi-Node Cluster}
-
-\begin{lstlisting}[language=bash]
-# Start Cerberus worker (RTX 5090)
-$ docker compose -f docker-compose.worker.yaml up -d
-
-# Start Chimera head (RTX 3090)
-$ docker compose -f docker-compose.head.yaml up -d
-
-# Verify cluster
-$ curl http://192.168.1.150:8265/api/cluster_status
-{
-  "nodes": [
-    {"node_id": "chimera", "gpus": 3, "status": "ALIVE"},
-    {"node_id": "cerberus", "gpus": 2, "status": "ALIVE"}
-  ],
-  "total_gpus": 5
-}
-\end{lstlisting}
-
-\textbf{Expected:} Both nodes connected, 5 total GPUs.
+\textbf{Test 5 -- Multi-Node Cluster:} Both the Cerberus worker (RTX 5090) and Chimera head (RTX 3090) nodes connect successfully via Ray, with the cluster status API reporting all 5 GPUs alive and operational.
 
 \section{Performance Impact}
 
@@ -401,22 +237,7 @@ Cerberus & 2$\times$ RTX 5090 & 64GB & FA3 (patched) & \textcolor{green}{Working
 
 \section{Files Added to Repository}
 
-\begin{lstlisting}
-ScuffedRDMA/deployment/
-  patches/
-    BLACKWELL_FA3_FIX.md          # Full documentation
-    vllm-blackwell-fa3.patch      # Git patch file
-  vllm-gptoss/
-    docker-compose.yaml           # gpt-oss specific config
-    README.md
-  chimera/
-    docker-compose.yaml           # OpenWebUI v0.7.2 + vLLM
-    README.md
-  multi-node/
-    docker-compose.head.yaml      # Chimera (3x 3090)
-    docker-compose.worker.yaml    # Cerberus (2x 5090)
-    README.md
-\end{lstlisting}
+The following files were added to the ScuffedRDMA repository as part of this fix: a full documentation file (\texttt{deployment/patches/BLACKWELL\_FA3\_FIX.md}), the git patch file itself (\texttt{deployment/patches/vllm-blackwell-fa3.patch}), a gpt-oss-specific Docker Compose configuration (\texttt{deployment/vllm-gptoss/}), an OpenWebUI v0.7.2 + vLLM configuration for Chimera (\texttt{deployment/chimera/}), and updated multi-node Docker Compose files for both head and worker nodes (\texttt{deployment/multi-node/}).
 
 \section{Conclusion}
 

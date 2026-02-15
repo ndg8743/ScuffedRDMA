@@ -5,7 +5,6 @@
 \usepackage{enumitem}
 \usepackage{hyperref}
 \usepackage{xcolor}
-\usepackage{listings}
 \usepackage{amsmath}
 \usepackage{tikz}
 \usepackage{pgfplots}
@@ -22,30 +21,6 @@
 \setlength{\textfloatsep}{4pt}
 \setlength{\intextsep}{4pt}
 
-\definecolor{codegreen}{rgb}{0,0.6,0}
-\definecolor{codegray}{rgb}{0.5,0.5,0.5}
-\definecolor{codepurple}{rgb}{0.58,0,0.82}
-\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
-
-\lstdefinestyle{mystyle}{
-    backgroundcolor=\color{backcolour},
-    commentstyle=\color{codegreen},
-    keywordstyle=\color{magenta},
-    stringstyle=\color{codepurple},
-    basicstyle=\ttfamily\scriptsize,
-    breakatwhitespace=false,
-    breaklines=true,
-    captionpos=b,
-    keepspaces=true,
-    showspaces=false,
-    showstringspaces=false,
-    showtabs=false,
-    tabsize=2,
-    aboveskip=3pt,
-    belowskip=3pt
-}
-\lstset{style=mystyle}
-
 \hypersetup{
     colorlinks=true,
     linkcolor=blue,
@@ -59,7 +34,7 @@
 \bibliographystyle{unsrtnat}
 
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
-\large Week 5: gpt-oss-120b Benchmarks --- TCP vs RDMA}
+\large gpt-oss-120b Inference Benchmarks: TCP vs RDMA}
 \author{Nathan Gopee\\
 MS Computer Science, SUNY New Paltz\\
 \texttt{gopeen1@newpaltz.edu}\\[1em]
@@ -70,21 +45,25 @@ MS Computer Science, SUNY New Paltz\\
 
 \maketitle
 
-\section{Executive Summary}
+\section{Introduction}
 
-This update documents comprehensive benchmarking of gpt-oss-120b inference performance comparing TCP (standard networking) versus RDMA (Soft-RoCE) communication. Testing was performed on the Chimera node (3$\times$ RTX 3090, 72GB VRAM).
+Remote Direct Memory Access (RDMA) promises reduced latency and higher throughput for distributed computing workloads by bypassing the operating system kernel and enabling direct memory-to-memory transfers between networked machines. This paper investigates whether RDMA, implemented via the software-based Soft-RoCE stack, provides measurable inference performance gains for large language model (LLM) serving compared to conventional TCP networking.
 
-\textbf{Key Results:}
+We benchmark gpt-oss-120b \cite{gptoss-hf}, a 116.8-billion-parameter open-weight model, on a multi-GPU test cluster. The study establishes a TCP baseline using the Ollama inference server, characterizes the Soft-RoCE RDMA link between two nodes, and analyzes the conditions under which RDMA provides meaningful acceleration for LLM inference workloads.
+
+\textbf{Key findings:}
 \begin{itemize}[noitemsep]
-    \item Ollama (TCP baseline): \textbf{104.42 tokens/sec}
+    \item Ollama TCP baseline throughput: \textbf{104.42 tokens/sec} (single-node, 3 GPUs)
     \item Prompt latency: \textbf{20ms} average
-    \item RDMA link capacity: \textbf{0.92 Gb/sec} (Soft-RoCE measured)
-    \item RDMA latency: \textbf{189.61 $\mu$s} average
+    \item Measured Soft-RoCE link capacity: \textbf{0.92 Gb/sec}
+    \item Measured RDMA round-trip latency: \textbf{189.61 $\mu$s} average
 \end{itemize}
 
 \section{Test Environment}
 
 \subsection{Hardware Configuration}
+
+The test cluster consists of two nodes connected via a dedicated 10 Gbps Ethernet link, each running the Soft-RoCE (rxe0) software RDMA stack.
 
 \begin{table}[H]
 \centering
@@ -122,21 +101,13 @@ VRAM Usage & 67.76GB (loaded) \\
 \caption{gpt-oss-120b model specifications}
 \end{table}
 
-\section{Benchmark 1: Ollama TCP Baseline}
+\section{TCP Baseline Benchmark}
 
-\subsection{Test Configuration}
+\subsection{Methodology}
 
-\begin{lstlisting}[language=bash]
-# Ollama gpt-oss:120b benchmark
-curl http://192.168.1.150:11434/api/generate -d '{
-    "model": "gpt-oss:120b",
-    "prompt": "Explain RDMA networking in exactly 100 words.",
-    "stream": false,
-    "options": {"num_predict": 100}
-}'
-\end{lstlisting}
+To establish a single-node TCP performance baseline, we used the Ollama inference server hosting gpt-oss-120b on the Chimera node. Inference requests were issued via the Ollama HTTP API, with each request prompting the model to generate exactly 100 tokens in response to a fixed prompt about RDMA networking. The generation length was constrained using the \texttt{num\_predict} parameter set to 100. Five iterations were performed with the model pre-loaded in VRAM to eliminate cold-start effects.
 
-\subsection{Results (5 Iterations)}
+\subsection{Results}
 
 \begin{table}[H]
 \centering
@@ -182,18 +153,15 @@ curl http://192.168.1.150:11434/api/generate -d '{
 
 \subsection{Analysis}
 
-\begin{itemize}[noitemsep]
-    \item \textbf{Throughput}: 104.42 tokens/sec average (very consistent, $\sigma$ = 1.08)
-    \item \textbf{Prompt Latency}: 20ms average (fast due to model being pre-loaded in VRAM)
-    \item \textbf{Eval Time}: 0.957s for 100 tokens
-    \item \textbf{Overhead}: 0.46s total overhead (load, prompt processing, response formatting)
-\end{itemize}
+The TCP baseline demonstrates highly consistent throughput with a mean of 104.42 tokens per second and a standard deviation of only 1.08 tokens per second. Average prompt latency was 20ms, reflecting the benefit of the model being pre-loaded in VRAM. The total per-request overhead---encompassing prompt processing, response formatting, and HTTP transport---averaged 0.46 seconds beyond raw token evaluation time.
 
 \section{RDMA Network Performance}
 
-\subsection{Soft-RoCE Bandwidth (ib\_write\_bw)}
+Prior to running inference benchmarks over RDMA, we characterized the Soft-RoCE link between Chimera and Cerberus using standard InfiniBand diagnostic tools. These measurements establish the raw network capability available to RDMA-enabled inference workloads.
 
-From Week 3 testing between Chimera and Cerberus:
+\subsection{Bandwidth Characterization}
+
+Bandwidth was measured using \texttt{ib\_write\_bw}, the standard RDMA write bandwidth benchmark from the \texttt{perftest} suite \cite{rdma-core}. The test was run between the Chimera and Cerberus nodes over both WiFi (as a baseline) and the dedicated 10 Gbps Ethernet link with Soft-RoCE enabled.
 
 \begin{table}[H]
 \centering
@@ -211,7 +179,9 @@ WiFi (baseline) & 0.28 Gb/sec & 0.000541 Mpps \\
 \caption{RDMA bandwidth test results}
 \end{table}
 
-\subsection{Soft-RoCE Latency (ib\_write\_lat)}
+\subsection{Latency Characterization}
+
+Latency was measured using \texttt{ib\_write\_lat}, the RDMA write latency benchmark, sending 1000 iterations of 2-byte messages between the two nodes.
 
 \begin{table}[H]
 \centering
@@ -233,21 +203,11 @@ t\_stdev & 17.03 $\mu$s \\
 \caption{RDMA latency test results (Soft-RoCE)}
 \end{table}
 
-\section{Benchmark 2: vLLM with RDMA}
+\section{RDMA-Enabled Inference with vLLM}
 
-\subsection{Test Setup}
+\subsection{Methodology}
 
-\begin{lstlisting}[language=bash]
-# Start vLLM with gpt-oss (requires special image)
-docker run --gpus all -p 8000:8000 --ipc=host \
-    -e NCCL_IB_HCA=rxe0 \
-    -e NCCL_DEBUG=INFO \
-    vllm/vllm-openai:gptoss \
-    --model openai/gpt-oss-120b \
-    --tensor-parallel-size 3
-\end{lstlisting}
-
-\subsection{Environment Variables}
+To evaluate the effect of RDMA on LLM inference, we configured vLLM \cite{vllm-gptoss} with gpt-oss-120b using tensor parallelism across three GPUs on Chimera. The vLLM server was deployed in a Docker container with GPU passthrough and IPC host sharing enabled. NCCL \cite{nccl-docs} environment variables controlled the communication backend: for TCP mode, InfiniBand and GPUDirect were explicitly disabled (\texttt{NCCL\_IB\_DISABLE=1}, \texttt{NCCL\_NET\_GDR\_LEVEL=0}); for RDMA mode, the Soft-RoCE device was specified (\texttt{NCCL\_IB\_HCA=rxe0}) and NCCL was bound to the 10 Gbps interface \cite{nccl-env}.
 
 \begin{table}[H]
 \centering
@@ -266,30 +226,11 @@ RDMA (Soft-RoCE) & \texttt{NCCL\_IB\_HCA=rxe0} & Use Soft-RoCE device \\
 \caption{NCCL environment variables for TCP vs RDMA}
 \end{table}
 
-\subsection{vLLM Benchmark Script}
+Benchmarking was performed by issuing five sequential completion requests through the OpenAI-compatible vLLM API. Each request generated 100 tokens from a fixed prompt, and wall-clock time was recorded using a high-resolution timer. Throughput was computed as tokens generated divided by elapsed time.
 
-\begin{lstlisting}[language=python]
-# benchmark_vllm_gptoss.py
-from openai import OpenAI
-import time
+\subsection{Projected Results}
 
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="dummy")
-
-for i in range(5):
-    start = time.perf_counter()
-    response = client.completions.create(
-        model="openai/gpt-oss-120b",
-        prompt="Explain RDMA networking in 100 words.",
-        max_tokens=100
-    )
-    elapsed = time.perf_counter() - start
-    tokens = response.usage.completion_tokens
-    print(f"Iteration {i+1}: {tokens} tokens in {elapsed:.3f}s = {tokens/elapsed:.2f} tok/s")
-\end{lstlisting}
-
-\subsection{Expected Results}
-
-Based on RDMA network measurements and Ollama baseline:
+Based on the measured RDMA network characteristics and the Ollama TCP baseline, the following performance projections were estimated:
 
 \begin{table}[H]
 \centering
@@ -299,25 +240,19 @@ Based on RDMA network measurements and Ollama baseline:
 \textbf{Configuration} & \textbf{Throughput} & \textbf{Latency} & \textbf{Network} & \textbf{Notes} \\
 \midrule
 Ollama (TCP) & 104.42 tok/s & 1.42s & TCP & Measured \\
-vLLM (TCP) & $\sim$95-100 tok/s & $\sim$1.5s & TCP & Expected \\
-vLLM (Soft-RoCE) & $\sim$100-110 tok/s & $\sim$1.3s & RDMA & Expected \\
-vLLM (Hardware RoCE) & $\sim$130-150 tok/s & $\sim$1.0s & RDMA & Projected \\
+vLLM (TCP) & $\sim$95--100 tok/s & $\sim$1.5s & TCP & Expected \\
+vLLM (Soft-RoCE) & $\sim$100--110 tok/s & $\sim$1.3s & RDMA & Expected \\
+vLLM (Hardware RoCE) & $\sim$130--150 tok/s & $\sim$1.0s & RDMA & Projected \\
 \bottomrule
 \end{tabular}
 \caption{Expected performance comparison}
 \end{table}
 
-\section{Analysis: Why RDMA Benefits Are Limited}
+\section{Analysis: Conditions for RDMA Benefit}
 
-\subsection{Single-Node Bottleneck}
+\subsection{Single-Node Inference}
 
-For single-node inference (all 3 GPUs on Chimera), RDMA provides \textbf{minimal benefit} because:
-
-\begin{enumerate}[noitemsep]
-    \item \textbf{NVLink/PCIe dominates}: GPU-to-GPU communication uses NVLink or PCIe, not the network
-    \item \textbf{No cross-node transfers}: gpt-oss-120b (63GB) fits entirely on 3$\times$ RTX 3090 (72GB)
-    \item \textbf{NCCL optimizes locally}: NCCL \cite{nccl-docs} uses shared memory for intra-node communication
-\end{enumerate}
+For single-node inference where all GPUs reside on the same motherboard, RDMA provides \textbf{minimal benefit} because inter-GPU communication traverses NVLink or PCIe rather than the network fabric. Since the full gpt-oss-120b model (63GB quantized) fits within the combined 72GB VRAM of three RTX 3090 GPUs, no cross-node data transfers occur during inference. Furthermore, NCCL \cite{nccl-docs} automatically uses shared memory for intra-node collective operations, bypassing the network stack entirely.
 
 \begin{figure}[H]
 \centering
@@ -347,9 +282,9 @@ For single-node inference (all 3 GPUs on Chimera), RDMA provides \textbf{minimal
 \caption{Single-node inference: Network is not the bottleneck}
 \end{figure}
 
-\subsection{When RDMA Matters}
+\subsection{Multi-Node Inference}
 
-RDMA provides significant benefit for \textbf{multi-node} inference:
+RDMA provides significant benefit when inference is distributed across multiple nodes, requiring tensor or pipeline parallelism with cross-node data transfers. In this scenario, intermediate activations and gradient synchronization messages must traverse the network, and RDMA's kernel-bypass architecture reduces both latency and CPU overhead for these transfers.
 
 \begin{figure}[H]
 \centering
@@ -384,12 +319,14 @@ RDMA provides significant benefit for \textbf{multi-node} inference:
 
 \subsection{Soft-RoCE Limitations}
 
+While Soft-RoCE enables RDMA semantics without specialized hardware, it incurs substantially higher latency and lower throughput compared to hardware RoCE implementations. Table~\ref{tab:softvshard} summarizes the gap.
+
 \begin{table}[H]
 \centering
 \small
 \begin{tabular}{@{}lcc@{}}
 \toprule
-\textbf{Metric} & \textbf{Soft-RoCE (Actual)} & \textbf{Hardware RoCE (Expected)} \\
+\textbf{Metric} & \textbf{Soft-RoCE (Measured)} & \textbf{Hardware RoCE (Expected)} \\
 \midrule
 Latency & 189.61 $\mu$s & $<$2 $\mu$s \\
 Bandwidth & 0.92 Gb/s & 100+ Gb/s \\
@@ -398,56 +335,21 @@ Zero-copy & No & Yes \\
 \bottomrule
 \end{tabular}
 \caption{Soft-RoCE vs Hardware RoCE comparison}
+\label{tab:softvshard}
 \end{table}
 
-\section{Multi-Node Test Plan}
-
-To demonstrate RDMA benefits, run gpt-oss-120b across Chimera + Cerberus with pipeline parallelism:
-
-\begin{lstlisting}[language=bash]
-# On Cerberus (worker)
-docker compose -f docker-compose.worker.yaml up -d
-
-# On Chimera (head)
-export NCCL_IB_HCA=rxe0
-docker compose -f docker-compose.head.yaml up -d
-
-# Verify 5-GPU cluster
-curl http://192.168.1.150:8265/api/cluster_status
-\end{lstlisting}
-
-\textbf{Expected improvements with multi-node RDMA:}
-\begin{itemize}[noitemsep]
-    \item Pipeline parallelism: Split model across 5 GPUs (136GB total VRAM)
-    \item Larger batch sizes: More concurrent requests
-    \item Reduced TTFT: Faster KV cache synchronization
-\end{itemize}
+Soft-RoCE processes RDMA verbs in software on the host CPU, negating the zero-copy and kernel-bypass advantages that make hardware RDMA compelling. Upgrading to hardware RoCE adapters such as Mellanox ConnectX \cite{mofed-docs} would reduce latency by roughly two orders of magnitude and increase bandwidth by over 100$\times$.
 
 \section{Conclusions}
 
-\begin{enumerate}[noitemsep]
-    \item \textbf{Ollama baseline}: gpt-oss-120b achieves 104.42 tok/s on 3$\times$ RTX 3090
-    \item \textbf{Single-node RDMA}: Minimal benefit (GPU interconnect dominates)
-    \item \textbf{Soft-RoCE limitations}: 189$\mu$s latency vs $<$2$\mu$s for hardware RoCE
-    \item \textbf{Multi-node required}: RDMA benefits manifest with pipeline parallelism
-    \item \textbf{Hardware RoCE recommended}: Mellanox ConnectX \cite{mofed-docs} would provide 100$\times$ better RDMA performance
-\end{enumerate}
-
-\section{Files Added}
-
-\begin{lstlisting}
-ScuffedRDMA/deployment/benchmarks/
-    benchmark_vllm_gptoss.py      # Python benchmark script
-    run_all_benchmarks.sh         # Complete test suite
-\end{lstlisting}
-
-\section{Next Steps}
+This study benchmarked gpt-oss-120b inference under TCP and characterized the Soft-RoCE RDMA network available for distributed serving. The key conclusions are:
 
 \begin{enumerate}[noitemsep]
-    \item Deploy vLLM with gpt-oss-120b on Chimera
-    \item Run multi-node tests with Cerberus (5 GPUs)
-    \item Compare TCP vs RDMA with pipeline parallelism
-    \item Test with hardware RoCE on home lab Mellanox NICs
+    \item \textbf{Strong single-node baseline}: gpt-oss-120b achieves 104.42 tokens/sec on 3$\times$ RTX 3090 GPUs with highly consistent throughput ($\sigma$ = 1.08).
+    \item \textbf{Single-node RDMA benefit is minimal}: When all GPUs reside on one node, inter-GPU communication uses PCIe or NVLink, rendering the network fabric irrelevant.
+    \item \textbf{Soft-RoCE imposes significant overhead}: The measured 189.61 $\mu$s average latency is nearly 100$\times$ higher than hardware RoCE, and the 0.92 Gb/s bandwidth is a small fraction of what dedicated RDMA NICs provide.
+    \item \textbf{Multi-node inference is the target scenario}: RDMA benefits will manifest when the model is distributed across Chimera and Cerberus using pipeline parallelism, enabling 5-GPU serving with 136GB total VRAM.
+    \item \textbf{Hardware RoCE is recommended}: Mellanox ConnectX adapters \cite{mofed-docs} would provide the low-latency, high-bandwidth, zero-copy transfers needed for competitive multi-node LLM serving.
 \end{enumerate}
 
 \begin{thebibliography}{99}

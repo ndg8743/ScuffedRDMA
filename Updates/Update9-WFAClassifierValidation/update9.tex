@@ -3,21 +3,8 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{booktabs}
-\usepackage{listings}
 \usepackage{xcolor}
 \usepackage{amsmath}
-
-\definecolor{codebg}{HTML}{F5F5F5}
-\lstset{
-    backgroundcolor=\color{codebg},
-    basicstyle=\ttfamily\small,
-    breaklines=true,
-    frame=single,
-    rulecolor=\color{gray!40},
-    numbers=left,
-    numberstyle=\tiny\color{gray},
-    tabsize=4,
-}
 
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
 \large Update 9: WFA Tensor Classification Validation on LLM4Decompile Inference}
@@ -33,7 +20,7 @@ MS Computer Science, SUNY New Paltz\\
 \begin{abstract}
 \noindent
 \textbf{Project Purpose.}
-This update validates the Weighted Finite Automaton (WFA) tensor classifier from the adaptive RDMA middleware (Update~10) against a real workload: LLM4Decompile, an open-source LLM that decompiles x86-64 binaries back into C source code. By instrumenting KV cache access patterns during decompilation inference on a Google Colab H100 GPU in BF16 with FlashAttention~2, we capture per-layer access frequencies and run the WFA classifier to categorize each layer's KV cache as hot, warm, or cold.
+This update validates the Weighted Finite Automaton (WFA) tensor classifier from the adaptive RDMA middleware against a real workload: LLM4Decompile, an open-source LLM that decompiles x86-64 binaries back into C source code. The WFA tensor classifier categorizes tensor access streams as hot, warm, or cold to drive RDMA Queue Pair routing decisions in the two-tower cluster. By instrumenting KV cache access patterns during decompilation inference on a Google Colab H100 GPU in BF16 with FlashAttention~2, we capture per-layer access frequencies and run the WFA classifier to categorize each layer's KV cache.
 
 Additionally, we implement SAE (Sparse Autoencoder) feature steering---the same technique behind Golden Gate Claude and the Eiffel Tower Llama demo---to demonstrate gradient-free behavior modification and measure its impact on WFA classification. Steering specific transformer layers changes their access patterns, which the WFA detects and would route to dedicated RDMA Queue Pairs.
 
@@ -80,7 +67,7 @@ LLM4Decompile connects to the thesis in two ways:
 
 \begin{enumerate}
     \item \textbf{WFA validation workload}: Decompilation inference exercises the full autoregressive generation pipeline (prefill + decode), producing real KV cache access patterns for WFA classifier validation.
-    \item \textbf{RISC-V assembly generation} (Section~14.2 of Update~10): The same model architecture could be fine-tuned on RISC-V binaries using the heterogeneous training pipeline (V100 FP16 forward/backward, Neumann FP32 master weights, 5070~Ti BF16 validation).
+    \item \textbf{RISC-V assembly generation}: The same model architecture could be fine-tuned on RISC-V binaries using the heterogeneous training pipeline (V100 FP16 forward/backward, Neumann FP32 master weights, 5070~Ti BF16 validation), as described in the RISC-V assembly generation component of the thesis.
 \end{enumerate}
 
 %=============================================================================
@@ -256,7 +243,7 @@ The same WFA classifier from Part~1 runs on both the unsteered baseline and the 
 
 Steering adds a per-token forward hook overhead at steered layers. The WFA detects this as modified temporal access patterns---steered layers show different inter-access timing distributions compared to unsteered layers. In the RDMA middleware, this information drives QP allocation: steered layers with higher compute overhead benefit from dedicated low-latency Queue Pairs to avoid becoming a pipeline bottleneck.
 
-This validates the thesis claim that SAE feature steering is a gradient-free alternative to fine-tuning (Section~11 of Update~10) and demonstrates that the WFA classifier correctly adapts its routing decisions when the inference workload changes.
+This validates the thesis claim that SAE feature steering is a gradient-free alternative to fine-tuning and demonstrates that the WFA classifier correctly adapts its routing decisions when the inference workload changes. The SAE steering approach, as described in the thesis's discussion of Sparse Autoencoder feature manipulation, allows behavioral modification without backward passes or weight updates, making it particularly efficient for RDMA-connected inference where minimizing cross-tower traffic is critical.
 
 %=============================================================================
 \section{Next Steps}
@@ -265,11 +252,11 @@ This validates the thesis claim that SAE feature steering is a gradient-free alt
 
 \begin{enumerate}
     \item Run the Colab notebook on the H100 VM and capture access traces, WFA classifications, and steering comparison figures.
-    \item Generate the steered vs.\ unsteered comparison figure for inclusion in Update~10.
+    \item Generate the steered vs.\ unsteered comparison figure for inclusion in the thesis.
     \item Extend the steering experiment with real SAE decoder weights (e.g., \texttt{andyrdt/saes-llama-3.1-8b-instruct}) on a Llama model.
     \item Extend the experiment to batch inference (multiple assembly samples) to produce non-uniform classification distributions.
-    \item Port the validated classifier and steering engine to the two-tower cluster for integration with the RDMA middleware (Project P10).
-    \item Explore fine-tuning LLM4Decompile on RISC-V assembly using the heterogeneous training pipeline (Project P16 / Section~14.2).
+    \item Port the validated classifier and steering engine to the two-tower cluster for integration with the RDMA middleware.
+    \item Explore fine-tuning LLM4Decompile on RISC-V assembly using the heterogeneous training pipeline.
 \end{enumerate}
 
 \bibliographystyle{plain}

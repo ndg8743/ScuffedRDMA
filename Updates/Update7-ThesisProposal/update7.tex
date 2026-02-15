@@ -23,18 +23,6 @@
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 
-% Code listings
-\usepackage{listings}
-\lstset{
-    basicstyle=\ttfamily\small,
-    breaklines=true,
-    frame=single,
-    backgroundcolor=\color{gray!10},
-    keywordstyle=\color{blue},
-    commentstyle=\color{green!50!black},
-    stringstyle=\color{red!70!black},
-}
-
 % Math
 \usepackage{amsmath,amssymb,amsthm}
 
@@ -64,7 +52,7 @@
 \title{
     \vspace{-1cm}
     \textbf{Adaptive RDMA Optimization for Distributed LLM Workloads} \\[0.5em]
-    \large Update 7: Thesis Proposal --- A Unified Communication Framework Addressing\\Fragmentation Across NCCL, UCX, JACCL, and Emerging Standards
+    \large Thesis Proposal --- A Unified Communication Framework Addressing\\Fragmentation Across NCCL, UCX, JACCL, and Emerging Standards
 }
 
 \author{
@@ -905,80 +893,17 @@ Intel X710 & -- & 10GbE iWARP & Consumer RDMA validation \\
 \end{tabular}
 \end{table}
 
-\subsection{12-Month Timeline}
-
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}[
-    node distance=0.3cm,
-    phase/.style={rectangle, draw, rounded corners, minimum height=0.8cm, align=center, font=\small},
-    milestone/.style={circle, draw, fill=red!50, minimum size=0.3cm}
-]
-
-% Timeline
-\draw[very thick, ->] (0,0) -- (13,0) node[right] {Months};
-\foreach \x in {1,...,12} {
-    \draw (\x, 0.1) -- (\x, -0.1) node[below, font=\tiny] {\x};
-}
-
-% Phases
-\node[phase, fill=blue!20, minimum width=3cm] (p1) at (1.5, 1) {Foundation\\Setup};
-\node[phase, fill=green!20, minimum width=3cm] (p2) at (4.5, 1) {Hardware\\Integration};
-\node[phase, fill=yellow!20, minimum width=3cm] (p3) at (7.5, 1) {Framework\\Integration};
-\node[phase, fill=orange!20, minimum width=2cm] (p4) at (10, 1) {Optimization};
-\node[phase, fill=red!20, minimum width=2cm] (p5) at (12, 1) {Evaluation};
-
-% Milestones
-\node[milestone] (m1) at (3, 0) {};
-\node[below=0.3cm of m1, font=\tiny, align=center] {UCX\\Working};
-
-\node[milestone] (m2) at (6, 0) {};
-\node[below=0.3cm of m2, font=\tiny, align=center] {RDMA\\Validated};
-
-\node[milestone] (m3) at (9, 0) {};
-\node[below=0.3cm of m3, font=\tiny, align=center] {WFA\\Integrated};
-
-\node[milestone] (m4) at (12, 0) {};
-\node[below=0.3cm of m4, font=\tiny, align=center] {Thesis\\Defense};
-
-\end{tikzpicture}
-\caption{Implementation timeline with key milestones.}
-\label{fig:timeline}
-\end{figure}
-
 \subsection{Software Stack}
 
-\begin{lstlisting}[language=Python, caption={Core middleware interface design}]
-class AdaptiveRDMAMiddleware:
-    def __init__(self, config: MiddlewareConfig):
-        self.wfa_classifier = WFAClassifier(config.wfa_params)
-        self.telemetry = RuntimeTelemetry()
-        self.transport = self._init_transport(config)
-        
-    def _init_transport(self, config):
-        # Automatic transport selection with fallback
-        if self._detect_container():
-            config.ucx_tls = "^shm,rc,tcp"  # Issue #10055 fix
-        
-        try:
-            return UCXTransport(config)
-        except UCXInitError:
-            return NCCLFallback(config)
-    
-    async def transfer_tensor(self, tensor: Tensor, dest: int):
-        # WFA classification
-        classification = self.wfa_classifier.classify(
-            tensor.id, tensor.size, self.telemetry.get_access_pattern(tensor.id)
-        )
-        
-        # Route based on classification
-        if classification == TensorClass.HOT:
-            return await self.transport.send_priority(tensor, dest)
-        elif classification == TensorClass.WARM:
-            return await self.transport.send_standard(tensor, dest)
-        else:  # COLD
-            return await self.transport.send_batched(tensor, dest)
-\end{lstlisting}
+The core middleware is implemented as a Python class, \texttt{AdaptiveRDMAMiddleware}, whose constructor accepts a configuration object specifying WFA classifier parameters, telemetry settings, and transport preferences.
+During initialization, the middleware instantiates a WFA classifier, a runtime telemetry collector, and a transport backend.
+Transport initialization proceeds by first inspecting whether the process runs inside a container; if so, the shared-memory transport is excluded from the UCX transport list to avoid the isolation failures described in Issue~7.
+The middleware then attempts to create a UCX-based transport as the primary backend and, upon failure, falls back to an NCCL-based transport.
+
+The central method, \texttt{transfer\_tensor}, accepts a tensor object and a destination rank.
+It queries the WFA classifier with the tensor's identifier, size, and historical access pattern obtained from the telemetry subsystem.
+Depending on whether the tensor is classified as hot, warm, or cold, the method dispatches the transfer through a dedicated high-priority queue pair, a standard queue pair, or a batched transfer channel, respectively.
+This design ensures that latency-critical tensors such as KV cache entries receive immediate, low-latency transport, while infrequently accessed buffers are coalesced for throughput efficiency.
 
 %=============================================================================
 \section{Validation Strategy}

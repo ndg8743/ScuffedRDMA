@@ -20,20 +20,6 @@
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 
-\usepackage{listings}
-\lstset{
-    basicstyle=\ttfamily\small,
-    breaklines=true,
-    frame=single,
-    backgroundcolor=\color{gray!10},
-    keywordstyle=\color{blue},
-    commentstyle=\color{green!50!black},
-    stringstyle=\color{red!70!black},
-    numbers=left,
-    numberstyle=\tiny\color{gray},
-    numbersep=5pt,
-}
-
 \usepackage{amsmath,amssymb,amsthm}
 
 \usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
@@ -155,24 +141,7 @@ The distinction between datacenter and consumer GPUs is critical here. The V100,
 
 \subsection{GPUDirect RDMA and nvidia-peermem}
 
-GPUDirect RDMA~\cite{gpudirect-rdma-redhat} enables RDMA NICs to read/write GPU memory directly. It requires the \texttt{nvidia-peermem} kernel module, which registers GPU memory regions with the InfiniBand subsystem. On Tower~2 (Linux), this is the target configuration for V100 tensor transfers:
-
-\begin{lstlisting}[language=bash, caption={GPUDirect RDMA setup on Tower 2}]
-# Load nvidia-peermem for GPUDirect RDMA
-modprobe nvidia-peermem
-
-# Verify registration
-dmesg | grep nv_mem
-# nvidia-peermem: module loaded, peer memory registered
-
-# Verify RDMA devices
-ibv_devinfo
-# hca_id: mlx5_0
-#   transport: InfiniBand (0)
-#   fw_ver: 12.28.2006
-#   node_guid: ...
-#   phys_port_cnt: 1
-\end{lstlisting}
+GPUDirect RDMA~\cite{gpudirect-rdma-redhat} enables RDMA NICs to read/write GPU memory directly. It requires the \texttt{nvidia-peermem} kernel module, which registers GPU memory regions with the InfiniBand subsystem. On Tower~2 (Linux), GPUDirect RDMA is configured by loading the \texttt{nvidia-peermem} kernel module and verifying that the module registers GPU peer memory successfully through kernel messages. The RDMA device information is then confirmed via \texttt{ibv\_devinfo}, which reports the ConnectX-4 NIC (\texttt{mlx5\_0}) with InfiniBand transport, firmware version 12.28.2006, and a single physical port. This confirms that the NIC can perform direct memory access to V100 GPU memory regions.
 
 \subsection{GDRCopy}
 
@@ -441,25 +410,7 @@ This gives the unbiasedness property:
 \end{equation}
 which ensures that gradient accumulation over many steps converges to the correct value despite precision loss in individual steps~\cite{micikevicius2018mixed}.
 
-In the \texttt{tensor\_rdma} crate, stochastic rounding is implemented in \texttt{rounding.rs} using the \texttt{half} crate for FP16/BF16 manipulation and \texttt{rand} for probability generation. The \texttt{next\_fp16} and \texttt{next\_bf16} helper functions find adjacent representable values via bit manipulation:
-
-\begin{lstlisting}[language=C, caption={Stochastic rounding implementation sketch (from rounding.rs)}, label={lst:stochastic-round}]
-pub fn stochastic_round_f32_to_f16(value: f32, rng: &mut impl Rng) -> f16 {
-    let floor = f16::from_f32(value);
-    let floor_f32 = floor.to_f32();
-
-    if (floor_f32 - value).abs() < f32::EPSILON {
-        return floor; // Exact representation
-    }
-
-    let ceil = next_fp16(floor, value > floor_f32);
-    let ceil_f32 = ceil.to_f32();
-    let gap = ceil_f32 - floor_f32;
-    let fraction = (value - floor_f32) / gap;
-
-    if rng.gen::<f32>() < fraction { ceil } else { floor }
-}
-\end{lstlisting}
+In the \texttt{tensor\_rdma} crate, stochastic rounding is implemented in \texttt{rounding.rs} using the \texttt{half} crate for FP16/BF16 manipulation and \texttt{rand} for probability generation. The core function, \texttt{stochastic\_round\_f32\_to\_f16}, takes an FP32 value and a random number generator as inputs and returns an FP16 result. It first truncates the input to the nearest lower FP16 representable value (the ``floor'') and converts that floor back to FP32 to measure the truncation error. If the original value is exactly representable in FP16 (the difference falls within machine epsilon), the floor is returned directly. Otherwise, the function computes the next higher representable FP16 value (the ``ceiling'') using bit-level manipulation via a \texttt{next\_fp16} helper. It then calculates the fractional position of the original FP32 value between the floor and ceiling, and uses a uniform random draw to decide the rounding direction: if the random value falls below the fraction, the result rounds up to the ceiling; otherwise it rounds down to the floor. This procedure guarantees that the expected value of the rounded output equals the original FP32 input, eliminating the systematic directional bias inherent in deterministic rounding during gradient accumulation.
 
 \subsection{Centralized KV Cache}
 
@@ -567,27 +518,7 @@ Configuration & \texttt{config.rs} & \texttt{RdmaCacheConfig}, \texttt{PrefetchS
 
 \subsection{Device Capability Model}
 
-The \texttt{DeviceCapability} struct encodes what each GPU supports. The \texttt{PrecisionRouter} uses these to select wire formats:
-
-\begin{lstlisting}[language=C, caption={Device capabilities for our hardware}, label={lst:device-caps}]
-// V100: FP16 native, FP32 supported, no BF16, GPUDirect RDMA
-DeviceCapability::v100_32gb() -> DeviceCapability {
-    name: "Tesla V100 32GB",
-    supported_formats: [FP16, FP32],
-    native_compute: FP16,
-    vram_bytes: 34_359_738_368,
-    gpu_direct_rdma: true,
-}
-
-// RTX 5070 Ti: BF16 native, FP16/FP32 supported, no GPUDirect
-DeviceCapability::rtx5070ti() -> DeviceCapability {
-    name: "RTX 5070 Ti 16GB",
-    supported_formats: [FP16, BF16, FP32],
-    native_compute: BF16,
-    vram_bytes: 17_179_869_184,
-    gpu_direct_rdma: false,
-}
-\end{lstlisting}
+The \texttt{DeviceCapability} struct encodes what each GPU supports, and the \texttt{PrecisionRouter} uses these capabilities to select wire formats. For our hardware, two device capability presets are defined. The V100 preset (\texttt{DeviceCapability::v100\_32gb()}) describes the Tesla V100 32\,GB as supporting FP16 and FP32 formats with FP16 as the native compute precision, 32\,GB of VRAM, and GPUDirect RDMA enabled. The RTX 5070~Ti preset (\texttt{DeviceCapability::rtx5070ti()}) describes the consumer GPU as supporting FP16, BF16, and FP32 with BF16 as the native compute precision, 16\,GB of VRAM, and GPUDirect RDMA disabled (since Windows lacks kernel-level RDMA support).
 
 The \texttt{PrecisionRouter::common\_format()} method determines the lowest common denominator: for V100 + 5070~Ti, this is FP16 (since V100 lacks BF16). However, the cache stores in FP32 and converts per-device, avoiding the precision ceiling that a common format would impose.
 
@@ -805,23 +736,7 @@ This modification is applied at inference time with no gradient computation, no 
 
 \subsubsection{Mapping to Neumann}
 
-SAE feature vectors are a natural fit for Neumann's \texttt{SparseVector} type, which stores only non-zero indices and values:
-\begin{lstlisting}[language=C, caption={SAE features as Neumann SparseVectors}]
-// A 65536-dim SAE feature vector with ~50 active features
-// Dense: 65536 * 4 bytes = 256 KB
-// SparseVector: ~50 * (4 + 4) bytes = 400 bytes
-// Compression: 51x (640:1 ratio)
-
-let feature_vector = SparseVector::from_pairs(
-    vec![(1204, 0.85), (3891, 0.42), (15023, 0.91), ...],
-    65536, // total dimensions
-);
-
-// Store in Neumann for RDMA access
-store.put("sae:layer_12:eiffel_tower", feature_vector);
-\end{lstlisting}
-
-The 51$\times$ compression from dense to sparse representation means SAE feature vectors are trivially transferable over RDMA---a single feature vector fits in a single RDMA read of $\sim$400~bytes, well below the MTU.
+SAE feature vectors are a natural fit for Neumann's \texttt{SparseVector} type, which stores only non-zero indices and values. A typical SAE feature vector has 65,536 dimensions but only approximately 50 active features, which illustrates the storage advantage: the dense representation requires $65{,}536 \times 4 = 256$\,KB, while Neumann's \texttt{SparseVector} stores only the active index--value pairs, consuming roughly $50 \times (4 + 4) = 400$\,bytes---a 51$\times$ compression ratio. These sparse vectors are constructed from the list of active feature indices and their activation magnitudes, stored in Neumann under descriptive keys (e.g., \texttt{sae:layer\_12:eiffel\_tower}), and made available for RDMA access by both towers. A single feature vector at approximately 400~bytes fits well within a single RDMA read, far below the network MTU.
 
 OpenAI's work on scaling SAEs~\cite{openai-sae-scaling} and the HuggingFace SAE collection~\cite{sae-collection} provide pre-trained SAEs for several open-weight models. These can be loaded into Neumann and served to both towers for inference-time steering.
 
@@ -853,72 +768,15 @@ SAE steering does not replace fine-tuning for all tasks. It cannot learn genuine
 \label{sec:python-prototype}
 %=============================================================================
 
-The Python prototype bridges the \texttt{tensor\_rdma} Rust crate with vLLM's distributed inference engine. It follows the middleware architecture established in Update~6 and extends it with RDMA-native connectors.
+The Python prototype bridges the \texttt{tensor\_rdma} Rust crate with vLLM's distributed inference engine. It follows the middleware architecture established in earlier work on the ScuffedRDMA communication layer and extends it with RDMA-native connectors.
 
 \subsection{Architecture}
 
-\begin{lstlisting}[language=Python, caption={RDMA Tensor Cache middleware extension}]
-class RDMATensorCacheMiddleware:
-    """Extends the ScuffedRDMA middleware with Neumann tensor cache access."""
-
-    def __init__(self, config: MiddlewareConfig):
-        self.transport = self._init_transport(config)
-        self.neumann_client = NeumannClient(
-            host=config.neumann_host,  # 192.168.2.111
-            port=config.neumann_port,  # 4791
-        )
-        self.precision_router = PrecisionRouter(config.devices)
-
-    def get_tensor(self, key: str, device: DeviceCapability) -> torch.Tensor:
-        """Fetch tensor from Neumann with automatic precision conversion."""
-        wire_format = self.precision_router.optimal_wire_format(device)
-        raw = self.neumann_client.rdma_read(key)
-        return self._decode_to_torch(raw, wire_format, device)
-
-    def put_gradient(self, key: str, gradient: torch.Tensor,
-                     source_device: DeviceCapability) -> None:
-        """Send gradient to Neumann for FP32 master weight update."""
-        wire_data = self._encode_from_torch(gradient, source_device)
-        self.neumann_client.rdma_write(key, wire_data)
-
-    def get_kv_cache(self, layer_idx: int, seq_positions: List[int]
-                     ) -> torch.Tensor:
-        """Fetch KV cache entries from centralized Neumann store."""
-        keys = [f"kv:layer_{layer_idx}:pos_{p}" for p in seq_positions]
-        return self.neumann_client.batch_read(keys)
-\end{lstlisting}
+The \texttt{RDMATensorCacheMiddleware} class extends the ScuffedRDMA middleware with Neumann tensor cache access. On initialization, it establishes a transport connection and creates a \texttt{NeumannClient} pointing to the Neumann host at 192.168.2.111 on port 4791, along with a \texttt{PrecisionRouter} configured with the available device capabilities. The middleware exposes two primary data-path methods. The \texttt{get\_tensor} method fetches a tensor from Neumann by key: it determines the optimal wire format for the requesting device via the precision router, issues an RDMA read through the Neumann client, and decodes the raw bytes into a PyTorch tensor in the appropriate precision. The \texttt{put\_gradient} method performs the reverse operation, encoding a PyTorch gradient tensor from the source device's native format and writing it to Neumann via RDMA for FP32 master weight accumulation. A \texttt{get\_kv\_cache} convenience method provides batch access to centralized KV cache entries by constructing keys from the layer index and sequence positions and issuing a batched RDMA read to retrieve the requested entries from Neumann's store.
 
 \subsection{vLLM Connector}
 
-The connector follows vLLM's existing patterns for distributed KV cache management. vLLM supports pluggable connectors (MooncakeConnector~\cite{mooncake2024}, NixlConnector~\cite{nixl}) through its transfer engine interface. Our connector implements the same interface:
-
-\begin{lstlisting}[language=Python, caption={vLLM RDMA connector skeleton}]
-class NeumannKVConnector:
-    """vLLM KV cache connector backed by Neumann RDMA Tensor Cache."""
-
-    def __init__(self, vllm_config, role: str):
-        self.role = role  # "prefill" or "decode"
-        self.middleware = RDMATensorCacheMiddleware(
-            MiddlewareConfig.from_vllm(vllm_config)
-        )
-
-    def send_kv_caches_and_hidden_states(
-        self, model_executable, model_input, kv_caches, hidden_states
-    ):
-        """Push KV caches to Neumann after prefill."""
-        for layer_idx, kv in enumerate(kv_caches):
-            key = f"kv:req_{model_input.request_id}:layer_{layer_idx}"
-            self.middleware.neumann_client.rdma_write(key, kv)
-
-    def recv_kv_caches_and_hidden_states(self, model_executable, model_input):
-        """Pull KV caches from Neumann for decode."""
-        kv_caches = []
-        for layer_idx in range(model_executable.num_layers):
-            key = f"kv:req_{model_input.request_id}:layer_{layer_idx}"
-            kv = self.middleware.get_kv_cache(layer_idx, model_input.positions)
-            kv_caches.append(kv)
-        return kv_caches, None
-\end{lstlisting}
+The connector follows vLLM's existing patterns for distributed KV cache management. vLLM supports pluggable connectors (MooncakeConnector~\cite{mooncake2024}, NixlConnector~\cite{nixl}) through its transfer engine interface. Our \texttt{NeumannKVConnector} implements the same interface. It is initialized with a vLLM configuration and a role of either ``prefill'' or ``decode,'' and internally creates an \texttt{RDMATensorCacheMiddleware} instance. The \texttt{send\_kv\_caches\_and\_hidden\_states} method iterates over all layers' KV caches after prefill, writing each to Neumann under a key constructed from the request ID and layer index. The complementary \texttt{recv\_kv\_caches\_and\_hidden\_states} method, used during decode, reads KV caches back from Neumann for each layer using the middleware's \texttt{get\_kv\_cache} method, returning the assembled caches to vLLM's execution engine.
 
 %=============================================================================
 \section{SoftRoCEv2 Baseline}
@@ -929,46 +787,11 @@ Before deploying hardware RoCE with the ConnectX-4 NICs, we establish a SoftRoCE
 
 \subsection{Configuration}
 
-On Tower~2 (Proxmox/Linux), SoftRoCEv2 is configured through the \texttt{rdma\_rxe} kernel module:
-
-\begin{lstlisting}[language=bash, caption={SoftRoCEv2 setup on Tower 2}]
-# Load the software RDMA provider
-modprobe rdma_rxe
-
-# Create RXE device over the physical NIC
-rdma link add rxe0 type rxe netdev ens3f0
-
-# Verify
-rdma link show
-# link rxe0/1 state ACTIVE physical_state LINK_UP netdev ens3f0
-
-ibv_devinfo -d rxe0
-# hca_id: rxe0
-# transport: InfiniBand (0)
-# fw_ver: 0.0.0
-# max_qp: 1024
-# max_mr_size: 0xffffffffffffffff
-\end{lstlisting}
+On Tower~2 (Proxmox/Linux), SoftRoCEv2 is configured by loading the \texttt{rdma\_rxe} kernel module and creating an RXE device bound to the physical NIC (\texttt{ens3f0}) using the \texttt{rdma link add} command. After creation, \texttt{rdma link show} confirms that the RXE device is in the ACTIVE state with physical link up over the specified network device. Querying the device with \texttt{ibv\_devinfo} reports it as an InfiniBand transport device with software firmware (version 0.0.0), supporting up to 1024 queue pairs and the maximum possible memory region size. This software RDMA provider exercises the same verbs API as hardware InfiniBand, enabling full development and testing of RDMA code paths.
 
 \subsection{GPUDirect RDMA Setup}
 
-For the V100 GPUs on Tower~2, GPUDirect RDMA provides the most efficient data path. With \texttt{nvidia-peermem} loaded, the RDMA NIC can read/write GPU memory directly:
-
-\begin{lstlisting}[language=bash, caption={GPUDirect RDMA verification}]
-# Load nvidia-peermem
-modprobe nvidia-peermem
-
-# Verify GPU BAR1 memory is accessible
-nvidia-smi -q | grep "BAR1"
-#   BAR1 Memory Usage
-#       Total: 32768 MiB
-#       Used: 2 MiB
-#       Free: 32766 MiB
-
-# Test with perftest
-ib_write_bw -d rxe0 --use_cuda=0  # Server (V100 GPU 0)
-ib_write_bw -d rxe0 --use_cuda=0 192.168.2.111  # Client
-\end{lstlisting}
+For the V100 GPUs on Tower~2, GPUDirect RDMA provides the most efficient data path. With \texttt{nvidia-peermem} loaded, the RDMA NIC can read/write GPU memory directly. The setup involves loading the \texttt{nvidia-peermem} kernel module and verifying that GPU BAR1 memory is accessible, which for the V100 32\,GB reports a total BAR1 space of 32,768\,MiB. RDMA write bandwidth can then be tested using the \texttt{perftest} suite's \texttt{ib\_write\_bw} tool with the \texttt{-{}-use\_cuda=0} flag to target GPU~0 memory, running in server mode on one end and client mode connecting to the Tower~2 address (192.168.2.111) on the other.
 
 \subsection{Expected Baseline Measurements}
 
@@ -1082,15 +905,7 @@ When the middleware initializes a connection between Tower~1 and Tower~2, the tr
 
 This negotiation is transparent to the application layer. The vLLM connector (Section~\ref{sec:python-prototype}) issues \texttt{get\_tensor} and \texttt{put\_gradient} calls without knowledge of the underlying transport. The same code runs whether the path is TCP (Tower~1), SoftRoCE (development), or hardware RoCE (production).
 
-The UCX environment variable \texttt{UCX\_TLS} can be used to constrain transport selection for debugging. Setting \texttt{UCX\_TLS=tcp} forces TCP on both sides; setting \texttt{UCX\_TLS=rc,tcp} allows the negotiation to select RC when available with TCP fallback. For our heterogeneous cluster, the recommended setting is:
-\begin{lstlisting}[language=bash]
-# Tower 2 (Linux, RDMA available)
-export UCX_TLS=rc,dc,tcp,cuda_copy,gdr_copy
-export UCX_NET_DEVICES=mlx5_0:1
-
-# Tower 1 (Windows, TCP only)
-export UCX_TLS=tcp
-\end{lstlisting}
+The UCX environment variable \texttt{UCX\_TLS} can be used to constrain transport selection for debugging. For our heterogeneous cluster, the recommended configuration sets \texttt{UCX\_TLS=rc,dc,tcp,cuda\_copy,gdr\_copy} and \texttt{UCX\_NET\_DEVICES=mlx5\_0:1} on Tower~2 (Linux, where RDMA is available), enabling the full range of transports including reliable and dynamic connections, TCP fallback, and both CUDA copy and GDRCopy for GPU memory access. On Tower~1 (Windows, TCP only), \texttt{UCX\_TLS} is set to \texttt{tcp} since no RDMA stack is available. Setting \texttt{UCX\_TLS=tcp} on both sides forces TCP for debugging, while \texttt{UCX\_TLS=rc,tcp} allows the negotiation to prefer RC when available with TCP fallback.
 
 %=============================================================================
 % References

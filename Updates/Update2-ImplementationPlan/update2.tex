@@ -5,7 +5,6 @@
 \usepackage{enumitem}
 \usepackage{hyperref}
 \usepackage{xcolor}
-\usepackage{listings}
 \usepackage{amsmath}
 \usepackage{tikz}
 \usetikzlibrary{shapes,arrows,positioning,fit,backgrounds}
@@ -14,32 +13,8 @@
 \titlespacing*{\subsection}{0pt}{6pt}{3pt}
 \setlength{\parskip}{2pt}
 
-\definecolor{codegreen}{rgb}{0,0.6,0}
-\definecolor{codegray}{rgb}{0.5,0.5,0.5}
-\definecolor{codepurple}{rgb}{0.58,0,0.82}
-\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
-
-\lstdefinestyle{mystyle}{
-    backgroundcolor=\color{backcolour},
-    commentstyle=\color{codegreen},
-    keywordstyle=\color{magenta},
-    stringstyle=\color{codepurple},
-    basicstyle=\ttfamily\scriptsize,
-    breakatwhitespace=false,
-    breaklines=true,
-    captionpos=b,
-    keepspaces=true,
-    showspaces=false,
-    showstringspaces=false,
-    showtabs=false,
-    tabsize=2,
-    aboveskip=3pt,
-    belowskip=3pt
-}
-\lstset{style=mystyle}
-
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
-\large Week 2: Implementation Plan}
+\large Implementation Plan}
 \author{Nathan Gopee\\
 MS Computer Science, SUNY New Paltz\\
 \texttt{gopeen1@newpaltz.edu}\\[1em]
@@ -116,16 +91,16 @@ A Weighted Finite Automaton that classifies tensors into hot/cold categories bas
 \begin{tikzpicture}[node distance=2.5cm, auto,
     state/.style={circle, draw, minimum size=1.2cm, font=\small},
     arrow/.style={->, >=stealth, thick}]
-    
+
     \node[state] (cold) {Cold};
     \node[state, right of=cold] (warm) {Warm};
     \node[state, right of=warm] (hot) {Hot};
-    
+
     \draw[arrow, bend left=20] (cold) to node[above] {\scriptsize freq $> \theta_1$} (warm);
     \draw[arrow, bend left=20] (warm) to node[below] {\scriptsize idle $> t_1$} (cold);
     \draw[arrow, bend left=20] (warm) to node[above] {\scriptsize freq $> \theta_2$} (hot);
     \draw[arrow, bend left=20] (hot) to node[below] {\scriptsize idle $> t_2$} (warm);
-    
+
     \draw[arrow, loop left] (cold) to node[left] {\scriptsize batch} (cold);
     \draw[arrow, loop right] (hot) to node[right] {\scriptsize priority} (hot);
 \end{tikzpicture}
@@ -227,257 +202,62 @@ GPUDirect RDMA & $<$2$\mu$s & RoCE/IB + nvidia-peermem & Tesla/Quadro only \\
 
 The middleware intercepts communication at two levels:
 
-\textbf{1. Tensor Parallel Communication} (replacing NCCL):
-\begin{lstlisting}[language=Python]
-# In vllm/distributed/parallel_state.py
-def tensor_model_parallel_all_reduce(tensor):
-    # Original: torch.distributed.all_reduce(tensor)
-    # Modified: route through adaptive middleware
-    pattern = wfa_classifier.classify(tensor)
-    if pattern == "hot":
-        rdma_hot_channel.all_reduce(tensor)
-    else:
-        rdma_cold_channel.batch_all_reduce(tensor)
-\end{lstlisting}
+\textbf{1. Tensor Parallel Communication} (replacing NCCL): The adaptive middleware hooks into vLLM's tensor-parallel all-reduce path (in \texttt{vllm/distributed/parallel\_state.py}). When a tensor all-reduce is requested, the WFA classifier first determines whether the tensor exhibits hot or cold access patterns. Hot tensors are routed through a dedicated low-latency RDMA channel, while cold tensors are batched and sent through the throughput-optimized channel. This replaces the default \texttt{torch.distributed.all\_reduce} call with pattern-aware routing.
 
-\textbf{2. KV Cache Transfers} (extending vLLM's Connector abstraction):
-\begin{lstlisting}[language=Python]
-# New connector: AdaptiveRDMAConnector
-class AdaptiveRDMAConnector(KVConnectorBase):
-    def save_kv_layer(self, layer_id, kv_tensors):
-        for block in kv_tensors:
-            pattern = self.classifier.classify(block)
-            self.router.transfer(block, pattern)
-\end{lstlisting}
+\textbf{2. KV Cache Transfers} (extending vLLM's Connector abstraction): A new \texttt{AdaptiveRDMAConnector} class extends vLLM's \texttt{KVConnectorBase}. During KV layer save operations, each KV block is classified by the WFA classifier and then routed through the appropriate RDMA transfer path based on its access pattern.
 
 \section{Implementation Plan}
 
-\subsection{Phase 1: Foundation (Weeks 1--4)}
+\subsection{Phase 1: Foundation}
 
-\textbf{Step 1.1: Environment Setup}
-\begin{lstlisting}[language=bash]
-# Install RDMA stack on both nodes
-sudo apt install rdma-core ibverbs-utils perftest libibverbs-dev
-pip install pyverbs
+\textbf{Environment Setup:} The RDMA software stack (\texttt{rdma-core}, \texttt{ibverbs-utils}, \texttt{perftest}, \texttt{libibverbs-dev}, and \texttt{pyverbs}) is installed on both nodes. Soft-RoCE is enabled on the 10GbE interface by loading the \texttt{rdma\_rxe} kernel module and creating a virtual RDMA device. Connectivity is verified using \texttt{ibv\_devices} to list RDMA devices and \texttt{rping} for basic RDMA ping testing between server and client.
 
-# Enable SoftRoCE on 10GbE interface
-sudo rdma link add rxe0 type rxe netdev eth0
-rdma link  # Verify: rxe0 should appear
+\textbf{Baseline Latency Measurement:} RDMA write latency is measured using \texttt{ib\_write\_lat} from the perftest suite, targeting sub-10$\mu$s round-trip time on Soft-RoCE. TCP latency is measured with \texttt{sockperf} to establish a baseline for comparison against RDMA performance.
 
-# Test connectivity
-ibv_devices  # List RDMA devices
-rping -s -v  # Server
-rping -c -a <server_ip> -v  # Client
-\end{lstlisting}
-
-\textbf{Step 1.2: Baseline Latency Measurement}
-\begin{lstlisting}[language=bash]
-# RDMA write latency (target: <10us for SoftRoCE)
-ib_write_lat -d rxe0 -n 1000  # Server
-ib_write_lat -d rxe0 -n 1000 <server_ip>  # Client
-
-# TCP baseline for comparison
-sockperf ping-pong -i <server_ip> --tcp
-\end{lstlisting}
-
-\textbf{Step 1.3: pyverbs Buffer Pool Implementation}
-\begin{lstlisting}[language=Python]
-import pyverbs as pv
-from pyverbs.pd import PD
-from pyverbs.mr import MR
-import numa
-
-class RDMABufferPool:
-    def __init__(self, ctx, size_mb=256, numa_node=0):
-        self.pd = PD(ctx)
-        # NUMA-aware allocation
-        numa.bind(numa_node)
-        self.mr = MR(self.pd, size_mb * 1024 * 1024,
-                     pv.enums.IBV_ACCESS_LOCAL_WRITE |
-                     pv.enums.IBV_ACCESS_REMOTE_WRITE)
-        
-    def get_buffer(self, size):
-        # Suballocate from registered region
-        ...
-\end{lstlisting}
+\textbf{pyverbs Buffer Pool Implementation:} A NUMA-aware RDMA buffer pool is implemented using \texttt{pyverbs}. The pool allocates a large memory region (default 256MB) registered with the RDMA protection domain, pinned to the same NUMA node as the host channel adapter using \texttt{libnuma}. A sub-allocation strategy provides individual buffers from this registered region on demand, avoiding repeated memory registration overhead.
 
 \textbf{Deliverable}: RDMA ping-pong achieving $<$10$\mu$s RTT on SoftRoCE.
 
-\subsection{Phase 2: Telemetry \& Classification (Weeks 5--8)}
+\subsection{Phase 2: Telemetry \& Classification}
 
-\textbf{Step 2.1: Instrument vLLM's KV Cache Manager}
-\begin{lstlisting}[language=Python]
-# In vllm/core/kv_cache_manager.py
-class InstrumentedKVCacheManager(KVCacheManager):
-    def __init__(self, ...):
-        super().__init__(...)
-        self.access_log = defaultdict(list)  # block_id -> timestamps
-        
-    def allocate_slots(self, request, num_tokens):
-        blocks = super().allocate_slots(request, num_tokens)
-        for block in blocks:
-            self.access_log[block.id].append(time.monotonic_ns())
-        return blocks
-\end{lstlisting}
+\textbf{Instrument vLLM's KV Cache Manager:} An instrumented subclass of vLLM's \texttt{KVCacheManager} is created that logs access timestamps for every block allocation. Each call to \texttt{allocate\_slots} records a nanosecond-precision timestamp per block, building an access frequency histogram that feeds into the classifier.
 
-\textbf{Step 2.2: Implement WFA Classifier}
-\begin{lstlisting}[language=Python]
-class TensorClassifier:
-    COLD, WARM, HOT = 0, 1, 2
-    
-    def __init__(self, theta1=10, theta2=100, t_idle=0.1):
-        self.state = {}  # tensor_id -> (state, last_access)
-        self.theta1, self.theta2 = theta1, theta2
-        self.t_idle = t_idle
-        
-    def classify(self, tensor_id, access_count, elapsed):
-        current = self.state.get(tensor_id, (self.COLD, 0))
-        if elapsed > self.t_idle:
-            new_state = max(self.COLD, current[0] - 1)
-        elif access_count > self.theta2:
-            new_state = self.HOT
-        elif access_count > self.theta1:
-            new_state = self.WARM
-        else:
-            new_state = current[0]
-        self.state[tensor_id] = (new_state, time.monotonic())
-        return new_state
-\end{lstlisting}
+\textbf{Implement WFA Classifier:} The \texttt{TensorClassifier} maintains a state machine with three states (Cold, Warm, Hot) for each tracked tensor. Transitions are governed by configurable thresholds: tensors exceeding $\theta_1$ accesses per interval transition from Cold to Warm, and those exceeding $\theta_2$ transition from Warm to Hot. Idle periods longer than $t_{idle}$ cause demotion. The classifier tracks per-tensor state and last-access timestamps to make classification decisions.
 
-\textbf{Step 2.3: Phase Detection (Prefill vs Decode)}
-\begin{lstlisting}[language=Python]
-def detect_phase(input_batch):
-    # Prefill: many tokens, few sequences
-    # Decode: few tokens (1 per seq), many sequences
-    tokens_per_seq = input_batch.num_tokens / input_batch.num_seqs
-    return "prefill" if tokens_per_seq > 8 else "decode"
-\end{lstlisting}
+\textbf{Phase Detection (Prefill vs Decode):} A lightweight heuristic distinguishes prefill from decode phases by examining the ratio of tokens to sequences in each batch. Prefill phases exhibit many tokens across few sequences, while decode phases show one token per sequence across many sequences. A threshold of eight tokens per sequence separates the two regimes, allowing the classifier to adjust its routing thresholds accordingly.
 
 \textbf{Deliverable}: Classifier achieving $>$90\% accuracy on synthetic access patterns.
 
-\subsection{Phase 3: Routing Integration (Weeks 9--12)}
+\subsection{Phase 3: Routing Integration}
 
-\textbf{Step 3.1: Dual-Path Queue Pair Pool}
-\begin{lstlisting}[language=Python]
-class DualPathRDMA:
-    def __init__(self, ctx, num_hot_qps=4, num_cold_qps=2):
-        # Hot path: dedicated QPs, polled completions
-        self.hot_qps = [self._create_qp(ctx, poll=True) 
-                        for _ in range(num_hot_qps)]
-        # Cold path: shared QPs, event-driven completions
-        self.cold_qps = [self._create_qp(ctx, poll=False) 
-                         for _ in range(num_cold_qps)]
-        self.cold_batch = []  # Accumulate for batching
-        
-    def transfer(self, tensor, classification):
-        if classification == TensorClassifier.HOT:
-            qp = self._get_least_loaded(self.hot_qps)
-            self._rdma_write_immediate(qp, tensor)  # Sub-5us
-        else:
-            self.cold_batch.append(tensor)
-            if len(self.cold_batch) >= 8:
-                self._flush_cold_batch()
-\end{lstlisting}
+\textbf{Dual-Path Queue Pair Pool:} The \texttt{DualPathRDMA} class maintains separate pools of RDMA Queue Pairs for hot and cold traffic. Hot-path QPs (default: 4) use polled completions for minimal latency, executing RDMA Write with Immediate operations targeting sub-5$\mu$s transfer times. Cold-path QPs (default: 2) use event-driven completions and batch transfers---accumulating tensors until a batch threshold (default: 8) is reached before flushing, optimizing for throughput. A least-loaded selection policy distributes hot transfers across available QPs.
 
-\textbf{Step 3.2: vLLM Connector Integration}
-\begin{lstlisting}[language=Python]
-# New file: vllm/distributed/kv_transfer/adaptive_rdma.py
-class AdaptiveRDMAConnector(KVConnectorBase):
-    def __init__(self, config):
-        self.rdma = DualPathRDMA(...)
-        self.classifier = TensorClassifier()
-        
-    def save_kv_layer(self, layer_id, kv_tensors):
-        for block_id, kv in enumerate(kv_tensors):
-            cls = self.classifier.classify(
-                f"{layer_id}:{block_id}", 
-                self.access_counts[block_id],
-                time.monotonic() - self.last_access[block_id])
-            self.rdma.transfer(kv, cls)
-\end{lstlisting}
+\textbf{vLLM Connector Integration:} A new \texttt{AdaptiveRDMAConnector} (placed in \texttt{vllm/distributed/kv\_transfer/}) extends \texttt{KVConnectorBase} and wires together the \texttt{DualPathRDMA} transport with the \texttt{TensorClassifier}. During \texttt{save\_kv\_layer} operations, each block's access count and time since last access are fed to the classifier, and the resulting classification determines which RDMA path handles the transfer.
 
-\textbf{Step 3.3: Benchmark TTFT Improvement}
-\begin{lstlisting}[language=bash]
-# Run vLLM benchmark with adaptive connector
-python -m vllm.entrypoints.openai.api_server \
-    --model meta-llama/Llama-2-7b-hf \
-    --tensor-parallel-size 2 \
-    --kv-connector AdaptiveRDMAConnector
-
-# Measure TTFT
-python benchmarks/benchmark_serving.py \
-    --model llama-7b --num-prompts 100
-\end{lstlisting}
+\textbf{Benchmark TTFT Improvement:} The vLLM OpenAI-compatible API server is launched with the adaptive connector enabled (via the \texttt{--kv-connector AdaptiveRDMAConnector} flag) using tensor parallelism across two GPUs. TTFT is measured using vLLM's built-in benchmark serving script across 100 prompts.
 
 \textbf{Deliverable}: 30\%+ TTFT reduction on 7B model inference.
 
-\subsection{Phase 4: Training Extension (Weeks 13--16)}
+\subsection{Phase 4: Training Extension}
 
-\textbf{Step 4.1: Adaptive All-Reduce for Gradients}
-\begin{lstlisting}[language=Python]
-# Hook into PyTorch DDP gradient synchronization
-class AdaptiveAllReduce:
-    def __init__(self, process_group, rdma_pool):
-        self.pg = process_group
-        self.rdma = rdma_pool
-        self.grad_classifier = TensorClassifier(theta1=5, theta2=50)
-        
-    def all_reduce(self, tensor):
-        # Classify based on gradient magnitude variance
-        cls = self._classify_gradient(tensor)
-        if cls == TensorClassifier.HOT:
-            # Critical gradients: immediate sync
-            self.rdma.hot_all_reduce(tensor)
-        else:
-            # Bulk gradients: batched async
-            self.rdma.cold_all_reduce_async(tensor)
-\end{lstlisting}
+\textbf{Adaptive All-Reduce for Gradients:} An \texttt{AdaptiveAllReduce} class hooks into PyTorch DDP gradient synchronization. Gradient tensors are classified based on magnitude variance---critical gradients with high variance are synchronized immediately via the hot RDMA path, while bulk gradients with stable values are batched and synchronized asynchronously through the cold path.
 
-\textbf{Step 4.2: Integration with FSDP}
-\begin{lstlisting}[language=Python]
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+\textbf{Integration with FSDP:} The adaptive routing is integrated with PyTorch's Fully Sharded Data Parallel (FSDP) by wrapping the model with an \texttt{AdaptiveProcessGroup} that routes FSDP's internal communication through the dual-path RDMA infrastructure.
 
-model = FSDP(model, 
-    process_group=AdaptiveProcessGroup(rdma_pool))
-\end{lstlisting}
-
-\textbf{Step 4.3: Profile with Nsight Systems}
-\begin{lstlisting}[language=bash]
-nsys profile -o training_profile \
-    python train.py --model llama-7b --use-adaptive-rdma
-nsys stats training_profile.qdrep
-\end{lstlisting}
+\textbf{Profiling:} NVIDIA Nsight Systems is used to profile training runs with adaptive RDMA enabled, generating detailed timelines of communication overlap and identifying any remaining synchronization bottlenecks.
 
 \textbf{Deliverable}: Training throughput improvement of 15\%+ over NCCL baseline.
 
-\subsection{Phase 5: Validation \& Writing (Weeks 17--24)}
+\subsection{Phase 5: Validation \& Writing}
 
-\textbf{Step 5.1: Comprehensive Benchmarking}
-\begin{lstlisting}[language=bash]
-# Test across model sizes
-for model in llama-7b llama-13b llama-70b; do
-    for tp in 2 4 8; do
-        python benchmark.py --model $model --tp $tp \
-            --connector {nccl,adaptive_rdma} \
-            --metrics ttft,tpot,throughput
-    done
-done
-\end{lstlisting}
+\textbf{Comprehensive Benchmarking:} A full sweep of model sizes (7B, 13B, 70B parameters) and tensor-parallel configurations (2, 4, 8 GPUs) is executed, comparing NCCL baseline against the adaptive RDMA connector. Metrics collected include TTFT, time per output token, and aggregate throughput.
 
-\textbf{Step 5.2: Ablation Studies}
+\textbf{Ablation Studies:}
 \begin{itemize}[noitemsep]
     \item WFA classifier vs.\ static hot/cold assignment
     \item Hot-path only vs.\ dual-path routing
     \item NUMA-aware vs.\ NUMA-oblivious allocation
     \item Threshold sensitivity analysis ($\theta_1$, $\theta_2$, $t_{idle}$)
-\end{itemize}
-
-\textbf{Step 5.3: Thesis Writing Timeline}
-\begin{itemize}[noitemsep]
-    \item Week 17--18: Introduction, Background, Related Work
-    \item Week 19--20: Design and Implementation chapters
-    \item Week 21--22: Evaluation chapter with all figures
-    \item Week 23--24: Conclusion, revisions, defense prep
 \end{itemize}
 
 \textbf{Deliverable}: Complete thesis with reproducible benchmarks and defense.
