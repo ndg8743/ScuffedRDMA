@@ -34,7 +34,8 @@
 \bibliographystyle{unsrtnat}
 
 \title{\textbf{Adaptive RDMA Optimization for Distributed LLM Workloads}\\[0.5em]
-\large Lab Infrastructure \& RDMA Transport Testing}
+\large Lab Infrastructure \& RDMA Transport Testing\\[0.3em]
+\normalsize (Revised with Hardware RoCEv2 Results)}
 \author{Nathan Gopee\\
 MS Computer Science, SUNY New Paltz\\
 \texttt{gopeen1@newpaltz.edu}\\[1em]
@@ -45,13 +46,55 @@ MS Computer Science, SUNY New Paltz\\
 
 \maketitle
 
+\section{Motivation: Why RDMA for Distributed LLM Inference}
+
+When an LLM exceeds the memory capacity of a single GPU, the model must be partitioned across multiple devices using tensor parallelism (splitting individual layers) or pipeline parallelism (assigning sequential stages to different GPUs). In both strategies, GPUs must exchange intermediate tensors---activations, attention KV caches, and gradient fragments---at every forward pass. Each exchange introduces a \textit{communication stall}: the receiving GPU sits idle until the data arrives.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Transport} & \textbf{Latency / transfer} & \textbf{32\,MB tensor shard} & \textbf{Measured on} \\
+\midrule
+TCP / Ethernet & $\sim$500--1000\,$\mu$s & $\sim$35\,ms & Typical 10\,GbE \\
+Soft-RoCE & $\sim$190\,$\mu$s & $\sim$278\,ms (0.92\,Gb/s) & Lab cluster \\
+\textbf{Hardware RoCEv2} & \textbf{0.71\,$\mu$s} & \textbf{$\sim$5\,ms (50.62\,Gb/s)} & \textbf{Home lab CX-4} \\
+\bottomrule
+\end{tabular}
+\caption{Communication cost per tensor exchange by transport---dozens of exchanges occur per forward pass}
+\end{table}
+
+During a single forward pass with pipeline parallelism, there can be dozens of these exchanges. The cumulative communication overhead directly inflates Time to First Token (TTFT). RDMA addresses this at three levels:
+
+\begin{enumerate}[noitemsep]
+    \item \textbf{Direct TTFT reduction.} Our measured 267$\times$ latency improvement (0.71\,$\mu$s vs.\ 190\,$\mu$s) eliminates most GPU idle time during tensor exchanges. For a pipeline with $N$ stages and $k$ exchanges per stage, the communication component of TTFT drops from $N \cdot k \cdot 190\,\mu\text{s}$ to $N \cdot k \cdot 0.71\,\mu\text{s}$.
+
+    \item \textbf{Enabling cross-node tensor parallelism.} With slow interconnects (TCP), only pipeline parallelism is viable across machines---tensor parallelism requires all-reduce operations that are too latency-sensitive for high-overhead transports. Hardware RDMA makes cross-node tensor parallelism practical, which is fundamentally more GPU-efficient (less pipeline bubble idle time).
+
+    \item \textbf{Fewer serving replicas at constant throughput.} By Little's Law ($L = \lambda W$), if each request completes faster ($W$ decreases), fewer concurrent model instances ($L$) are needed to sustain the same request rate ($\lambda$):
+    \begin{align*}
+        \text{Before:}\quad 10\;\text{req/s} \times 200\;\text{ms} &= 2.0\;\text{concurrent instances} \\
+        \text{After (30\% TTFT reduction):}\quad 10\;\text{req/s} \times 140\;\text{ms} &= 1.4\;\text{concurrent instances}
+    \end{align*}
+    A 30--50\% TTFT reduction translates to roughly 23--33\% fewer serving replicas for the same SLA---a direct cost saving in production GPU clusters.
+\end{enumerate}
+
+\textbf{Important caveat:} RDMA does \textit{not} reduce the number of GPUs needed for VRAM capacity. A 64\,GB model still requires $2\times$ V100-32GB regardless of network speed. The savings come from needing fewer \textit{replicas} of the full model to serve a given throughput target.
+
+The ScuffedRDMA adaptive middleware adds a further optimization layer: a runtime classifier routes latency-critical tensors (e.g., KV cache during prefill) through the hardware RDMA path while allowing bulk transfers (e.g., weight loading, checkpointing) to use slower paths. This maximizes the benefit of the fast path without requiring all traffic to traverse the RDMA fabric.
+
 \section{Overview}
 
-This document describes the deployment of the ScuffedRDMA research infrastructure across the SUNY New Paltz lab cluster (Chimera, Cerberus, Hydra), results from RDMA transport testing, and comprehensive deployment documentation covering six different transport options. Key accomplishments include:
+This document describes the deployment of the ScuffedRDMA research infrastructure across the SUNY New Paltz lab cluster (Chimera, Cerberus, Hydra) and the home lab (Tower~1, Tower~2), results from both software and hardware RDMA transport testing, and comprehensive deployment documentation covering six different transport options. Key accomplishments include:
 
 \begin{itemize}[noitemsep]
-    \item Configured 3-machine cluster with shared storage and GPU resources
-    \item Tested Soft-RoCE achieving 0.92 Gb/sec bandwidth and ~190$\mu$s latency
+    \item Configured 3-machine lab cluster with shared storage and GPU resources
+    \item Deployed home lab with 100GbE Mellanox ConnectX-4 NICs and direct-attach copper (DAC)
+    \item Tested Soft-RoCE achieving 0.92 Gb/sec bandwidth and $\sim$190$\mu$s latency (lab cluster)
+    \item Tested Hardware RoCEv2 achieving \textbf{50.62 Gb/s} bandwidth and \textbf{0.71$\mu$s} latency (home lab)
+    \item Identified \texttt{CONFIG\_INFINIBAND\_PEER\_MEM} kernel blocker for GPUDirect RDMA (Issue \href{https://github.com/ndg8743/ScuffedRDMA/issues/56}{\#56})
+    \item Enabled SR-IOV in ConnectX-4 firmware for NIC virtualization under Proxmox
     \item Built Tesla TTPoe kernel modules successfully
     \item Created comprehensive documentation for 6 RDMA transport technologies
     \item Deployed vLLM multi-node cluster configurations with Ray orchestration
@@ -101,6 +144,49 @@ Cerberus & Worker Node & 192.168.1.233 & 2$\times$ RTX 5090 & 128GB & Intel X710
 \end{figure}
 
 \textit{Note: Cerberus has dual network paths---WiFi (192.168.1.242) and 10G Ethernet (192.168.1.233). RDMA testing confirmed 3.3$\times$ improvement when using the 10G interface vs WiFi.}
+
+\subsection{Home Lab Configuration}
+
+The home lab provides hardware RDMA capabilities via Mellanox ConnectX-4 100GbE NICs connected by a direct-attach copper (DAC) cable, eliminating the need for a switch:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llllll@{}}
+\toprule
+\textbf{Machine} & \textbf{OS} & \textbf{GPUs} & \textbf{VRAM} & \textbf{NIC} & \textbf{RDMA} \\
+\midrule
+Tower 1 & Windows & RTX 5070 Ti & 16 GB & CX-4 100GbE & Hardware RoCEv2 \\
+Tower 2 & Proxmox/Linux & 2$\times$ V100 SXM2 & 64 GB & CX-4 100GbE & Hardware RoCEv2 \\
+\bottomrule
+\end{tabular}
+\caption{Home lab hardware configuration}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=3cm,
+    box/.style={rectangle, draw, rounded corners, minimum width=3cm, minimum height=1.2cm, align=center, font=\small},
+    arrow/.style={<->, thick}
+]
+    \node[box, fill=purple!15] (tower1) at (-3,0) {Tower 1\\Windows\\RTX 5070 Ti};
+    \node[box, fill=cyan!15] (tower2) at (3,0) {Tower 2\\Proxmox (2$\times$ V100)\\ConnectX-4};
+
+    \draw[arrow, red!70!black, line width=1.5pt] (tower1) -- node[above, font=\scriptsize] {100GbE DAC} node[below, font=\scriptsize] {Hardware RoCEv2} (tower2);
+\end{tikzpicture}
+\caption{Home lab topology---direct 100GbE DAC link between GPU nodes}
+\end{figure}
+
+\textbf{Key hardware details:}
+\begin{itemize}[noitemsep]
+    \item ConnectX-4 (MT27700) dual-port, PCIe 3.0 x16 (limited to x8 in Tower~2 $\rightarrow$ 63.0 Gb/s theoretical)
+    \item V100 SXM2 requires NVIDIA 580.126.09 legacy driver (Volta dropped from 590+ branch)
+    \item CUDA 13.0.0 standalone toolkit (Debian packages incompatible with .run driver)
+    \item ConnectX-4 ports required mode change from InfiniBand to Ethernet via \texttt{mstconfig}
+\end{itemize}
+
+\textit{Issue references: V100 legacy driver requirement (\href{https://github.com/ndg8743/ScuffedRDMA/issues/31}{Issue \#31}), GPUDirect RDMA blocked by kernel config (\href{https://github.com/ndg8743/ScuffedRDMA/issues/56}{Issue \#56}).}
 
 \section{User and Repository Setup}
 
@@ -178,6 +264,198 @@ Bandwidth & 5--8 Gb/s & 0.92 Gb/s & CPU-limited, not line rate \\
 \end{enumerate}
 
 \textbf{Recommendation}: Soft-RoCE is adequate for development/testing RDMA semantics but production deployments should use Hardware RoCE with Mellanox ConnectX NICs \cite{mofed-docs} (expected latency $<$2$\mu$s).
+
+\section{Hardware RoCEv2 Testing Results (Home Lab)}
+
+\subsection{ConnectX-4 Initialization}
+
+Deploying Hardware RoCEv2 on the ConnectX-4 required several non-obvious steps:
+
+\begin{enumerate}[noitemsep]
+    \item \textbf{Port mode change}: The ConnectX-4 defaults to InfiniBand mode, which does not negotiate with Ethernet DAC cables. Both ports were switched to Ethernet using \texttt{mstconfig}:
+    \begin{verbatim}
+    mstconfig -y -d 03:00.0 set LINK_TYPE_P1=2 LINK_TYPE_P2=2
+    \end{verbatim}
+    A reboot was required to apply the firmware change.
+
+    \item \textbf{Link negotiation}: After the port mode change, the DAC cable negotiated at 100 Gbps on port~1 (\texttt{ens4f1np1}). The interface was configured with IP 10.0.0.2/24 and MTU 9000 (jumbo frames).
+
+    \item \textbf{RDMA device verification}: Two RoCE devices appeared (\texttt{rocep3s0f0}, \texttt{rocep3s0f1}) with port~1 in ACTIVE state and RoCEv2 GIDs registered.
+\end{enumerate}
+
+\subsection{Bandwidth Test Results}
+
+Loopback testing was performed using \texttt{ib\_write\_bw} \cite{perftest} on the ConnectX-4:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Transport} & \textbf{BW Peak} & \textbf{BW Avg} & \textbf{MsgRate} & \textbf{Hardware} \\
+\midrule
+Soft-RoCE (10GbE) & 0.92 Gb/s & 0.92 Gb/s & 0.001754 Mpps & Aquantia 10G \\
+\textbf{Hardware RoCEv2 (CX-4)} & \textbf{50.62 Gb/s} & \textbf{50.62 Gb/s} & \textbf{0.096 Mpps} & \textbf{ConnectX-4 100GbE} \\
+\bottomrule
+\end{tabular}
+\caption{RDMA bandwidth comparison: Soft-RoCE vs Hardware RoCEv2}
+\end{table}
+
+\textbf{Key Finding:} Hardware RoCEv2 delivers \textbf{55$\times$ the bandwidth} of Soft-RoCE. The 50.62 Gb/s result is limited by the PCIe 3.0 x8 electrical connection (theoretical max $\sim$63 Gb/s), not the 100GbE link. Full 100 Gb/s would require PCIe 3.0 x16 or PCIe 4.0.
+
+\subsection{Latency Test Results}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Metric} & \textbf{Soft-RoCE} & \textbf{Hardware RoCEv2} \\
+\midrule
+t\_min & 130.21 $\mu$s & \textbf{0.63 $\mu$s} \\
+t\_max & 219.66 $\mu$s & 6.42 $\mu$s \\
+t\_typical & 198.91 $\mu$s & \textbf{0.71 $\mu$s} \\
+t\_avg & 189.61 $\mu$s & \textbf{0.71 $\mu$s} \\
+t\_stdev & 17.03 $\mu$s & 0.18 $\mu$s \\
+99th percentile & 207.14 $\mu$s & 0.86 $\mu$s \\
+\bottomrule
+\end{tabular}
+\caption{RDMA latency comparison: Soft-RoCE vs Hardware RoCEv2 (ib\_write\_lat)}
+\end{table}
+
+\textbf{Key Finding:} Hardware RoCEv2 achieves \textbf{0.71$\mu$s average latency}---a \textbf{267$\times$ improvement} over Soft-RoCE's 189.6$\mu$s. This sub-microsecond latency enables true kernel-bypass RDMA and validates the thesis approach of using hardware RDMA for latency-sensitive tensor transfers.
+
+\subsection{Performance Comparison Chart}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    bar width=1.2cm,
+    width=0.7\textwidth,
+    height=6cm,
+    ylabel={Latency ($\mu$s) --- log scale},
+    ymode=log,
+    ymin=0.5,
+    ymax=300,
+    symbolic x coords={Soft-RoCE, Hardware RoCEv2},
+    xtick=data,
+    nodes near coords,
+    nodes near coords align={vertical},
+    every node near coord/.append style={font=\scriptsize},
+    grid=major,
+    grid style={gray!30},
+    title={\textbf{RDMA Latency: Software vs Hardware}},
+]
+\addplot[fill=red!30, draw=red!50] coordinates {(Soft-RoCE, 189.61)};
+\addplot[fill=green!40, draw=green!60] coordinates {(Hardware RoCEv2, 0.71)};
+\legend{Soft-RoCE, Hardware RoCEv2}
+\end{axis}
+\end{tikzpicture}
+\caption{RDMA write latency comparison (log scale)---267$\times$ improvement with hardware offload}
+\end{figure}
+
+\subsection{Implications for Adaptive Middleware}
+
+These results directly inform the middleware design:
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Hot tensor path}: At 0.71$\mu$s latency, hardware RoCEv2 meets the $<$1$\mu$s target for attention KV cache transfers during prefill
+    \item \textbf{Cold tensor path}: Even at 50.62 Gb/s, bulk weight transfers complete in $\sim$5ms for a 32MB tensor shard
+    \item \textbf{WFA classifier threshold}: The 267$\times$ latency gap between software and hardware RDMA justifies the overhead of runtime tensor classification ($<$100ns target, \href{https://github.com/ndg8743/ScuffedRDMA/issues/46}{Issue \#46})
+    \item \textbf{PCIe bottleneck}: GPUDirect RDMA will bypass the CPU memory copy, but the PCIe x8 link remains the physical ceiling
+\end{itemize}
+
+\section{GPUDirect RDMA: Blockers and Kernel Rebuild}
+
+\subsection{The nvidia-peermem Problem}
+
+GPUDirect RDMA requires the \texttt{nvidia-peermem} kernel module to bridge GPU memory and the RDMA NIC. On Tower~2, \texttt{modprobe nvidia-peermem} fails with ``Invalid argument'' because the running PVE kernel (6.17.2-1-pve) was compiled \textbf{without} \texttt{CONFIG\_INFINIBAND\_PEER\_MEM}.
+
+\begin{verbatim}
+# grep ib_register_peer_memory_client /proc/kallsyms | wc -l
+0
+\end{verbatim}
+
+The \texttt{ib\_register\_peer\_memory\_client} symbol, which nvidia-peermem needs to register as a peer memory client with the IB core, is absent. This is the single blocker for GPUDirect RDMA on this system (\href{https://github.com/ndg8743/ScuffedRDMA/issues/56}{Issue \#56}).
+
+\subsection{PVE Kernel Rebuild}
+
+To resolve this, the PVE kernel source (git.proxmox.com) was cloned and rebuilt with the missing config option:
+
+\begin{enumerate}[noitemsep]
+    \item Cloned \texttt{pve-kernel} from \texttt{git://git.proxmox.com/git/pve-kernel.git}
+    \item Added \texttt{-m CONFIG\_INFINIBAND\_PEER\_MEM} to \texttt{PMX\_CONFIG\_OPTS} in \texttt{debian/rules}
+    \item Built kernel 6.17.13-1-pve with \texttt{dpkg-buildpackage}
+    \item Produced .deb packages: kernel (119MB), headers (15MB), tools
+\end{enumerate}
+
+After installing the rebuilt kernel and rebooting, \texttt{ib\_core.ko} will export the peer memory client API, enabling \texttt{nvidia-peermem} to register and provide GPU$\leftrightarrow$NIC DMA paths.
+
+\textit{This rebuild also positions the system for SR-IOV VF passthrough testing (Section~\ref{sec:sriov}).}
+
+\section{SR-IOV Configuration}
+\label{sec:sriov}
+
+\subsection{Motivation}
+
+Single Root I/O Virtualization (SR-IOV) allows a physical NIC to present multiple Virtual Functions (VFs) to the hypervisor, each passable to a different VM or container. For the thesis, SR-IOV enables:
+
+\begin{itemize}[noitemsep]
+    \item Passing a dedicated 100GbE VF to a GPU VM alongside a V100 via PCI passthrough
+    \item Testing RDMA from within Proxmox VMs (simulating datacenter deployment)
+    \item Running isolated vLLM workers with dedicated network paths
+\end{itemize}
+
+\subsection{Firmware Configuration}
+
+SR-IOV was enabled in the ConnectX-4 firmware using \texttt{mstconfig}:
+
+\begin{verbatim}
+mstconfig -y -d 03:00.0 set SRIOV_EN=1 NUM_OF_VFS=8
+\end{verbatim}
+
+This configures up to 8 VFs per physical function. A reboot is required to activate the VFs, at which point \texttt{/sys/class/net/ens4f1np1/device/sriov\_numvfs} can be written to instantiate them.
+
+\subsection{Proxmox Integration}
+
+VF lifecycle management in Proxmox requires a hookscript \cite{pve-hookscript-sriov} to create/destroy VFs on VM start/stop. The hookscript approach is preferred over static \texttt{/etc/rc.local} VF creation because:
+
+\begin{itemize}[noitemsep]
+    \item VFs are only created when needed (on VM pre-start)
+    \item VFs are destroyed on VM post-stop, freeing resources
+    \item Each VM's configuration specifies which VF to use via \texttt{hostpci} entries
+\end{itemize}
+
+\textit{IOMMU is already enabled on Tower~2 (Proxmox default). SR-IOV activation is pending the kernel reboot (\href{https://github.com/ndg8743/ScuffedRDMA/issues/56}{Issue \#56}).}
+
+\section{UCX Transport Framework}
+
+The Unified Communication X (UCX) framework \cite{ucx-repo} provides a transport-agnostic API for RDMA, shared memory, and TCP communication. UCX is the transport layer for both OpenMPI and NVIDIA's HPC-X \cite{hpcx-docs}.
+
+\subsection{UCX Build and Configuration}
+
+UCX was built from source (latest master) with CUDA and mlx5 support:
+
+\begin{verbatim}
+./configure --prefix=/usr/local/ucx \
+    --with-cuda=/usr/local/cuda \
+    --with-verbs --with-rdmacm \
+    --enable-mt --enable-cma
+\end{verbatim}
+
+Available transports on Tower~2:
+\begin{itemize}[noitemsep]
+    \item \texttt{rc\_mlx5}, \texttt{ud\_mlx5}: ConnectX-4 reliable/unreliable RDMA
+    \item \texttt{cuda\_copy}, \texttt{cuda\_ipc}: GPU memory registration and inter-process
+    \item \texttt{rdmacm}: RDMA connection manager
+    \item \texttt{cma}: Cross-memory attach (intra-node)
+\end{itemize}
+
+\subsection{HPC-X as Comparison Target}
+
+NVIDIA's HPC-X \cite{hpcx-docs} bundles a tuned OpenMPI + UCX + NCCL + SHARP stack optimized for ConnectX NICs. Future benchmarks will compare our custom UCX + OpenMPI build against HPC-X to quantify the performance delta and determine whether the thesis middleware should target one or both stacks. The NCCL RDMA/SHARP plugin \cite{nccl-sharp} is particularly relevant as it provides the same GPU-aware collective operations that vLLM uses internally.
 
 \section{Tesla TTPoe Build}
 
@@ -365,26 +643,52 @@ Firewall rules were added on both nodes to allow RDMA traffic. Specifically, UDP
 \section{Next Steps}
 
 \begin{enumerate}[noitemsep]
-    \item \textbf{Hardware RoCE}: Test with Mellanox ConnectX NICs on home lab
-    \item \textbf{TTPoe Integration}: Load modules and benchmark against Soft-RoCE
-    \item \textbf{vLLM Deployment}: Start multi-node cluster with gpt-oss-120b
-    \item \textbf{Telemetry}: Instrument tensor transfers for the adaptive middleware
-    \item \textbf{WFA Classifier}: Implement hot/cold tensor classification
+    \item \textbf{Install rebuilt kernel}: Boot into 6.17.13-1-pve with \texttt{CONFIG\_INFINIBAND\_PEER\_MEM} and verify \texttt{nvidia-peermem} loads
+    \item \textbf{GPUDirect RDMA validation}: Run \texttt{ucx\_perftest} with \texttt{cuda\_copy} and \texttt{gdr\_copy} transports between V100 and ConnectX-4
+    \item \textbf{SR-IOV VF activation}: Create VFs post-reboot and test RDMA from within Proxmox VMs
+    \item \textbf{Cross-machine testing}: Configure Tower~1 (Windows) with WinOF-2 drivers and test end-to-end 100GbE RDMA
+    \item \textbf{HPC-X comparison}: Install NVIDIA HPC-X and benchmark against custom UCX + OpenMPI stack
+    \item \textbf{vLLM + NCCL over RoCEv2}: Deploy vLLM with tensor parallelism over hardware RDMA between V100s
+    \item \textbf{Lock-free middleware}: Begin C++/Rust implementation targeting the 0.71$\mu$s hardware baseline
 \end{enumerate}
+
+\section{Open Issues}
+
+The following GitHub issues track blockers discovered during this testing:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}clp{7cm}@{}}
+\toprule
+\textbf{Issue} & \textbf{Status} & \textbf{Description} \\
+\midrule
+\href{https://github.com/ndg8743/ScuffedRDMA/issues/31}{\#31} & Blocked & NVSHMEM installation on Tower~2 V100s \\
+\href{https://github.com/ndg8743/ScuffedRDMA/issues/46}{\#46} & Open & WFA classifier described as validated but only documented \\
+\href{https://github.com/ndg8743/ScuffedRDMA/issues/56}{\#56} & In Progress & SR-IOV and GPUDirect described as validated but only documented/designed---kernel rebuild complete, pending reboot \\
+\bottomrule
+\end{tabular}
+\caption{Relevant open issues from the ScuffedRDMA repository}
+\end{table}
 
 \section{Summary}
 
-This effort established the foundation for distributed LLM inference testing on the lab cluster. Key achievements:
+This update documents the expansion of the research infrastructure from a software-only RDMA baseline to hardware-validated transport testing. Key achievements:
 
 \begin{itemize}[noitemsep]
-    \item Configured 3-machine cluster with 5 GPUs (136GB total VRAM)
+    \item Configured 3-machine lab cluster with 5 GPUs (136GB total VRAM)
+    \item Deployed home lab with 100GbE Mellanox ConnectX-4 DAC link and 2$\times$ V100 GPUs
     \item Validated Soft-RoCE baseline: 0.92 Gb/s bandwidth, 190$\mu$s latency
+    \item \textbf{Validated Hardware RoCEv2: 50.62 Gb/s bandwidth, 0.71$\mu$s latency (55$\times$ BW, 267$\times$ latency improvement)}
+    \item Identified and resolved \texttt{CONFIG\_INFINIBAND\_PEER\_MEM} kernel blocker via PVE kernel rebuild
+    \item Enabled SR-IOV in ConnectX-4 firmware (8 VFs) for Proxmox VM passthrough
+    \item Built UCX with CUDA + mlx5 support for GPU-aware RDMA transport
     \item Built Tesla TTPoe kernel modules for low-latency alternative
     \item Created 6 comprehensive deployment guides for production use
     \item Deployed vLLM + Ray configurations for multi-node inference
 \end{itemize}
 
-The Soft-RoCE results confirm the thesis hypothesis: software RDMA incurs significant overhead ($\sim$190$\mu$s vs expected $\sim$10$\mu$s), motivating the development of adaptive routing to minimize latency-sensitive transfers. Hardware RoCE testing on the home lab Mellanox NICs will provide the production baseline for comparison.
+The Hardware RoCEv2 results validate the core thesis premise: at 0.71$\mu$s latency, kernel-bypass RDMA provides a transport fast enough for real-time tensor routing during LLM inference. The 267$\times$ latency improvement over Soft-RoCE justifies the complexity of the adaptive middleware---the performance gap between ``hot'' (hardware RDMA) and ``cold'' (TCP/software) paths is large enough that even imperfect classification yields significant TTFT reduction. The remaining blockers (GPUDirect RDMA via nvidia-peermem, cross-machine testing, SR-IOV activation) are configuration issues, not fundamental limitations.
 
 \begin{thebibliography}{99}
 
@@ -414,6 +718,21 @@ Linux RDMA. (2024). \textit{perftest - RDMA Performance Tests}. \url{https://git
 
 \bibitem{gpudirect-docs}
 NVIDIA. (2024). \textit{GPUDirect RDMA Documentation}. \url{https://docs.nvidia.com/cuda/gpudirect-rdma/index.html}
+
+\bibitem{ucx-repo}
+OpenUCX. (2024). \textit{Unified Communication X (UCX)}. \url{https://github.com/openucx/ucx}
+
+\bibitem{hpcx-docs}
+NVIDIA. (2025). \textit{HPC-X v2.20 Installation and Loading Guide}. \url{https://docs.nvidia.com/networking/display/hpcxv2200/installing+and+loading+hpc-x}
+
+\bibitem{nccl-sharp}
+NVIDIA. (2025). \textit{NCCL RDMA/SHARP Plugins}. \url{https://docs.nvidia.com/networking/display/hpcxv2200/nccl-rdma-sharp+plugins}
+
+\bibitem{pve-hookscript-sriov}
+Layman, J. (2024). \textit{Proxmox VE SR-IOV Hookscript}. \url{https://github.com/jdlayman/pve-hookscript-sriov}
+
+\bibitem{level1techs-sriov}
+Level1Techs Forum. (2024). \textit{QAT HowTo on Linux and SR-IOV and Proxmox 8}. \url{https://forum.level1techs.com/t/qat-howto-on-linux-and-sriov-and-proxmox-8/205786}
 
 \end{thebibliography}
 
