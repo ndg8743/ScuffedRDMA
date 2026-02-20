@@ -226,7 +226,7 @@ The middleware intercepts communication at two levels:
 
 \textbf{Phase Detection (Prefill vs Decode):} A lightweight heuristic distinguishes prefill from decode phases by examining the ratio of tokens to sequences in each batch. Prefill phases exhibit many tokens across few sequences, while decode phases show one token per sequence across many sequences. A threshold of eight tokens per sequence separates the two regimes, allowing the classifier to adjust its routing thresholds accordingly.
 
-\textbf{Deliverable}: Classifier achieving $>$90\% accuracy on synthetic access patterns.
+\textbf{Deliverable}: Classifier tested on synthetic access patterns with accuracy reported.
 
 \subsection{Phase 3: Routing Integration}
 
@@ -236,7 +236,7 @@ The middleware intercepts communication at two levels:
 
 \textbf{Benchmark TTFT Improvement:} The vLLM OpenAI-compatible API server is launched with the adaptive connector enabled (via the \texttt{--kv-connector AdaptiveRDMAConnector} flag) using tensor parallelism across two GPUs. TTFT is measured using vLLM's built-in benchmark serving script across 100 prompts.
 
-\textbf{Deliverable}: 30\%+ TTFT reduction on 7B model inference.
+\textbf{Deliverable}: Measured TTFT comparison between adaptive RDMA and NCCL baseline on 7B model inference.
 
 \subsection{Phase 4: Training Extension}
 
@@ -246,7 +246,7 @@ The middleware intercepts communication at two levels:
 
 \textbf{Profiling:} NVIDIA Nsight Systems is used to profile training runs with adaptive RDMA enabled, generating detailed timelines of communication overlap and identifying any remaining synchronization bottlenecks.
 
-\textbf{Deliverable}: Training throughput improvement of 15\%+ over NCCL baseline.
+\textbf{Deliverable}: Measured training throughput comparison between adaptive RDMA and NCCL baseline.
 
 \subsection{Phase 5: Validation \& Writing}
 
@@ -262,22 +262,24 @@ The middleware intercepts communication at two levels:
 
 \textbf{Deliverable}: Complete thesis with reproducible benchmarks and defense.
 
-\section{Expected Results}
+\section{Evaluation Plan}
+
+The following metrics will be measured to evaluate the adaptive RDMA middleware against the NCCL baseline. Baseline and target values will be determined experimentally:
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{@{}lccl@{}}
+\begin{tabular}{@{}llll@{}}
 \toprule
 \textbf{Metric} & \textbf{Baseline} & \textbf{Target} & \textbf{Measurement} \\
 \midrule
-TTFT (7B model) & $\sim$150ms & $<$100ms & vLLM benchmark suite \\
-TTFT (70B model, 2-node) & $\sim$800ms & $<$500ms & vLLM benchmark suite \\
-P99 latency variance & High (HOL) & Low & Custom telemetry \\
-Gradient sync overhead & 30\% step time & $<$15\% & PyTorch profiler \\
+TTFT (7B model) & Measured via NCCL & Reduce vs baseline & vLLM benchmark suite \\
+TTFT (multi-node) & Measured via NCCL & Reduce vs baseline & vLLM benchmark suite \\
+P99 latency variance & Measured (HOL present) & Reduce variance & Custom telemetry \\
+Gradient sync overhead & Measured via profiler & Reduce vs baseline & PyTorch profiler \\
 \bottomrule
 \end{tabular}
-\caption{Target performance improvements.}
+\caption{Evaluation metrics---baselines and improvements to be determined experimentally.}
 \end{table}
 
 \section{Hardware \& Software Requirements}

@@ -72,12 +72,7 @@ During a single forward pass with pipeline parallelism, there can be dozens of t
 
     \item \textbf{Enabling cross-node tensor parallelism.} With slow interconnects (TCP), only pipeline parallelism is viable across machines---tensor parallelism requires all-reduce operations that are too latency-sensitive for high-overhead transports. Hardware RDMA makes cross-node tensor parallelism practical, which is fundamentally more GPU-efficient (less pipeline bubble idle time).
 
-    \item \textbf{Fewer serving replicas at constant throughput.} By Little's Law ($L = \lambda W$), if each request completes faster ($W$ decreases), fewer concurrent model instances ($L$) are needed to sustain the same request rate ($\lambda$):
-    \begin{align*}
-        \text{Before:}\quad 10\;\text{req/s} \times 200\;\text{ms} &= 2.0\;\text{concurrent instances} \\
-        \text{After (30\% TTFT reduction):}\quad 10\;\text{req/s} \times 140\;\text{ms} &= 1.4\;\text{concurrent instances}
-    \end{align*}
-    A 30--50\% TTFT reduction translates to roughly 23--33\% fewer serving replicas for the same SLA---a direct cost saving in production GPU clusters.
+    \item \textbf{Fewer serving replicas at constant throughput.} By Little's Law ($L = \lambda W$), if each request completes faster ($W$ decreases), fewer concurrent model instances ($L$) are needed to sustain the same request rate ($\lambda$). Any reduction in per-request latency from faster tensor exchange directly reduces the number of replicas needed to meet a given throughput SLA---a direct cost saving in production GPU clusters. The magnitude of this saving depends on the actual TTFT improvement achieved, which will be measured experimentally.
 \end{enumerate}
 
 \textbf{Important caveat:} RDMA does \textit{not} reduce the number of GPUs needed for VRAM capacity. A 64\,GB model still requires $2\times$ V100-32GB regardless of network speed. The savings come from needing fewer \textit{replicas} of the full model to serve a given throughput target.
