@@ -45,9 +45,9 @@ KV Cache Management & PagedAttention with block-based allocation \\
 Request Scheduling & Continuous batching with FCFS/priority policies \\
 Single-Node Multi-GPU & \texttt{MultiProcExecutor} with tensor parallelism \\
 Multi-Node Distribution & Ray + pipeline parallelism \\
-GPU Communication & NCCL (all-reduce, all-gather) \\
-KV Transfer (Disagg. P/D) & NIXL-based connectors (LMCache, NixlConnector) \\
-Disaggregated Serving & Prefill/decode separation via llm-d orchestrator \\
+GPU Communication & NCCL~\cite{nccl} (all-reduce, all-gather) \\
+KV Transfer (Disagg. P/D) & NIXL-based connectors~\cite{nixl} (LMCache~\cite{lmcache}, NixlConnector) \\
+Disaggregated Serving & Prefill/decode separation via llm-d~\cite{llm-d} orchestrator \\
 External KV Cache & LMCacheConnectorV1 for vLLM V1 integration \\
 Optimizations & Chunked prefill, prefix caching, speculative decoding \\
 \bottomrule
@@ -55,21 +55,21 @@ Optimizations & Chunked prefill, prefix caching, speculative decoding \\
 \caption{vLLM capabilities this work builds upon, not replaces.}
 \end{table}
 
-vLLM's distributed execution uses \texttt{MultiProcExecutor}, which spawns worker processes coordinated via shared-memory message queues. Inter-GPU communication occurs through NCCL, which discovers network topology at initialization but does not adapt routing based on runtime access patterns.
+vLLM's~\cite{vllm} distributed execution uses \texttt{MultiProcExecutor}, which spawns worker processes coordinated via shared-memory message queues. Inter-GPU communication occurs through NCCL~\cite{nccl}, which discovers network topology at initialization but does not adapt routing based on runtime access patterns.
 
 \subsection{Recent vLLM Ecosystem Developments (2025--2026)}
 
 Since the initial proposal, significant advancements have emerged in the vLLM ecosystem:
 
-\textbf{vLLM v0.15.0} (Current): PyTorch 2.9.0 with CUDA 12.9, Model Runner V2 (experimental), improved distributed inference with DP+MoE fixes.
+\textbf{vLLM v0.15.0}~\cite{vllm} (Current): PyTorch 2.9.0 with CUDA 12.9, Model Runner V2 (experimental), improved distributed inference with DP+MoE fixes.
 
-\textbf{NIXL} (NVIDIA Dynamo): Communication abstraction layer supporting NVLink, RDMA-capable NICs, and GPU Direct Storage. Enables high-bandwidth KV cache transfer between disaggregated prefill and decode instances.
+\textbf{NIXL}~\cite{nixl} (NVIDIA Dynamo): Communication abstraction layer supporting NVLink, RDMA-capable NICs, and GPU Direct Storage. Enables high-bandwidth KV cache transfer between disaggregated prefill and decode instances.
 
-\textbf{llm-d} (v0.4, Dec 2025): Disaggregated serving orchestrator achieving 40\% reduction in per-output-token latency on DeepSeek V3.1. Supports RDMA over RoCE for point-to-point KV cache transfer via NIXL sidecar.
+\textbf{llm-d}~\cite{llm-d} (v0.4, Dec 2025): Disaggregated serving orchestrator achieving 40\% reduction in per-output-token latency on DeepSeek V3.1. Supports RDMA over RoCE for point-to-point KV cache transfer via NIXL sidecar.
 
-\textbf{LMCache}: External KV cache layer for vLLM V1 with first-class NIXL support. Enables KV cache extraction/injection directly from vLLM's internal paged memory.
+\textbf{LMCache}~\cite{lmcache}: External KV cache layer for vLLM V1 with first-class NIXL support. Enables KV cache extraction/injection directly from vLLM's internal paged memory.
 
-\textbf{Semantic Router v0.1 Iris} (Jan 2026): Intelligent model routing layer with signal-decision architecture, modular LoRA optimization, and HaluGate safety pipeline.
+\textbf{Semantic Router v0.1 Iris}~\cite{vllm-iris} (Jan 2026): Intelligent model routing layer with signal-decision architecture, modular LoRA optimization, and HaluGate safety pipeline.
 
 \section{Thesis Contribution}
 
@@ -109,7 +109,7 @@ A Weighted Finite Automaton that classifies tensors into hot/cold categories bas
 The classifier also detects workload phase (prefill vs.\ decode, training vs.\ inference) to adjust thresholds dynamically.
 
 \subsection{Smart RDMA Routing Layer}
-Dual-path routing implemented via \texttt{pyverbs} (libibverbs Python bindings):
+Dual-path routing implemented via \texttt{pyverbs}~\cite{rdma-core} (libibverbs Python bindings):
 
 \begin{itemize}[noitemsep]
     \item \textbf{Hot Path}: Dedicated Queue Pairs (QPs) with polled completions, RDMA Write with Immediate for sub-5$\mu$s transfers
@@ -144,11 +144,11 @@ GPUDirect RDMA & $<$2$\mu$s & RoCE/IB + nvidia-peermem & Tesla/Quadro only \\
 \caption{Transport layer comparison for distributed inference.}
 \end{table}
 
-\textbf{Tesla TTPoe}: A peer-to-peer Ethernet transport designed for exascale AI (Tesla Dojo). Unlike RoCE/InfiniBand which require lossless fabrics, TTPoe is a \textit{lossy} protocol that expects packet loss and handles retries locally. This eliminates Priority Flow Control (PFC) requirements and works on commodity switches. Reference implementation available as Linux kernel module.
+\textbf{Tesla TTPoe}~\cite{ttpoe-repo,ttpoe-hotchips}: A peer-to-peer Ethernet transport designed for exascale AI (Tesla Dojo). Unlike RoCE/InfiniBand which require lossless fabrics, TTPoe is a \textit{lossy} protocol that expects packet loss and handles retries locally. This eliminates Priority Flow Control (PFC) requirements and works on commodity switches. Reference implementation available as Linux kernel module.
 
-\textbf{GPUDirect RDMA}: Enables NICs to read/write GPU memory directly without CPU involvement. Requires \texttt{nvidia-peermem} kernel module and GPU/NIC on same PCIe root complex. \textit{Critical limitation}: Only supported on datacenter GPUs (Tesla, Quadro); consumer GPUs (GeForce RTX) lack the necessary BAR mapping features.
+\textbf{GPUDirect RDMA}~\cite{gpudirect-docs}: Enables NICs to read/write GPU memory directly without CPU involvement. Requires \texttt{nvidia-peermem} kernel module and GPU/NIC on same PCIe root complex. \textit{Critical limitation}: Only supported on datacenter GPUs (Tesla, Quadro); consumer GPUs (GeForce RTX) lack the necessary BAR mapping features.
 
-\textbf{NIXL}: NVIDIA's communication abstraction from Dynamo, providing unified API across NVLink, RDMA, and TCP. Used by LMCache and llm-d for disaggregated KV cache transfer.
+\textbf{NIXL}~\cite{nixl}: NVIDIA's communication abstraction from Dynamo, providing unified API across NVLink, RDMA, and TCP. Used by LMCache~\cite{lmcache} and llm-d~\cite{llm-d} for disaggregated KV cache transfer.
 
 \section{Architecture}
 
@@ -210,9 +210,9 @@ The middleware intercepts communication at two levels:
 
 \subsection{Phase 1: Foundation}
 
-\textbf{Environment Setup:} The RDMA software stack (\texttt{rdma-core}, \texttt{ibverbs-utils}, \texttt{perftest}, \texttt{libibverbs-dev}, and \texttt{pyverbs}) is installed on both nodes. Soft-RoCE is enabled on the 10GbE interface by loading the \texttt{rdma\_rxe} kernel module and creating a virtual RDMA device. Connectivity is verified using \texttt{ibv\_devices} to list RDMA devices and \texttt{rping} for basic RDMA ping testing between server and client.
+\textbf{Environment Setup:} The RDMA software stack (\texttt{rdma-core}~\cite{rdma-core}, \texttt{ibverbs-utils}, \texttt{perftest}~\cite{perftest}, \texttt{libibverbs-dev}, and \texttt{pyverbs}) is installed on both nodes. Soft-RoCE is enabled on the 10GbE interface by loading the \texttt{rdma\_rxe} kernel module and creating a virtual RDMA device. Connectivity is verified using \texttt{ibv\_devices} to list RDMA devices and \texttt{rping} for basic RDMA ping testing between server and client.
 
-\textbf{Baseline Latency Measurement:} RDMA write latency is measured using \texttt{ib\_write\_lat} from the perftest suite, targeting sub-10$\mu$s round-trip time on Soft-RoCE. TCP latency is measured with \texttt{sockperf} to establish a baseline for comparison against RDMA performance.
+\textbf{Baseline Latency Measurement:} RDMA write latency is measured using \texttt{ib\_write\_lat} from the perftest suite~\cite{perftest}, targeting sub-10$\mu$s round-trip time on Soft-RoCE. TCP latency is measured with \texttt{sockperf} to establish a baseline for comparison against RDMA performance.
 
 \textbf{pyverbs Buffer Pool Implementation:} A NUMA-aware RDMA buffer pool is implemented using \texttt{pyverbs}. The pool allocates a large memory region (default 256MB) registered with the RDMA protection domain, pinned to the same NUMA node as the host channel adapter using \texttt{libnuma}. A sub-allocation strategy provides individual buffers from this registered region on demand, avoiding repeated memory registration overhead.
 
@@ -310,38 +310,11 @@ Gradient sync overhead & Measured via profiler & Reduce vs baseline & PyTorch pr
     \item NVIDIA driver 550+, CUDA 12.4+
 \end{itemize}
 
-\textbf{Key Repositories}:
-\begin{itemize}[noitemsep]
-    \item \url{https://github.com/vllm-project/vllm} -- Core inference engine
-    \item \url{https://github.com/linux-rdma/rdma-core} -- RDMA userspace libraries
-    \item \url{https://github.com/NVIDIA/nccl} -- Baseline collective communication
-    \item \url{https://github.com/NVIDIA/Dynamo} -- NIXL communication abstraction
-    \item \url{https://github.com/LMCache/lmcache} -- External KV cache layer
-    \item \url{https://github.com/llm-d/llm-d} -- Disaggregated serving orchestrator
-    \item \url{https://github.com/linux-rdma/perftest} -- RDMA benchmarking tools
-    \item \url{https://github.com/teslamotors/ttpoe} -- Tesla's TTPoe protocol (Dojo)
-    \item \url{https://github.com/ndg8743/x99-udp4-rebar} -- Custom BIOS for Resizable BAR
-\end{itemize}
+\textbf{Key Repositories}: vLLM~\cite{vllm}, rdma-core~\cite{rdma-core}, NCCL~\cite{nccl}, NIXL/Dynamo~\cite{nixl}, LMCache~\cite{lmcache}, llm-d~\cite{llm-d}, perftest~\cite{perftest}, Tesla TTPoe~\cite{ttpoe-repo}, and the custom x99 Resizable BAR BIOS~\cite{x99-rebar}.
 
-\textbf{RDMA \& Transport Documentation}:
-\begin{itemize}[noitemsep]
-    \item \href{https://wiki.archlinux.org/title/InfiniBand}{Arch Wiki: InfiniBand} -- Comprehensive setup guide
-    \item \href{https://docs.nvidia.com/cuda/gpudirect-rdma/index.html}{NVIDIA GPUDirect RDMA} -- Direct GPU-NIC communication
-    \item \href{https://hc2024.hotchips.org/assets/program/conference/day2/17_HC2024_Tesla_TTPoE_v5.pdf}{Hot Chips 2024: Tesla TTPoe} -- TTPoe protocol specification
-    \item \href{https://chipsandcheese.com/p/teslas-ttpoe-at-hot-chips-2024-replacing-tcp-for-low-latency-applications}{Tesla TTPoe Analysis} -- Technical deep-dive
-\end{itemize}
+\textbf{RDMA \& Transport Documentation}: Arch Wiki InfiniBand guide~\cite{arch-ib}, NVIDIA GPUDirect RDMA~\cite{gpudirect-docs}, Tesla TTPoe at Hot Chips 2024~\cite{ttpoe-hotchips}, and Chips and Cheese TTPoe analysis~\cite{ttpoe-analysis}.
 
-\textbf{vLLM \& Inference Framework Resources}:
-\begin{itemize}[noitemsep]
-    \item \href{https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html}{Anatomy of vLLM} -- Official deep-dive into vLLM internals
-    \item \href{https://docs.vllm.ai/en/latest/features/disagg_prefill/}{vLLM Disaggregated Prefilling} -- P/D separation documentation
-    \item \href{https://blog.lmcache.ai/2025-04-11-lmcache-vllmv1-nixl/}{LMCache NIXL Integration} -- KV cache layer for vLLM V1
-    \item \href{https://llm-d.ai/docs/architecture}{llm-d Architecture} -- Disaggregated serving orchestrator
-    \item \href{https://blog.vllm.ai/2026/01/05/vllm-sr-iris.html}{vLLM Semantic Router v0.1 Iris} -- Intelligent model routing
-    \item \href{https://discuss.vllm.ai/t/vllm-benchmarking-why-is-gpudirect-rdma-not-outperforming-standard-rdma-in-a-pipeline-parallel-setup/1377}{GPUDirect RDMA vs Standard RDMA Benchmarking} -- Pipeline parallel analysis
-    \item \href{https://www.reddit.com/r/LocalLLaMA/comments/1oyawkl/why_is_vllm_outperforming_tensorrtllm_nvidias/}{vLLM vs TensorRT-LLM Performance Discussion} -- Community benchmarks
-    \item \href{https://www.reddit.com/r/LocalLLaMA/comments/1pq5k6e/jake_formerly_of_ltt_demonstrates_exos/}{Jake's Exo Distributed Inference Demo} -- Multi-node inference demonstration
-\end{itemize}
+\textbf{vLLM \& Inference Framework Resources}: Anatomy of vLLM~\cite{anatomy-vllm}, vLLM disaggregated prefilling documentation~\cite{vllm-disagg}, LMCache NIXL integration~\cite{lmcache-nixl}, llm-d architecture~\cite{llm-d-arch}, vLLM Semantic Router v0.1 Iris~\cite{vllm-iris}, GPUDirect RDMA benchmarking discussion~\cite{gpudirect-bench}, vLLM vs TensorRT-LLM community benchmarks~\cite{vllm-vs-trt}, and Jake's Exo distributed inference demo~\cite{exo-demo}.
 
 \section{Risk Mitigation}
 
@@ -362,7 +335,7 @@ Limited 100GbE access & Demonstrate on 10GbE; project improvements \\
 
 \section{Future Work: LLM for RISC-V Assembly Generation}
 
-A secondary research direction involves training/fine-tuning an LLM to generate RISC-V assembly code. Recent work by \href{https://arxiv.org/abs/2401.10364}{Hossain et al.\ (2024)} explored using ChatGPT for RISC processor design, finding that while LLMs can assist with hardware code generation, significant human intervention is still required to fix bugs.
+A secondary research direction involves training/fine-tuning an LLM to generate RISC-V assembly code. Recent work by Hossain et al.~\cite{hossain2024} explored using ChatGPT for RISC processor design, finding that while LLMs can assist with hardware code generation, significant human intervention is still required to fix bugs.
 
 \textbf{Planned Approach:}
 \begin{itemize}[noitemsep]
@@ -372,14 +345,7 @@ A secondary research direction involves training/fine-tuning an LLM to generate 
     \item \textbf{Integration}: Explore FPGA deployment for real hardware validation using the Xilinx UltraScale+ boards
 \end{itemize}
 
-\textbf{Training Optimizations}: The fine-tuning process will leverage mixed-precision training (FP16/BF16) and tensor classification from this thesis work. Key references:
-\begin{itemize}[noitemsep]
-    \item \href{https://synced.medium.com/two-lines-of-code-to-use-a-2080ti-to-achieve-what-was-previously-only-possible-on-a-v100-a9b94c590e46}{Mixed Precision: 2080 Ti matching V100 performance} -- Demonstrates FP16 enabling consumer GPUs to match datacenter performance
-    \item \href{https://github.com/pytorch/pytorch/issues/3748}{PyTorch FP16 Support Discussion} -- Implementation details for mixed-precision in PyTorch
-    \item \href{https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/index.html}{NVIDIA Mixed Precision Training Guide} -- Official documentation for AMP training
-    \item \href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html}{NVIDIA GPU Performance Background} -- Tensor Core utilization and memory bandwidth optimization
-    \item \href{https://docs.nvidia.com/cuda/gpudirect-rdma/index.html}{GPUDirect RDMA Documentation} -- Direct GPU-NIC communication for distributed training
-\end{itemize}
+\textbf{Training Optimizations}: The fine-tuning process will leverage mixed-precision training~\cite{nvidia-amp} (FP16/BF16) and tensor classification from this thesis work. Mixed precision on consumer GPUs can match datacenter performance~\cite{mixed-prec-2080ti}, and PyTorch provides native AMP support~\cite{pytorch-fp16}. Tensor Core utilization and memory bandwidth are documented in the NVIDIA performance guide~\cite{nvidia-gpu-perf}. GPUDirect RDMA~\cite{gpudirect-docs} enables direct GPU-NIC communication for distributed training.
 
 The adaptive RDMA middleware developed in this thesis will accelerate gradient synchronization during fine-tuning, while the tensor classifier can identify which gradient tensors benefit from priority routing.
 
@@ -388,5 +354,87 @@ This leverages the same distributed inference infrastructure being developed for
 \section{Conclusion}
 
 This thesis addresses a concrete performance bottleneck in distributed LLM systems by introducing runtime-adaptive communication optimization. The work builds on vLLM's production-grade infrastructure while contributing a novel pattern-aware routing layer. The approach is validated on consumer hardware, demonstrating that intelligent communication scheduling can achieve latency improvements previously requiring expensive InfiniBand deployments.
+
+\begin{thebibliography}{99}
+
+\bibitem{vllm}
+Kwon, W., et al. (2023). \textit{Efficient Memory Management for Large Language Model Serving with PagedAttention}. SOSP 2023. \url{https://github.com/vllm-project/vllm}
+
+\bibitem{nccl}
+NVIDIA. (2024). \textit{NVIDIA Collective Communications Library (NCCL)}. \url{https://github.com/NVIDIA/nccl}
+
+\bibitem{nixl}
+NVIDIA. (2025). \textit{NIXL: Communication Abstraction Layer for NVIDIA Dynamo}. \url{https://github.com/NVIDIA/Dynamo}
+
+\bibitem{lmcache}
+LMCache. (2025). \textit{LMCache: External KV Cache Layer for vLLM}. \url{https://github.com/LMCache/lmcache}
+
+\bibitem{llm-d}
+llm-d Contributors. (2025). \textit{llm-d: Disaggregated Serving Orchestrator}. \url{https://github.com/llm-d/llm-d}
+
+\bibitem{rdma-core}
+Linux RDMA. (2024). \textit{rdma-core: RDMA Userspace Libraries and Daemons}. \url{https://github.com/linux-rdma/rdma-core}
+
+\bibitem{perftest}
+Linux RDMA. (2024). \textit{perftest: RDMA Performance Tests}. \url{https://github.com/linux-rdma/perftest}
+
+\bibitem{ttpoe-repo}
+Tesla, Inc. (2024). \textit{TTPoe: Time-Triggered Protocol over Ethernet}. \url{https://github.com/teslamotors/ttpoe}
+
+\bibitem{ttpoe-hotchips}
+Tesla. (2024). \textit{TTPoE at Hot Chips 2024: Replacing TCP for Low Latency Applications}. \url{https://hc2024.hotchips.org/assets/program/conference/day2/17_HC2024_Tesla_TTPoE_v5.pdf}
+
+\bibitem{ttpoe-analysis}
+Chips and Cheese. (2024). \textit{Tesla's TTPoe at Hot Chips 2024: Replacing TCP for Low Latency Applications}. \url{https://chipsandcheese.com/p/teslas-ttpoe-at-hot-chips-2024-replacing-tcp-for-low-latency-applications}
+
+\bibitem{x99-rebar}
+Gopee, N. (2025). \textit{x99-udp4-rebar: Custom BIOS for Resizable BAR on X99}. \url{https://github.com/ndg8743/x99-udp4-rebar}
+
+\bibitem{gpudirect-docs}
+NVIDIA. (2024). \textit{GPUDirect RDMA Documentation}. \url{https://docs.nvidia.com/cuda/gpudirect-rdma/index.html}
+
+\bibitem{arch-ib}
+Arch Wiki. (2024). \textit{InfiniBand}. \url{https://wiki.archlinux.org/title/InfiniBand}
+
+\bibitem{anatomy-vllm}
+vLLM Team. (2025). \textit{Anatomy of vLLM}. \url{https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html}
+
+\bibitem{vllm-disagg}
+vLLM. (2025). \textit{Disaggregated Prefilling Documentation}. \url{https://docs.vllm.ai/en/latest/features/disagg_prefill/}
+
+\bibitem{lmcache-nixl}
+LMCache. (2025). \textit{LMCache + vLLM V1 + NIXL Integration}. \url{https://blog.lmcache.ai/2025-04-11-lmcache-vllmv1-nixl/}
+
+\bibitem{llm-d-arch}
+llm-d. (2025). \textit{llm-d Architecture Documentation}. \url{https://llm-d.ai/docs/architecture}
+
+\bibitem{vllm-iris}
+vLLM Team. (2026). \textit{vLLM Semantic Router v0.1 Iris}. \url{https://blog.vllm.ai/2026/01/05/vllm-sr-iris.html}
+
+\bibitem{gpudirect-bench}
+vLLM Community. (2025). \textit{Why is GPUDirect RDMA Not Outperforming Standard RDMA in Pipeline Parallel?}. \url{https://discuss.vllm.ai/t/vllm-benchmarking-why-is-gpudirect-rdma-not-outperforming-standard-rdma-in-a-pipeline-parallel-setup/1377}
+
+\bibitem{vllm-vs-trt}
+LocalLLaMA. (2025). \textit{Why is vLLM Outperforming TensorRT-LLM?}. \url{https://www.reddit.com/r/LocalLLaMA/comments/1oyawkl/}
+
+\bibitem{exo-demo}
+LocalLLaMA. (2025). \textit{Jake's Exo Distributed Inference Demo}. \url{https://www.reddit.com/r/LocalLLaMA/comments/1pq5k6e/}
+
+\bibitem{hossain2024}
+Hossain, M. S., et al. (2024). \textit{Can ChatGPT Assist in the Development of a RISC Processor?}. arXiv:2401.10364. \url{https://arxiv.org/abs/2401.10364}
+
+\bibitem{mixed-prec-2080ti}
+Synced. (2019). \textit{Two Lines of Code to Use a 2080 Ti to Achieve What Was Previously Only Possible on a V100}. \url{https://synced.medium.com/two-lines-of-code-to-use-a-2080ti-to-achieve-what-was-previously-only-possible-on-a-v100-a9b94c590e46}
+
+\bibitem{pytorch-fp16}
+PyTorch Contributors. (2017). \textit{PyTorch FP16 Support Discussion}. GitHub Issue \#3748. \url{https://github.com/pytorch/pytorch/issues/3748}
+
+\bibitem{nvidia-amp}
+NVIDIA. (2024). \textit{Mixed Precision Training Guide}. \url{https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/index.html}
+
+\bibitem{nvidia-gpu-perf}
+NVIDIA. (2024). \textit{Deep Learning Performance: GPU Background}. \url{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html}
+
+\end{thebibliography}
 
 \end{document}

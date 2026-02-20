@@ -326,16 +326,17 @@ t\_stdev & 17.03 $\mu$s & 0.18 $\mu$s \\
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-    ybar,
-    bar width=1.2cm,
+    ybar=0pt,
+    bar width=2cm,
     width=0.7\textwidth,
     height=6cm,
     ylabel={Latency ($\mu$s) --- log scale},
     ymode=log,
-    ymin=0.5,
-    ymax=300,
-    symbolic x coords={Soft-RoCE, Hardware RoCEv2},
-    xtick=data,
+    ymin=0.3,
+    ymax=500,
+    xtick={1,2},
+    xticklabels={Soft-RoCE, Hardware RoCEv2},
+    xmin=0.2, xmax=2.8,
     nodes near coords,
     nodes near coords align={vertical},
     every node near coord/.append style={font=\scriptsize},
@@ -343,9 +344,10 @@ t\_stdev & 17.03 $\mu$s & 0.18 $\mu$s \\
     grid style={gray!30},
     title={\textbf{RDMA Latency: Software vs Hardware}},
 ]
-\addplot[fill=red!30, draw=red!50] coordinates {(Soft-RoCE, 189.61)};
-\addplot[fill=green!40, draw=green!60] coordinates {(Hardware RoCEv2, 0.71)};
-\legend{Soft-RoCE, Hardware RoCEv2}
+\addplot[fill=red!30, draw=red!50] coordinates {(1, 189.61)};
+\addlegendentry{Soft-RoCE}
+\addplot[fill=green!40, draw=green!60] coordinates {(2, 0.71)};
+\addlegendentry{Hardware RoCEv2}
 \end{axis}
 \end{tikzpicture}
 \caption{RDMA write latency comparison (log scale)---267$\times$ improvement with hardware offload}
@@ -573,40 +575,41 @@ rdma-tas & $\sim$5$\mu$s & $\sim$40 Gb/s & DPDK NIC & Research \\
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-    ybar,
-    bar width=0.8cm,
+    ybar=0pt,
+    bar width=1cm,
     width=0.95\textwidth,
     height=7cm,
     ylabel={Latency ($\mu$s)},
     xlabel={Protocol},
     ymin=0,
-    ymax=11,
-    ytick={0,2,4,6,8,10},
-    symbolic x coords={Soft-RoCE, rdma-tas, Hardware RoCE, Tesla TTPoe, OCP Falcon, UEC 1.0},
-    xtick=data,
-    x tick label style={font=\small},
+    ymax=12,
+    ytick={0,2,4,6,8,10,12},
+    xtick={1,2,3,4,5,6},
+    xticklabels={Soft-RoCE, rdma-tas, Hardware RoCE, Tesla TTPoe, OCP Falcon, UEC 1.0},
+    x tick label style={font=\small, rotate=20, anchor=north east},
+    xmin=0.2, xmax=6.8,
     nodes near coords,
     nodes near coords align={vertical},
     every node near coord/.append style={font=\scriptsize},
-    legend style={at={(0.98,0.98)}, anchor=north east, font=\scriptsize},
     grid=major,
     grid style={gray!30},
     title={\textbf{RDMA Acceleration Technology Latencies}},
     title style={font=\normalsize},
 ]
-
-% Deprecated (pink/red)
-\addplot[fill=red!30, draw=red!50] coordinates {(Soft-RoCE, 10)};
-
-% Research (pink)
-\addplot[fill=pink!60, draw=pink!80] coordinates {(rdma-tas, 5)};
-
-% Production (green)
-\addplot[fill=green!40, draw=green!60] coordinates {(Hardware RoCE, 2) (Tesla TTPoe, 1.5)};
-
-% Emerging (yellow)
-\addplot[fill=yellow!50, draw=yellow!70] coordinates {(OCP Falcon, 3.5) (UEC 1.0, 1.8)};
-
+% Deprecated
+\addplot[fill=red!30, draw=red!50] coordinates {(1, 10)};
+\addlegendentry{Deprecated}
+% Research
+\addplot[fill=pink!60, draw=pink!80] coordinates {(2, 5)};
+\addlegendentry{Research}
+% Production
+\addplot[fill=green!40, draw=green!60] coordinates {(3, 2)};
+\addlegendentry{Production}
+\addplot[fill=green!40, draw=green!60, forget plot] coordinates {(4, 1.5)};
+% Emerging
+\addplot[fill=yellow!50, draw=yellow!70] coordinates {(5, 3.5)};
+\addlegendentry{Emerging}
+\addplot[fill=yellow!50, draw=yellow!70, forget plot] coordinates {(6, 1.8)};
 \end{axis}
 \end{tikzpicture}
 
