@@ -1,0 +1,169 @@
+% ============================================================================
+% Nathan Gopee — Résumé (Updated margins)
+% Full LaTeX source — all info & comments preserved
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+%                     DOCUMENT CLASS & GLOBAL OPTIONS
+% ----------------------------------------------------------------------------
+\documentclass[letterpaper,11pt]{article}
+
+% ----------------------------------------------------------------------------
+%                                  PACKAGES
+% ----------------------------------------------------------------------------
+\usepackage{fontawesome5}  % icon fonts
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+% Consistent bullets across lists
+\setlist[itemize]{label=\textbullet,leftmargin=0.16in,topsep=2pt,itemsep=1pt,parsep=0pt,partopsep=0pt}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\input{glyphtounicode}      
+
+% ---------------------------  GEOMETRY  ------------------------------------
+% Re-instated original small margins per user request
+\usepackage[margin=0.42in, top=0.26in, bottom=0.42in]{geometry}
+% ---------------------------------------------------------------------------
+% Global spacing adjustments (kept identical)
+% ---------------------------------------------------------------------------
+\setlength{\parskip}{0pt}
+\renewcommand{\baselinestretch}{0.95}\selectfont
+\setlist[itemize,1]{itemsep=1pt, topsep=2pt, parsep=0pt, partopsep=0pt, leftmargin=0.15in}
+
+% ------------------------------  HEADERS/FOOTERS  --------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ------------------------------  SECTION STYLE  ----------------------------
+\titleformat{\section}{\vspace{-8pt}\scshape\raggedright\large}{}{0em}{}[\color{black}\titlerule \vspace{-6pt}]
+
+\pdfgentounicode=1
+
+% ------------------------------  CUSTOM COMMANDS  --------------------------
+\newcommand{\resumeItem}[1]{\item\small{#1}}
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+  \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+    \textbf{#1} & #2 \\
+    \textit{#3} & \textit{#4} \\
+  \end{tabular*}\vspace{-2pt}
+}
+% Project heading: title | icons, followed by small footnote line
+\newcommand{\resumeProjectHeading}[4]{
+  \vspace{-2pt}\item
+  \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+    \textbf{#1} \href{#4}{\faLink} & {\Large #2} \\
+  \end{tabular*}\vspace{-2pt}
+  {\small\faDatabase\ \hspace{-0.15in} {\tiny #3}}\\[-10pt]
+}
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[label={},parsep=0pt]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+
+% ============================================================================
+%                                DOCUMENT BODY
+% ============================================================================
+\begin{document}
+
+% ---------------------------------  HEADER  ---------------------------------
+\begin{center}\vspace{-6pt}
+  {\Huge\bfseries Nathan Gopee}\\
+  {\scriptsize\faEnvelope\ ndg8743@gmail.com \quad|\quad\faPhone*\ (845) 853-5418 \quad|\quad\faMapMarker*\ New York \quad|\quad\faLinkedin\ linkedin.com/in/nathangopee \quad|\quad\faGithub\ github.com/ndg8743}\\[ -6pt]
+\end{center}
+
+% -------------------------------- EDUCATION ---------------------------------
+\section{Education}
+\resumeSubHeadingListStart
+  \resumeSubheading{State University of New York at New Paltz}{New Paltz, NY}{M.S. Computer Science}{Jan. 2025 -- Present}
+  \resumeSubheading{State University of New York at New Paltz}{New Paltz, NY}{B.S. Computer Science}{Aug. 2021 -- Dec. 2024}
+\resumeSubHeadingListEnd
+
+% -------------------------------- EXPERIENCE --------------------------------
+\vspace{-8pt}
+\section{Experience}
+\resumeSubHeadingListStart
+  \resumeSubheading{Graduate Teaching Assistant}{Jan. 2025 -- Present}{SUNY New Paltz}{New Paltz, NY}
+    \begin{itemize}
+      \resumeItem{Supported 50+ students across Assembly \& Computer Architecture and Principles of Programming Languages through weekly labs, office hours, and study sessions}
+      \resumeItem{Graded assignments, quizzes, and projects; ran review sessions to strengthen comprehension and raise class averages by 10\%}
+      \resumeItem{Integrated LCC.js (hydra.newpaltz.edu/lccjs) into lab sessions for interactive assembler/interpreter demos; collaborated with faculty to refine curriculum and develop study materials}
+    \end{itemize}
+
+
+  \resumeSubheading{Graduate Lab Manager}{Aug. 2024 -- Present}{SUNY New Paltz}{New Paltz, NY}
+    \begin{itemize}
+      \resumeItem{Maintained and refactored sites, implemented SSO auth/user management for \texttt{hydra.newpaltz.edu}}
+      \resumeItem{Setup and maintain 50+ Linux systems, enforced cybersecurity policies, and creating internal software solutions}
+      \resumeItem{Supported students and research infrastructure through debugging, tutoring, and lab maintenance}
+      \resumeItem{Built and maintained several 3D printers, deployed a local LLM at \texttt{gpt.hydra.newpaltz.edu} on our ML servers}
+      \resumeItem{Collaborated on network security protocols, redundancy/backups, and infrastructure expansion/redesign for the department}
+    \end{itemize}
+\resumeSubHeadingListEnd
+
+% -------------------------------- PROJECTS ----------------------------------
+\vspace{-8pt}
+\section{Projects}
+\resumeSubHeadingListStart
+
+  \resumeProjectHeading{QView3D -- Advanced 3D-Printer Farm Web App}{\faGithub}{Python, Go, TypeScript, Vue, Flask, WebSockets, Docker}{https://github.com/sunyhydralab/QView3D}
+    \begin{itemize}
+      \resumeItem{Led a full-scale backend refactor and built a Go-based virtual printer emulator to harden G-code processing.}
+      \resumeItem{Implemented real-time WebSocket control and multi-printer job management; extended support beyond Prusa devices.}
+      \resumeItem{Improved CI/CD, modularity, and cross-platform deployment (Windows/WSL, Linux, macOS).}
+    \end{itemize}
+
+  \resumeProjectHeading{LCC.js -- In-browser Assembly IDE/Compiler}{\faGithub}{React, Node, JavaScript/TypeScript, Docker}{https://github.com/ndg8743/lccjs}
+    \begin{itemize}
+      \resumeItem{Collaborated on a JavaScript implementation of LCC and built a full web IDE: live code editing, assembling, context highlight/hover, and step-through tutorials (used in CPS 330 labs).}
+    \end{itemize}
+
+  \resumeProjectHeading{Git Learning Journey -- Interactive Git Internals Platform}{\faGithub}{React, React Flow, xterm.js, Node, Docker}{https://github.com/ndg8743/GG-git-learning}
+    \begin{itemize}
+      \resumeItem{Visualized Git's core data structures (Trie, DAG, AVL, Skip-List, Union-Find, Bloom Filter) to teach real commands.}
+      \resumeItem{Engineered in-browser terminal and challenge-validation flows; added CI/CD pipelines for easy maintenance.}
+    \end{itemize}
+
+  \resumeProjectHeading{GitStructures -- Interactive Git \& Data Structures Tutor}{\faGithub}{React, Node, xterm.js, Algorithms}{https://github.com/ndg8743/GG-git-learning}
+    \begin{itemize}
+      \resumeItem{Designed React Flow learning graphs; implemented an in-browser terminal and validation; animated Trie/DAG/AVL/Skip-List/Union-Find/Bloom Filter visualizations.}
+    \end{itemize}
+
+  \resumeProjectHeading{ScuffedK8 -- Minimal K8s-style Orchestrator (independent study)}{\faGithub}{Go, REST/gRPC (planned), Scheduling}{https://github.com/ndg8743/ScuffedK8}
+    \begin{itemize}
+      \resumeItem{Implemented a clean, configurable scheduler (Best-Fit/First-Fit/Spread) and resource filters; designed for pluggable policies.}
+    \end{itemize}
+
+  \resumeProjectHeading{Danmomo -- Multiplayer Puzzle Game}{\faGithub}{Godot 4.3, GDScript, Node, WebSockets, AWS}{https://github.com/ndg8743/Danmomo}
+    \begin{itemize}
+      \resumeItem{Built real-time multiplayer fruit-merging gameplay with synchronized game-state and server-client networking.}
+    \end{itemize}
+
+  \resumeProjectHeading{Fitness Tracker -- Full-stack Web App}{\faGithub}{Vue 3 + TypeScript, Node/Express, SQL, Bulma, Supabase/PostgreSQL}{https://github.com/ndg8743/WSP-Final-Project-Fall2024}
+    \begin{itemize}
+      \resumeItem{Developed exercise/meal logging with auth, dashboard views, and a responsive UI (Bulma).}
+    \end{itemize}
+
+  \resumeProjectHeading{Homelab -- Fault-Tolerant Cluster}{\faServer}{Proxmox, k3s, Traefik, Longhorn, KEDA, Wazuh, Prometheus/Grafana}{https://github.com/ndg8743}
+    \begin{itemize}
+      \resumeItem{Three-node (GPU) cluster with VIP fail-over, 3-rep Longhorn storage, NAS-backed NFS; zero-touch recovery on node loss.}
+      \resumeItem{Automated media services, SIEM, and event-driven batch tasks (ETL/ingest/log-mining) via KEDA.}
+    \end{itemize}
+
+% ---------------------- CERTIFICATIONS & SKILLS -----------------------------
+\vspace{-8pt}
+\section{Certifications \& Skills}
+\resumeSubHeadingListStart
+  \resumeItem{\textbf{Certifications:} Systems Administration, C/C++ Development, Linux, Networking, Cloud Architecture, DevOps}
+  \resumeItem{\textbf{Languages:} Java, C, C++, Python, Go, SQL, JavaScript/TypeScript, HTML/CSS, Assembly}
+  \resumeItem{\textbf{Frameworks \& Tools:} Docker, Kubernetes, Git, CI/CD, Gradle, Flask, FastAPI, Vue, React, Express, Tailwind, Bulma, REST, WebSockets, HTTP, gRPC, WebHooks, Electron, PowerShell, SQL, AWS, Google Cloud, Oracle, Azure, Supabase, Pytorch, Jupyter, Pandas, NLTK}
+\resumeSubHeadingListEnd
+
+% ---------------------------------- END -------------------------------------
+\end{document}
