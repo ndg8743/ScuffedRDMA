@@ -530,82 +530,53 @@ We structure validation around three experimental pillars, each targeting a dist
 
 \subsection{Pillar 1: Precision Switching Overhead}
 
-\textbf{Hypothesis:} Stochastic rounding adds less than 5\% overhead compared to deterministic truncation, while eliminating gradient bias.
+\textbf{Hypothesis:} Stochastic rounding eliminates gradient bias with acceptable overhead compared to deterministic truncation.
 
-\textbf{Metrics:} Conversion throughput (GB/s) for FP16$\leftrightarrow$FP32 and FP32$\leftrightarrow$BF16; statistical bias magnitude ($< 10^{-6}$ target for stochastic); overhead ratio $T_{\text{stochastic}} / T_{\text{deterministic}}$.
+\textbf{Metrics:} Conversion throughput (GB/s) for FP16$\leftrightarrow$FP32 and FP32$\leftrightarrow$BF16; statistical bias magnitude for stochastic vs.\ deterministic; overhead ratio $T_{\text{stochastic}} / T_{\text{deterministic}}$.
 
 \subsection{Pillar 2: Prefetching Effectiveness}
 
-\textbf{Hypothesis:} Adaptive prefetch achieves $>$90\% hit rate for sequential inference and $>$70\% for fine-tuning workloads.
+\textbf{Hypothesis:} Adaptive prefetch improves cache hit rates for both sequential inference and fine-tuning access patterns.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[
-    node distance=1.8cm,
-    state/.style={circle, draw, thick, minimum size=1.8cm, align=center, font=\small},
-    seq/.style={state, fill=solutiongreen!20},
-    str/.style={state, fill=ucxblue!20},
-    lsw/.style={state, fill=cudaorange!20},
-    adp/.style={state, fill=dbpurple!20},
-    rnd/.style={state, fill=gray!20},
-    arrow/.style={->, >=stealth, thick},
-    label/.style={font=\scriptsize, align=center}
+    node distance=1.4cm,
+    state/.style={circle, draw, thick, minimum size=1.4cm, align=center, font=\scriptsize},
+    arrow/.style={->, >=stealth, semithick},
+    label/.style={font=\tiny, align=center}
 ]
 
-\node[rnd] (random) {Random\\$q_0$};
-\node[seq, right=2.5cm of random] (seq) {Sequential\\$q_1$};
-\node[str, below right=2cm and 1cm of random] (str) {Strided\\$q_2$};
-\node[lsw, below left=2cm and 1cm of random] (lsw) {Layer\\Sweep\\$q_3$};
-\node[adp, below=3cm of random] (adp) {Adaptive\\$q_4$};
+\node[state, fill=gray!20] (rnd) {Random};
+\node[state, fill=solutiongreen!20, right=2cm of rnd] (seq) {Seq};
+\node[state, fill=ucxblue!20, below right=1.2cm and 0.5cm of rnd] (str) {Strided};
+\node[state, fill=cudaorange!20, below left=1.2cm and 0.5cm of rnd] (lsw) {Layer\\Sweep};
+\node[state, fill=dbpurple!20, below=2cm of rnd] (adp) {Adaptive};
 
-\draw[arrow] ($(random.west)+(-1,0)$) -- (random) node[midway, above] {init};
-\draw[arrow, bend left=20] (random) to node[above, label] {stride=1\\detected} (seq);
-\draw[arrow, bend left=20] (seq) to node[below, label] {pattern\\broken} (random);
-\draw[arrow, bend left=15] (random) to node[right, label] {stride$>$1} (str);
-\draw[arrow, bend left=15] (str) to node[left, label] {broken} (random);
-\draw[arrow, bend right=15] (random) to node[left, label] {prefix\\match} (lsw);
-\draw[arrow, bend right=15] (lsw) to node[right, label] {broken} (random);
-\draw[arrow, dashed] (seq) to node[right, label] {auto} (adp);
-\draw[arrow, dashed] (str) to node[left, label] {auto} (adp);
-\draw[arrow, dashed] (lsw) to node[left, label] {auto} (adp);
-\draw[arrow] (seq) to[loop right] node[label] {correct} (seq);
-\draw[arrow] (str) to[loop right] node[label] {correct} (str);
-\draw[arrow] (lsw) to[loop left] node[label] {correct} (lsw);
+\draw[arrow] ($(rnd.west)+(-0.7,0)$) -- (rnd);
+\draw[arrow, bend left=15] (rnd) to node[above, label] {stride=1} (seq);
+\draw[arrow, bend left=15] (seq) to node[below, label] {broken} (rnd);
+\draw[arrow, bend left=10] (rnd) to node[right, label] {stride$>$1} (str);
+\draw[arrow, bend left=10] (str) to node[left, label] {broken} (rnd);
+\draw[arrow, bend right=10] (rnd) to node[left, label] {prefix} (lsw);
+\draw[arrow, bend right=10] (lsw) to node[right, label] {broken} (rnd);
+\draw[arrow, dashed, gray] (seq) -- (adp);
+\draw[arrow, dashed, gray] (str) -- (adp);
+\draw[arrow, dashed, gray] (lsw) -- (adp);
 
 \end{tikzpicture}
-\caption{Prefetch engine state machine. The \texttt{Adaptive} strategy delegates to the detected pattern.}
+\caption{Prefetch engine state machine. Detected patterns delegate to the Adaptive strategy.}
 \label{fig:prefetch-fsm}
 \end{figure}
 
-\textbf{Metrics:} Hit rate by strategy; latency breakdown (hit $<$1~$\mu$s vs.\ miss 190~$\mu$s SoftRoCE / 2~$\mu$s hardware RoCE); wasted prefetch ratio ($< 15\%$ target).
+\textbf{Metrics:} Hit rate by strategy; latency breakdown (hit vs.\ miss, SoftRoCE vs.\ hardware RoCE); wasted prefetch ratio.
 
 \subsection{Pillar 3: Adaptive Quantization}
 
-\textbf{Hypothesis:} MXFP4~\cite{rouhani2023mxfp4} achieves $4\times$ bandwidth reduction with $< 1\%$ accuracy loss for KV cache transfers.
+\textbf{Hypothesis:} MXFP4~\cite{rouhani2023mxfp4} reduces wire bandwidth for KV cache transfers with acceptable accuracy loss.
 
 \textbf{Metrics:} Perplexity delta $\Delta\text{PPL}$ for FP16/MXFP4 vs.\ FP32; bandwidth savings per training step; convergence rate.
 
-\subsection{Planned Target Performance}
-
-\begin{table}[htbp]
-\centering
-\caption{Planned target performance metrics (untested)}
-\label{tab:target-metrics}
-\begin{tabular}{@{}llcc@{}}
-\toprule
-\textbf{Pillar} & \textbf{Metric} & \textbf{Baseline} & \textbf{Target} \\
-\midrule
-\multirow{2}{*}{Precision} & Stochastic round overhead & -- & $< 5\%$ \\
- & Conversion throughput & -- & $> 50$ GB/s \\
-\midrule
-\multirow{2}{*}{Prefetching} & Hit rate (inference) & 0\% & $> 90\%$ \\
- & Hit rate (fine-tuning) & 0\% & $> 70\%$ \\
-\midrule
-\multirow{2}{*}{Quantization} & $\Delta$PPL (MXFP4 KV) & FP32 & $< 0.5$ \\
- & Bandwidth reduction & 1$\times$ & $2$--$4\times$ \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 %=============================================================================
 \section{Fine-Tuning and SAE Feature Steering}
