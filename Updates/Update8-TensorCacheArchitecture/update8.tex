@@ -294,9 +294,64 @@ Stochastic rounding eliminates the systematic bias of round-to-nearest-even. For
 \end{equation}
 giving the unbiasedness property $\mathbb{E}[\text{round}(x)] = x$, ensuring gradient accumulation converges to the correct value despite per-step precision loss~\cite{micikevicius2018mixed}. The implementation in \texttt{rounding.rs} uses the \texttt{half} crate for FP16/BF16 manipulation and uniform random draws to decide rounding direction.
 
-\subsection{Centralized KV Cache}
+\subsection{Centralized KV Cache via vLLM Connector}
+\label{sec:kv-connector}
 
-The MLA/MQA duplication problem (\Cref{sec:mla-problem}) is resolved by storing the KV cache in the tensor database's \texttt{RdmaTensorCache}, keyed by layer index and sequence position. Each TP rank issues one-sided RDMA reads rather than maintaining a local copy. The prefetch engine predicts needed entries based on the current decoding step, and new KV entries are written back via RDMA Write.
+The MLA/MQA duplication problem (\Cref{sec:mla-problem}) is resolved by externalizing the KV cache to the tensor database via a vLLM V1 KV Connector. vLLM's connector architecture~\cite{vllm-kv-pool} separates KV cache management into scheduler-side and worker-side methods, enabling pluggable backends (NIXL~\cite{nixl}, Mooncake~\cite{mooncake2024}, P2P NCCL). Our \texttt{RDMAKVConnector} implements this interface to back the KV cache with the RDMA tensor database.
+
+\Cref{fig:kv-connector} shows the data flow. vLLM V1 supports combining HBM Prefix Caching with an external KV Pool via the KV Connector V1 interface~\cite{vllm-kv-pool}. The lookup proceeds in two tiers:
+\begin{enumerate}
+    \item \textbf{HBM prefix cache}: The engine first checks for prefix hits in local GPU HBM (enabled by default in vLLM V1 unless \texttt{-{}-no\_enable\_prefix\_caching} is set).
+    \item \textbf{RDMA KV Pool}: After determining HBM hits, the connector queries the tensor database for additional matches. Only the blocks \emph{not} found in HBM are fetched from the KV Pool via RDMA, minimizing transfer latency.
+    \item \textbf{Resume}: Once KV Pool blocks are loaded into HBM, the remaining process is identical to standard HBM Prefix Caching---no special handling is needed downstream.
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+    node distance=0.8cm and 1.5cm,
+    box/.style={rectangle, draw, rounded corners, minimum width=2.4cm, minimum height=0.7cm, align=center, font=\footnotesize},
+    wide/.style={box, minimum width=3.2cm},
+    arrow/.style={->, >=stealth, thick},
+    darrow/.style={<->, >=stealth, thick},
+]
+
+% vLLM Engine
+\node[wide, fill=ucxblue!15] (sched) {vLLM Scheduler};
+\node[wide, fill=ucxblue!15, right=2.5cm of sched] (worker) {Model Worker};
+
+% Connector (center)
+\node[wide, fill=solutiongreen!20, below=1cm of $(sched)!0.5!(worker)$] (conn) {RDMAKVConnector};
+
+% Scheduler-side methods
+\node[box, fill=gray!10, below left=0.8cm and 0.3cm of conn] (sched_m) {\texttt{get\_num\_new\_}\\[-2pt]\texttt{matched\_tokens}};
+
+% Worker-side methods
+\node[box, fill=gray!10, below right=0.8cm and 0.3cm of conn] (work_m) {\texttt{start\_load\_kv}\\[-2pt]\texttt{save\_kv\_layer}};
+
+% Storage tier
+\node[wide, fill=cudaorange!15, below=2.8cm of conn] (hbm) {HBM Prefix Cache};
+\node[wide, fill=dbpurple!15, below=0.7cm of hbm] (tdb) {RDMA Tensor DB\\(FP32 KV Pool)};
+
+% Arrows
+\draw[arrow] (sched) -- node[left, font=\tiny] {query hits} (conn);
+\draw[arrow] (conn) -- node[right, font=\tiny] {load/save} (worker);
+\draw[arrow] (conn) -- (sched_m);
+\draw[arrow] (conn) -- (work_m);
+\draw[arrow] (conn) -- node[left, font=\tiny, pos=0.3] {1. check} (hbm);
+\draw[arrow] (hbm) -- node[left, font=\tiny] {2. miss $\to$ RDMA} (tdb);
+
+% Transfer annotations
+\draw[arrow, rdmared, dashed] (tdb.east) -- ++(1.5,0) |- (worker.east) node[pos=0.25, right, font=\tiny\color{rdmared}] {GPUDirect / TCP};
+
+\end{tikzpicture}
+\caption{RDMA KV Connector data flow. The scheduler queries prefix hits, the connector checks HBM first then fetches missing blocks from the tensor database via RDMA, and the worker receives KV data without maintaining per-rank copies.}
+\label{fig:kv-connector}
+\end{figure}
+
+For disaggregated prefill/decode (PD) serving, the architecture extends with vLLM's \texttt{MultiConnector}~\cite{vllm-kv-pool}: prefill nodes use the RDMA KV Pool connector for prefix caching and writeback, while decode nodes receive KV caches via a P2P connector (direct device-to-device transfer). This preserves prefix caching gains on prefill nodes without sacrificing P2P transfer efficiency to decode nodes. In our cluster, Tower~2 V100s handle prefill (writing KV to the tensor database), and the 5070~Ti on Tower~1 handles decode (reading via TCP/gRPC since it lacks kernel RDMA).
+
+The connector's scheduler-side method \texttt{get\_num\_new\_matched\_tokens} returns how many tokens have cached KV entries, allowing the engine to skip redundant prefill computation. Worker-side \texttt{start\_load\_kv} initiates async RDMA reads for the needed blocks, and \texttt{save\_kv\_layer} writes new KV data back per-layer as prefill progresses.
 
 %=============================================================================
 \section{Tensor Database Architecture}
