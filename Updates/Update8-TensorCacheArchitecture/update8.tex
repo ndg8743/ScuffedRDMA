@@ -363,61 +363,37 @@ The \texttt{tensor\_rdma} crate~\cite{scuffedrdma-repo} depends on \texttt{tenso
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[
-    node distance=1.2cm and 1.5cm,
-    crate/.style={rectangle, draw, rounded corners, minimum width=2.8cm, minimum height=0.8cm, align=center, font=\small},
+    node distance=0.8cm and 1.2cm,
+    crate/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=0.7cm, align=center, font=\small},
     rdma/.style={crate, fill=dbpurple!20, thick},
     dep/.style={crate, fill=blue!10},
-    ext/.style={crate, fill=gray!15, dashed},
+    mod/.style={rectangle, draw, rounded corners, fill=dbpurple!8, minimum width=1.8cm, minimum height=0.5cm, align=center, font=\scriptsize},
     arrow/.style={->, >=stealth, thick}
 ]
 
-% tensor_rdma (center)
 \node[rdma] (rdma) {tensor\_rdma};
+\node[dep, above left=1.2cm and 0.8cm of rdma] (store) {tensor\_store};
+\node[dep, above right=1.2cm and 0.8cm of rdma] (compress) {tensor\_compress};
 
-% Internal dependencies
-\node[dep, above left=1.5cm and 1cm of rdma] (store) {tensor\_store};
-\node[dep, above right=1.5cm and 1cm of rdma] (compress) {tensor\_compress};
-
-% Modules within tensor_rdma
-\node[crate, fill=dbpurple!10, below left=1.5cm and 2cm of rdma] (precision) {precision.rs};
-\node[crate, fill=dbpurple!10, below left=1.5cm and 0cm of rdma] (rounding) {rounding.rs};
-\node[crate, fill=dbpurple!10, below right=1.5cm and 0cm of rdma] (prefetch) {prefetch.rs};
-\node[crate, fill=dbpurple!10, below right=1.5cm and 2cm of rdma] (transport) {transport.rs};
-\node[crate, fill=dbpurple!10, below=3cm of rdma, xshift=-1.5cm] (cache) {rdma\_cache.rs};
-\node[crate, fill=dbpurple!10, below=3cm of rdma, xshift=1.5cm] (config) {config.rs};
-
-% External crates
-\node[ext, above=2.5cm of rdma, xshift=-3cm] (half) {half};
-\node[ext, above=2.5cm of rdma, xshift=0cm] (tokio) {tokio};
-\node[ext, above=2.5cm of rdma, xshift=3cm] (dashmap) {dashmap};
-
-% Arrows: external -> tensor_rdma
-\draw[arrow, gray] (half) -- (rdma);
-\draw[arrow, gray] (tokio) -- (rdma);
-\draw[arrow, gray] (dashmap) -- (rdma);
-
-% Arrows: internal deps
 \draw[arrow] (store) -- (rdma);
 \draw[arrow] (compress) -- (rdma);
 
-% Arrows: modules
-\draw[arrow, dbpurple] (rdma) -- (precision);
-\draw[arrow, dbpurple] (rdma) -- (rounding);
-\draw[arrow, dbpurple] (rdma) -- (prefetch);
-\draw[arrow, dbpurple] (rdma) -- (transport);
-\draw[arrow, dbpurple] (rdma) -- (cache);
-\draw[arrow, dbpurple] (rdma) -- (config);
+% Modules as compact row
+\node[mod, below=1.2cm of rdma, xshift=-3.5cm] (p) {precision.rs};
+\node[mod, right=0.2cm of p] (r) {rounding.rs};
+\node[mod, right=0.2cm of r] (pf) {prefetch.rs};
+\node[mod, right=0.2cm of pf] (t) {transport.rs};
+\node[mod, right=0.2cm of t] (c) {rdma\_cache.rs};
 
-% Module inter-deps
-\draw[arrow, dashed, gray, thin] (precision) -- (rounding);
-\draw[arrow, dashed, gray, thin] (precision) -- (cache);
-\draw[arrow, dashed, gray, thin] (rounding) -- (cache);
-\draw[arrow, dashed, gray, thin] (prefetch) -- (cache);
-\draw[arrow, dashed, gray, thin] (transport) -- (cache);
-\draw[arrow, dashed, gray, thin] (config) -- (cache);
+\draw[arrow, dbpurple] (rdma) -- (p.north);
+\draw[arrow, dbpurple] (rdma) -- (pf.north);
+\draw[arrow, dbpurple] (rdma) -- (c.north);
+
+% Grouping
+\node[draw=dbpurple!50, dashed, rounded corners, fit=(p)(r)(pf)(t)(c), inner sep=4pt, label={[font=\tiny\color{dbpurple}]below:Internal modules}] {};
 
 \end{tikzpicture}
-\caption{Tensor database \texttt{tensor\_rdma} crate dependency graph.}
+\caption{\texttt{tensor\_rdma} crate: depends on \texttt{tensor\_store} and \texttt{tensor\_compress}, with five internal modules implementing the RDMA Tensor Cache.}
 \label{fig:crate-deps}
 \end{figure}
 
