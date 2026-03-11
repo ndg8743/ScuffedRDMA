@@ -64,7 +64,7 @@
 
 \begin{abstract}
 \noindent
-Heterogeneous GPU clusters present a precision mismatch problem that limits distributed LLM training and inference. This update presents the RDMA Tensor Cache, a centralized precision management layer for a two-tower home lab: Tower~1 (Ryzen~9~7950X, RTX~5070~Ti~16GB, Windows) and Tower~2 (Proxmox/Linux, $2\times$ Tesla~V100~32GB). We resolve the V100 (FP16-only) vs.\ 5070~Ti (BF16-native, no kernel RDMA) asymmetry with an RDMA-accessible FP32 master weight store, stochastic rounding, predictive tensor prefetching, and a centralized KV cache eliminating per-rank duplication under MLA/MQA tensor parallelism. We introduce GPU pipeline optimization via Amdahl's and Gustafson's scaling laws, analyze CUDA vs.\ Triton kernel abstraction hierarchies, and describe vLLM semantic routing for heterogeneous clusters. Two new tools---ScuffedKernels (RDMA-aware kernel optimization) and ScuffedSearch (autonomous RDMA research automation)---provide systematic frameworks for kernel-level performance engineering and experiment tracking. Integration paths through UCX/UCC, SoftRoCEv2, and UEC~1.0 are described.
+Heterogeneous GPU clusters present a precision mismatch problem that limits distributed LLM training and inference. This update presents the RDMA Tensor Cache, a centralized precision management layer for a two-tower home lab: Tower~1 (Ryzen~9~7950X, RTX~5070~Ti~16GB, Windows) and Tower~2 (Proxmox/Linux, $2\times$ Tesla~V100~32GB). We resolve the V100 (FP16-only) vs.\ 5070~Ti (BF16-native, no kernel RDMA) asymmetry with an RDMA-accessible FP32 master weight store, stochastic rounding, predictive tensor prefetching, and a centralized KV cache eliminating per-rank duplication under MLA/MQA tensor parallelism. We introduce GPU pipeline optimization via Amdahl's and Gustafson's scaling laws, analyze CUDA vs.\ Triton kernel abstraction hierarchies, and describe vLLM semantic routing for heterogeneous clusters. Two new tools;ScuffedKernels (RDMA-aware kernel optimization) and ScuffedSearch (autonomous RDMA research automation);provide systematic frameworks for kernel-level performance engineering and experiment tracking. Integration paths through UCX/UCC, SoftRoCEv2, and UEC~1.0 are described.
 \end{abstract}
 
 \tableofcontents
@@ -113,16 +113,17 @@ The NVIDIA communication stack comprises several interdependent libraries. \Cref
 \centering
 \caption{NVIDIA communication stack summary}
 \label{tab:nvidia-stack}
-\begin{tabular}{@{}llp{6.5cm}@{}}
+\small
+\begin{tabular}{@{}lp{4.5cm}p{4.5cm}@{}}
 \toprule
 \textbf{Library} & \textbf{Role} & \textbf{Our Usage} \\
 \midrule
-NCCL~\cite{nccl} & GPU collective ops (AllReduce, AllGather) & V100$\leftrightarrow$V100 on Tower~2; cannot bridge heterogeneous precision \\
-UCX/HPC-X~\cite{ucx,hpcx} & Transport-agnostic point-to-point (IB, RoCE, TCP, SHM) & Transport negotiation; heterogeneous path selection \\
+NCCL~\cite{nccl} & GPU collectives (AllReduce, AllGather) & V100$\leftrightarrow$V100 on Tower~2; cannot bridge mixed precision \\
+UCX/HPC-X~\cite{ucx,hpcx} & Transport-agnostic point-to-point (IB, RoCE, TCP) & Transport negotiation; heterogeneous path selection \\
 GPUDirect RDMA~\cite{gpudirect-rdma-redhat} & NIC$\leftrightarrow$GPU DMA via \texttt{nvidia-peermem} & V100 direct memory access on Tower~2 \\
 GDRCopy~\cite{gdrcopy} & Low-latency CPU$\leftrightarrow$GPU copies & Small tensor/metadata transfers \\
-NIXL~\cite{nixl} & Point-to-point tensor transfer for disaggregated inference & Reference for vLLM connector design \\
-Megatron-LM~\cite{megatron2020} & Canonical TP/PP/DP parallelism & FP32 master weight pattern; our cache generalizes this to RDMA \\
+NIXL~\cite{nixl} & Tensor transfer for disaggregated inference & Reference for vLLM connector design \\
+Megatron-LM~\cite{megatron2020} & Canonical TP/PP/DP parallelism & FP32 master weight pattern; cache generalizes to RDMA \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -185,9 +186,9 @@ The RDMA Tensor Cache mediates all tensor transfers between Tower~1 and Tower~2,
 \centering
 \begin{tikzpicture}[
     node distance=0.6cm and 1.5cm,
-    box/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small},
-    tower/.style={rectangle, draw, thick, rounded corners, minimum width=5.5cm, minimum height=6cm, align=center},
-    db/.style={rectangle, draw, thick, rounded corners, fill=dbpurple!15, minimum width=3cm, minimum height=0.8cm, align=center, font=\small},
+    box/.style={rectangle, draw, rounded corners, minimum width=2.3cm, minimum height=0.7cm, align=center, font=\footnotesize},
+    tower/.style={rectangle, draw, thick, rounded corners, minimum width=5.8cm, minimum height=6cm, align=center},
+    db/.style={rectangle, draw, thick, rounded corners, fill=dbpurple!15, minimum width=2.6cm, minimum height=0.7cm, align=center, font=\footnotesize},
     link/.style={<->, >=stealth, very thick},
     arrow/.style={->, >=stealth, thick},
     label/.style={font=\footnotesize}
@@ -210,10 +211,10 @@ The RDMA Tensor Cache mediates all tensor transfers between Tower~1 and Tower~2,
 \node[tower, fill=tower2color!8] (t2) at (4.5, 0) {};
 \node[above=0.1cm of t2.north, font=\small\bfseries] {Tower 2 (Linux)};
 
-\node[box, fill=v100blue!20] (gpu2a) at (3.5, 2) {V100 32 GB\\(FP16)};
-\node[box, fill=v100blue!20] (gpu2b) at (5.5, 2) {V100 32 GB\\(FP16)};
-\node[box, fill=blue!15] (cpu2) at (4.5, 0.7) {Proxmox Host\\CPU + RAM};
-\node[db] (neu) at (4.5, -0.6) {Tensor\\Database};
+\node[box, fill=v100blue!20] (gpu2a) at (3.3, 2) {V100 32 GB\\(FP16)};
+\node[box, fill=v100blue!20] (gpu2b) at (5.7, 2) {V100 32 GB\\(FP16)};
+\node[box, fill=blue!15] (cpu2) at (4.5, 0.5) {Proxmox Host\\CPU + RAM};
+\node[db] (neu) at (4.5, -0.7) {Tensor\\Database};
 \node[box, fill=gray!20] (nic2) at (4.5, -1.9) {ConnectX-4\\100GbE};
 
 \draw[arrow] (gpu2a) -- (cpu2);
@@ -221,14 +222,14 @@ The RDMA Tensor Cache mediates all tensor transfers between Tower~1 and Tower~2,
 \draw[arrow] (cpu2) -- (neu);
 \draw[arrow] (neu) -- (nic2);
 
-% GPUDirect RDMA annotation
-\draw[arrow, dashed, rdmared] (gpu2a.south) -- ++(0, -0.4) -| ($(nic2.north)-(0.5,0)$) node[pos=0.3, left, font=\tiny\color{rdmared}] {GPUDirect};
+% GPUDirect RDMA annotation (route outside tower)
+\draw[arrow, dashed, rdmared] (gpu2b.east) -- ++(0.6, 0) |- (nic2.east) node[pos=0.25, right, font=\tiny\color{rdmared}] {GPUDirect};
 
 % 100GbE Link
 \draw[link, rdmared] (nic1.east) -- (nic2.west) node[midway, above, font=\small\bfseries] {100 GbE RDMA} node[midway, below, font=\tiny] {SoftRoCEv2 / RoCE v2};
 
 % Tensor Database detail
-\node[draw=dbpurple, fill=dbpurple!5, rounded corners, below=2.8cm of $(t1)!0.5!(t2)$, minimum width=12cm, minimum height=1.6cm, align=center] (detail) {};
+\node[draw=dbpurple, fill=dbpurple!5, rounded corners, below=4cm of $(t1)!0.5!(t2)$, minimum width=12cm, minimum height=1.4cm, align=center] (detail) {};
 \node[above=0.05cm of detail.north, font=\small\bfseries\color{dbpurple}] {RDMA Tensor Database (FP32 Master Store)};
 \node[font=\footnotesize, align=center] at (detail.center) {
     \texttt{precision.rs} \quad \texttt{rounding.rs} \quad \texttt{prefetch.rs} \quad \texttt{transport.rs} \quad \texttt{rdma\_cache.rs} \quad \texttt{config.rs}
@@ -303,7 +304,7 @@ The MLA/MQA duplication problem (\Cref{sec:mla-problem}) is resolved by external
 \begin{enumerate}
     \item \textbf{HBM prefix cache}: The engine first checks for prefix hits in local GPU HBM (enabled by default in vLLM V1 unless \texttt{-{}-no\_enable\_prefix\_caching} is set).
     \item \textbf{RDMA KV Pool}: After determining HBM hits, the connector queries the tensor database for additional matches. Only the blocks \emph{not} found in HBM are fetched from the KV Pool via RDMA, minimizing transfer latency.
-    \item \textbf{Resume}: Once KV Pool blocks are loaded into HBM, the remaining process is identical to standard HBM Prefix Caching---no special handling is needed downstream.
+    \item \textbf{Resume}: Once KV Pool blocks are loaded into HBM, the remaining process is identical to standard HBM Prefix Caching; no special handling is needed downstream.
 \end{enumerate}
 
 \begin{figure}[htbp]
@@ -313,36 +314,35 @@ The MLA/MQA duplication problem (\Cref{sec:mla-problem}) is resolved by external
     box/.style={rectangle, draw, rounded corners, minimum width=2.4cm, minimum height=0.7cm, align=center, font=\footnotesize},
     wide/.style={box, minimum width=3.2cm},
     arrow/.style={->, >=stealth, thick},
-    darrow/.style={<->, >=stealth, thick},
 ]
 
 % vLLM Engine
 \node[wide, fill=ucxblue!15] (sched) {vLLM Scheduler};
-\node[wide, fill=ucxblue!15, right=2.5cm of sched] (worker) {Model Worker};
+\node[wide, fill=ucxblue!15, right=3cm of sched] (worker) {Model Worker};
 
 % Connector (center)
-\node[wide, fill=solutiongreen!20, below=1cm of $(sched)!0.5!(worker)$] (conn) {RDMAKVConnector};
+\node[wide, fill=solutiongreen!20, below=1.2cm of $(sched)!0.5!(worker)$] (conn) {RDMAKVConnector};
 
 % Scheduler-side methods
-\node[box, fill=gray!10, below left=0.8cm and 0.3cm of conn] (sched_m) {\texttt{get\_num\_new\_}\\[-2pt]\texttt{matched\_tokens}};
+\node[box, fill=gray!10, below left=1cm and 0.5cm of conn] (sched_m) {\texttt{get\_num\_new\_}\\[-2pt]\texttt{matched\_tokens}};
 
 % Worker-side methods
-\node[box, fill=gray!10, below right=0.8cm and 0.3cm of conn] (work_m) {\texttt{start\_load\_kv}\\[-2pt]\texttt{save\_kv\_layer}};
+\node[box, fill=gray!10, below right=1cm and 0.5cm of conn] (work_m) {\texttt{start\_load\_kv}\\[-2pt]\texttt{save\_kv\_layer}};
 
 % Storage tier
-\node[wide, fill=cudaorange!15, below=2.8cm of conn] (hbm) {HBM Prefix Cache};
+\node[wide, fill=cudaorange!15, below=3.2cm of conn] (hbm) {HBM Prefix Cache};
 \node[wide, fill=dbpurple!15, below=0.7cm of hbm] (tdb) {RDMA Tensor DB\\(FP32 KV Pool)};
 
 % Arrows
 \draw[arrow] (sched) -- node[left, font=\tiny] {query hits} (conn);
 \draw[arrow] (conn) -- node[right, font=\tiny] {load/save} (worker);
-\draw[arrow] (conn) -- (sched_m);
-\draw[arrow] (conn) -- (work_m);
-\draw[arrow] (conn) -- node[left, font=\tiny, pos=0.3] {1. check} (hbm);
+\draw[arrow] (conn.south west) -- (sched_m);
+\draw[arrow] (conn.south east) -- (work_m);
+\draw[arrow] (conn) -- node[left, font=\tiny, pos=0.6] {1. check} (hbm);
 \draw[arrow] (hbm) -- node[left, font=\tiny] {2. miss $\to$ RDMA} (tdb);
 
 % Transfer annotations
-\draw[arrow, rdmared, dashed] (tdb.east) -- ++(1.5,0) |- (worker.east) node[pos=0.25, right, font=\tiny\color{rdmared}] {GPUDirect / TCP};
+\draw[arrow, rdmared, dashed] (tdb.east) -- ++(2,0) |- (worker.east) node[pos=0.25, right, font=\tiny\color{rdmared}] {GPUDirect / TCP};
 
 \end{tikzpicture}
 \caption{RDMA KV Connector data flow. The scheduler queries prefix hits, the connector checks HBM first then fetches missing blocks from the tensor database via RDMA, and the worker receives KV data without maintaining per-rank copies.}
@@ -451,7 +451,7 @@ Gustafson's Law~\cite{gustafson1988} provides the complementary perspective for 
 \label{eq:gustafson}
     S(n) = n - \alpha(n-1)
 \end{equation}
-where $\alpha$ is the serial fraction. For RDMA pipelines, increasing batch size scales the parallel portion while the serial overhead (connection setup, QP initialization) remains fixed. As a general example, with $\alpha = 0.05$ and $n = 4$ processors, $S(4) = 4 - 0.05 \times 3 = 3.85\times$---near-linear scaling. For our 3-GPU cluster, the applicable scaling depends on the measured serial fraction of the RDMA pipeline, which has not yet been determined.
+where $\alpha$ is the serial fraction. For RDMA pipelines, increasing batch size scales the parallel portion while the serial overhead (connection setup, QP initialization) remains fixed. As a general example, with $\alpha = 0.05$ and $n = 4$ processors, $S(4) = 4 - 0.05 \times 3 = 3.85\times$, near-linear scaling. For our 3-GPU cluster, the applicable scaling depends on the measured serial fraction of the RDMA pipeline, which has not yet been determined.
 
 \subsection{Arc Compute Pipeline Saturation}
 
@@ -470,7 +470,7 @@ GPU kernel development spans multiple abstraction levels. We use Triton for Scuf
 
 \subsection{CUDA Stack Layers}
 
-CUDA provides four levels: Driver API (\texttt{cuLaunchKernel}, direct GPU control), Runtime API (\texttt{cudaLaunchKernel}, simplified launch), CCCL (CUB/Thrust template libraries), and C++ kernels (thread-level programming with explicit indexing and shared memory). CUDA Python wraps the Driver/Runtime APIs but cannot express kernels---Numba CUDA or Triton is required for kernel authoring.
+CUDA provides four levels: Driver API (\texttt{cuLaunchKernel}, direct GPU control), Runtime API (\texttt{cudaLaunchKernel}, simplified launch), CCCL (CUB/Thrust template libraries), and C++ kernels (thread-level programming with explicit indexing and shared memory). CUDA Python wraps the Driver/Runtime APIs but cannot express kernels; Numba CUDA or Triton is required for kernel authoring.
 
 \subsection{Triton: Block-Level Kernel Language}
 
@@ -492,7 +492,7 @@ NVSHMEM~\cite{nvshmem} provides OpenSHMEM-like put/get semantics for GPU-to-GPU 
 
 \subsection{Flash Attention: Triton vs CUDA Implementations}
 
-Flash Attention~\cite{dao2022flashattention} reduces attention memory from $O(N^2)$ to $O(N)$ by tiling Q, K, V into SRAM-resident blocks and using the online softmax trick---maintaining running $(m, \ell)$ statistics and rescaling partial results per block:
+Flash Attention~\cite{dao2022flashattention} reduces attention memory from $O(N^2)$ to $O(N)$ by tiling Q, K, V into SRAM-resident blocks and using the online softmax trick, maintaining running $(m, \ell)$ statistics and rescaling partial results per block:
 \begin{equation}
     m_{\text{new}} = \max(m_{\text{prev}}, \tilde{m}), \quad
     \ell_{\text{new}} = e^{m_{\text{prev}} - m_{\text{new}}} \cdot \ell_{\text{prev}} + e^{\tilde{m} - m_{\text{new}}} \cdot \tilde{\ell}
@@ -503,7 +503,7 @@ A Triton implementation study~\cite{aminediro-flash-attn} shows the optimization
 
 \subsection{AMD IRIS: Cross-Platform GPU Communication}
 
-AMD's IRIS framework~\cite{amd-iris} brings SHMEM-like remote memory access (RMA) to ROCm GPUs within Triton kernels. IRIS is relevant for future cluster heterogeneity---if AMD GPUs join the cluster, IRIS provides a Triton-native communication path analogous to NVSHMEM. Our transport abstraction is designed to accommodate such backends.
+AMD's IRIS framework~\cite{amd-iris} brings SHMEM-like remote memory access (RMA) to ROCm GPUs within Triton kernels. IRIS is relevant for future cluster heterogeneity: if AMD GPUs join the cluster, IRIS provides a Triton-native communication path analogous to NVSHMEM. Our transport abstraction is designed to accommodate such backends.
 
 %=============================================================================
 \section{Semantic Routing and Cross-Platform GPU Orchestration}
@@ -512,10 +512,10 @@ AMD's IRIS framework~\cite{amd-iris} brings SHMEM-like remote memory access (RMA
 
 \subsection{vLLM Semantic Router}
 
-The vLLM Semantic Router~\cite{vllm-semantic-router} classifies requests by semantic signal and routes to the best-suited model---optimizing for quality, not just throughput. For our cluster, this enables two-layer routing:
+The vLLM Semantic Router~\cite{vllm-semantic-router} classifies requests by semantic signal and routes to the best-suited model, optimizing for quality, not just throughput. For our cluster, this enables two-layer routing:
 \begin{enumerate}
     \item \textbf{Semantic layer}: Route by task type (code, creative, QA) to the appropriate model.
-    \item \textbf{Latency layer}: Route to the GPU with lowest predicted latency---5070~Ti BF16 for small batches (no precision conversion), V100 FP16 for large batches (RDMA-backed KV cache).
+    \item \textbf{Latency layer}: Route to the GPU with lowest predicted latency: 5070~Ti BF16 for small batches (no precision conversion), V100 FP16 for large batches (RDMA-backed KV cache).
 \end{enumerate}
 The router's latency predictor can factor in RDMA transfer time from the tensor database, accounting for the different precision pipeline costs on each tower.
 
@@ -542,27 +542,24 @@ We structure validation around three experimental pillars, each targeting a dist
 \centering
 \begin{tikzpicture}[
     node distance=1.4cm,
-    state/.style={circle, draw, thick, minimum size=1.4cm, align=center, font=\scriptsize},
+    state/.style={circle, draw, thick, minimum size=1.3cm, align=center, font=\scriptsize},
     arrow/.style={->, >=stealth, semithick},
-    label/.style={font=\tiny, align=center}
+    label/.style={font=\tiny, align=center, fill=white, inner sep=1pt}
 ]
 
 \node[state, fill=gray!20] (rnd) {Random};
-\node[state, fill=solutiongreen!20, right=2cm of rnd] (seq) {Seq};
-\node[state, fill=ucxblue!20, below right=1.2cm and 0.5cm of rnd] (str) {Strided};
-\node[state, fill=cudaorange!20, below left=1.2cm and 0.5cm of rnd] (lsw) {Layer\\Sweep};
-\node[state, fill=dbpurple!20, below=2cm of rnd] (adp) {Adaptive};
+\node[state, fill=solutiongreen!20, right=3cm of rnd] (seq) {Seq};
+\node[state, fill=ucxblue!20, below right=2.2cm and 2.2cm of rnd] (str) {Strided};
+\node[state, fill=cudaorange!20, below left=2.2cm and 2.2cm of rnd] (lsw) {Layer\\Sweep};
+\node[state, fill=dbpurple!20, below=3.5cm of rnd] (adp) {Adaptive};
 
 \draw[arrow] ($(rnd.west)+(-0.7,0)$) -- (rnd);
-\draw[arrow, bend left=15] (rnd) to node[above, label] {stride=1} (seq);
-\draw[arrow, bend left=15] (seq) to node[below, label] {broken} (rnd);
-\draw[arrow, bend left=10] (rnd) to node[right, label] {stride$>$1} (str);
-\draw[arrow, bend left=10] (str) to node[left, label] {broken} (rnd);
-\draw[arrow, bend right=10] (rnd) to node[left, label] {prefix} (lsw);
-\draw[arrow, bend right=10] (lsw) to node[right, label] {broken} (rnd);
-\draw[arrow, dashed, gray] (seq) -- (adp);
-\draw[arrow, dashed, gray] (str) -- (adp);
-\draw[arrow, dashed, gray] (lsw) -- (adp);
+\draw[arrow, bend left=20] (rnd) to node[above, label] {stride=1} (seq);
+\draw[arrow, bend left=20] (seq) to node[below, label] {broken} (rnd);
+\draw[arrow, bend left=12] (rnd) to node[right, label, pos=0.4] {stride$>$1} (str);
+\draw[arrow, bend left=12] (str) to node[right, label, pos=0.6] {broken} (rnd);
+\draw[arrow, bend right=12] (rnd) to node[left, label, pos=0.4] {prefix} (lsw);
+\draw[arrow, bend right=12] (lsw) to node[left, label, pos=0.6] {broken} (rnd);
 
 \end{tikzpicture}
 \caption{Prefetch engine state machine. Detected patterns delegate to the Adaptive strategy.}
@@ -597,7 +594,7 @@ SAEs~\cite{cunningham2023sae} decompose activation $\mathbf{a} \in \mathbb{R}^d$
 \end{equation}
 Feature steering clamps feature $i$ to $\alpha \cdot \mathbf{f}_{\max,i}$, modifying behavior at inference time without gradient computation~\cite{eiffel-tower-llama}.
 
-SAE feature vectors map naturally to the tensor database's \texttt{SparseVector}: 65,536 dimensions with $\sim$50 active features yields $\sim$400~bytes vs.\ 256~KB dense---51$\times$ compression, fitting within a single RDMA read.
+SAE feature vectors map naturally to the tensor database's \texttt{SparseVector}: 65,536 dimensions with $\sim$50 active features yields $\sim$400~bytes vs.\ 256~KB dense, a 51$\times$ compression, fitting within a single RDMA read.
 
 \begin{table}[htbp]
 \centering
@@ -651,7 +648,7 @@ ScuffedKernels extends the classical roofline model with a \emph{network ceiling
 \begin{equation}
     P_{\text{net}} = \text{AI} \times B_{\text{network}}
 \end{equation}
-where AI is arithmetic intensity (FLOPs/byte) and $B_{\text{network}}$ is network bandwidth (12.5~GB/s for 100GbE). Kernels falling below this ceiling are network-bound, and compute optimization alone cannot help---prefetch depth and transfer overlap (Tier~6) are the appropriate interventions.
+where AI is arithmetic intensity (FLOPs/byte) and $B_{\text{network}}$ is network bandwidth (12.5~GB/s for 100GbE). Kernels falling below this ceiling are network-bound, and compute optimization alone cannot help; prefetch depth and transfer overlap (Tier~6) are the appropriate interventions.
 
 \subsection{Baseline Kernels}
 
@@ -669,7 +666,7 @@ ScuffedSearch provides a structured framework for systematic RDMA optimization e
 The core principle is \emph{one GPU, one file, one metric}:
 
 \begin{itemize}
-    \item \textbf{\texttt{prepare.py}} (IMMUTABLE): Defines the network topology (frozen dataclass), benchmark harness, and scoring function. Agents cannot modify this file---it ensures measurement consistency across experiments.
+    \item \textbf{\texttt{prepare.py}} (IMMUTABLE): Defines the network topology (frozen dataclass), benchmark harness, and scoring function. Agents cannot modify this file, ensuring measurement consistency across experiments.
 
     \item \textbf{\texttt{optimize.py}} (MUTABLE): The only file agents modify. Contains tunable hyperparameters (batch size, QP depth, prefetch depth, wire format, transport mode, buffer pool size, congestion window) and the \texttt{optimize\_rdma\_transfer()} function.
 
@@ -733,7 +730,7 @@ UCC~\cite{ucc} provides collective operations on top of UCX point-to-point primi
 
 \subsection{Proxmox GPU Passthrough}
 
-Tower~2 runs Proxmox (QEMU/KVM), with V100 GPUs passed through via VFIO-PCI. QEMU device properties can be overridden via libvirt's \texttt{qemu:override} XML element~\cite{libvirt-qemu}, which supports per-device frontend property tuning (string, unsigned, signed, bool, or remove). This is relevant for configuring PCIe BAR sizes and IOMMU settings that affect GPUDirect RDMA performance---incorrect BAR mapping can force host-bounce transfers instead of direct NIC$\to$GPU DMA.
+Tower~2 runs Proxmox (QEMU/KVM), with V100 GPUs passed through via VFIO-PCI. QEMU device properties can be overridden via libvirt's \texttt{qemu:override} XML element~\cite{libvirt-qemu}, which supports per-device frontend property tuning (string, unsigned, signed, bool, or remove). This is relevant for configuring PCIe BAR sizes and IOMMU settings that affect GPUDirect RDMA performance. Incorrect BAR mapping can force host-bounce transfers instead of direct NIC$\to$GPU DMA.
 
 %=============================================================================
 % References
