@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-decompile
+  namespace: hydra-infra
+  labels:
+    app: vllm-decompile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-decompile
+  template:
+    metadata:
+      labels:
+        app: vllm-decompile
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: cerberus
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.11.2
+          imagePullPolicy: Never
+          args:
+            - --model
+            - /models/llm4decompile-22b-v2
+            - --tensor-parallel-size
+            - "2"
+            - --dtype
+            - bfloat16
+            - --max-model-len
+            - "4096"
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --trust-remote-code
+            - --enforce-eager
+            - --disable-custom-all-reduce
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0,1"
+            - name: NCCL_IB_DISABLE
+              value: "1"
+            - name: NCCL_P2P_DISABLE
+              value: "1"
+            - name: VLLM_ATTENTION_BACKEND
+              value: "FLASHINFER"
+            - name: NCCL_SHM_DISABLE
+              value: "0"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+          resources:
+            requests:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: "2"
+            limits:
+              cpu: "16"
+              memory: 48Gi
+              nvidia.com/gpu: "2"
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+              readOnly: false
+            - name: shm
+              mountPath: /dev/shm
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 180
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 300
+            periodSeconds: 30
+      volumes:
+        - name: model-storage
+          hostPath:
+            path: /data/models
+            type: Directory
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-decompile
+  namespace: hydra-infra
+spec:
+  selector:
+    app: vllm-decompile
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http

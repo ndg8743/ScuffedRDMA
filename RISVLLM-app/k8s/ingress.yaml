@@ -1,0 +1,32 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: risvllm
+  namespace: hydra-infra
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: Host(`hydra.newpaltz.edu`) && PathPrefix(`/riscv`)
+      kind: Rule
+      priority: 15
+      middlewares:
+        - name: risvllm-strip
+        - name: hydra-forward-auth
+          namespace: hydra-system
+      services:
+        - name: risvllm
+          port: 3000
+  tls:
+    certResolver: letsencrypt
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: risvllm-strip
+  namespace: hydra-infra
+spec:
+  stripPrefix:
+    prefixes:
+      - /riscv
