@@ -35,12 +35,12 @@ ScuffedRDMA/
 ├── Updates/                         # 15 research updates (LaTeX + PDF)
 │   ├── Update1-HardwareSetup/
 │   ├── Update2-ImplementationPlan/
-│   ├── Update3-InfrastructureRDMATesting/
+│   ├── Update3-TensorCacheArchitecture/
 │   ├── Update4-FlashAttention3Blackwell/
 │   ├── Update5-GPToss120bBenchmarks/
 │   ├── Update6-TransportMiddleware/
 │   ├── Update7-ThesisProposal/
-│   ├── Update8-TensorCacheArchitecture/
+│   ├── Update8-InfrastructureRDMATesting/
 │   ├── Update9-WFAClassifierValidation/
 │   ├── Update10-MechanisticInterpretability/
 │   ├── Update11-WorkFirstScheduling/
