@@ -14,16 +14,14 @@ class VLLMClient {
     }
   }
 
-  formatPrompt(code, optimizationLevel = 'O0', inputType = 'pseudo') {
-    const prefix = inputType === 'assembly'
-      ? '# This is the assembly code with optimization level ' + optimizationLevel + ':\n'
-      : '# This is the decompiled pseudo code with optimization level ' + optimizationLevel + ':\n';
-
-    return `${prefix}${code}\n# What is the source code?`;
+  // Exact prompt format from LLM4Decompile training:
+  // https://github.com/albertan017/LLM4Decompile/blob/main/ghidra/demo.py
+  formatPrompt(code) {
+    return `# This is the assembly code:\n${code.trim()}\n# What is the source code?\n`;
   }
 
-  async decompile(code, { optimizationLevel = 'O0', inputType = 'pseudo', stream = false } = {}) {
-    const prompt = this.formatPrompt(code, optimizationLevel, inputType);
+  async decompile(code, { stream = false } = {}) {
+    const prompt = this.formatPrompt(code);
 
     const body = {
       model: '/models/llm4decompile-22b-v2',
@@ -52,8 +50,8 @@ class VLLMClient {
     return data.choices?.[0]?.text?.trim() || '';
   }
 
-  async decompileStream(code, options = {}) {
-    const prompt = this.formatPrompt(code, options.optimizationLevel, options.inputType);
+  async decompileStream(code) {
+    const prompt = this.formatPrompt(code);
 
     const body = {
       model: '/models/llm4decompile-22b-v2',

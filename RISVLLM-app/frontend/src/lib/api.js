@@ -81,3 +81,18 @@ export async function checkHealth() {
   const res = await fetch(`${API_BASE}/api/health`);
   return res.json();
 }
+
+export async function getModelStatus() {
+  const res = await fetch(`${API_BASE}/api/model`);
+  return res.json();
+}
+
+export async function loadModel() {
+  const res = await fetch(`${API_BASE}/api/model/load`, { method: 'POST' });
+  return res.json();
+}
+
+export async function unloadModel() {
+  const res = await fetch(`${API_BASE}/api/model/unload`, { method: 'POST' });
+  return res.json();
+}

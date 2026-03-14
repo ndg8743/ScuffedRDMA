@@ -15,6 +15,7 @@ spec:
       labels:
         app: risvllm
     spec:
+      serviceAccountName: risvllm
       nodeSelector:
         kubernetes.io/hostname: cerberus
       containers:

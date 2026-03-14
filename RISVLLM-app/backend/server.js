@@ -5,6 +5,7 @@ const path = require('path');
 const decompileRouter = require('./routes/decompile');
 const uploadRouter = require('./routes/upload');
 const healthRouter = require('./routes/health');
+const modelRouter = require('./routes/model');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,7 @@ app.use(express.json({ limit: '5mb' }));
 app.use('/api/decompile', decompileRouter);
 app.use('/api/upload', uploadRouter);
 app.use('/api/health', healthRouter);
+app.use('/api/model', modelRouter);
 
 // Serve frontend static files
 app.use(express.static(path.join(__dirname, '../frontend/dist')));

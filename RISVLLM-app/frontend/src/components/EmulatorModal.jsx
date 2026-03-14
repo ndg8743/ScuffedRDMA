@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { X, Maximize2, Minimize2, MonitorPlay } from 'lucide-react';
 
-const JSLINUX_URL = 'https://bellard.org/jslinux/vm.html?url=buildroot-riscv64+url=https://bellard.org/jslinux/&mem=256&graphic=0';
-const JSLINUX_GRAPHICAL = 'https://bellard.org/jslinux/vm.html?url=buildroot-riscv64+url=https://bellard.org/jslinux/&mem=256&graphic=1';
+const JSLINUX_URL = 'https://bellard.org/jslinux/vm.html?cpu=riscv64&url=buildroot-riscv64.cfg&mem=256';
+const JSLINUX_GRAPHICAL = 'https://bellard.org/jslinux/vm.html?cpu=riscv64&url=buildroot-riscv64-xwin.cfg&graphic=1&mem=256';
 
 export default function EmulatorModal({ isOpen, onClose }) {
   const [maximized, setMaximized] = useState(false);
@@ -63,8 +63,7 @@ export default function EmulatorModal({ isOpen, onClose }) {
             src={url}
             className="w-full h-full border-0"
             title="RISC-V Emulator"
-            sandbox="allow-scripts allow-same-origin allow-popups"
-            allow="cross-origin-isolated"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-downloads"
           />
         </div>
 
