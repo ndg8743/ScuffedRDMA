@@ -1,0 +1,14 @@
+\begin{table}[h]
+\centering
+\caption{Dual QP Pool Head-of-Line Blocking (SoftRoCE Loopback)}
+\label{tab:dual_qp_results}
+\begin{tabular}{lrrrrr}
+\toprule
+Scenario & Small p50 ($\mu$s) & Small p95 ($\mu$s) & Small p99 ($\mu$s) & Ops & Bytes \\
+\midrule
+  Single QP (baseline) & 13.6 & 15.5 & 19.7 & 1000 & 524416000 \\
+  Dual QP (WFA) & 14.4 & 17.1 & 21.4 & 500 & 128000 \\
+  Dual QP + PMP & 14.7 & 17.7 & 23.8 & 500 & 128000 \\
+\bottomrule
+\end{tabular}
+\end{table}

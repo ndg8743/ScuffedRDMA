@@ -1,0 +1,29 @@
+\begin{table}[h]
+\centering
+\caption{UCX vs libscuffedrdma Latency Across Protocol Boundaries}
+\label{tab:ucx_comparison}
+\begin{tabular}{rrrrr}
+\toprule
+Size (B) & UCX p50 ($\mu$s) & DualQP p50 ($\mu$s) & UCX p99 ($\mu$s) & DualQP p99 ($\mu$s) \\
+\midrule
+        64 & N/A & 12.6 & N/A & 48.1 \\
+       128 & N/A & 12.8 & N/A & 24.9 \\
+       256 & N/A & 12.9 & N/A & 24.6 \\
+       512 & N/A & 12.6 & N/A & 23.9 \\
+      1024 & N/A & 12.8 & N/A & 24.8 \\
+      2048 & N/A & 16.0 & N/A & 92.7 \\
+      3000 $\dag$ & N/A & 18.7 & N/A & 30.8 \\
+      4096 & N/A & 21.6 & N/A & 44.3 \\
+      8192 $\dag$ & N/A & 32.7 & N/A & 44.5 \\
+     16384 & N/A & 54.7 & N/A & 72.8 \\
+     32768 $\dag$ & N/A & 98.4 & N/A & 112.8 \\
+     49152 & N/A & 140.5 & N/A & 228.9 \\
+     65536 $\dag$ & N/A & 183.8 & N/A & 278.2 \\
+    131072 & N/A & 359.5 & N/A & 422.4 \\
+    262144 & N/A & 704.9 & N/A & 742.3 \\
+    524288 & N/A & 1414.5 & N/A & 1459.1 \\
+   1048576 & N/A & 2822.6 & N/A & 3104.0 \\
+\bottomrule
+\multicolumn{5}{l}{\footnotesize $\dag$ Near UCX protocol transition boundary (Issues \#10552, \#10486, \#10532)} \\
+\end{tabular}
+\end{table}

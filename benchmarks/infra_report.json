@@ -1,0 +1,99 @@
+{
+  "report_generated": "2026-03-30",
+  "hostname": "lambda-quad",
+  "probes": [
+    {
+      "probe_name": "pyverbs",
+      "available": false,
+      "output": null,
+      "error": "ModuleNotFoundError: No module named 'pyverbs'"
+    },
+    {
+      "probe_name": "nvidia-peermem",
+      "available": true,
+      "output": "Module nvidia-peermem found via modinfo. Version: 550.144.03. Description: NVIDIA GPU memory plug-in. Kernel module present at /lib/modules/6.8.0-63-generic/updates/dkms/nvidia-peermem.ko.zst. Note: module not currently loaded (lsmod shows no match).",
+      "error": null
+    },
+    {
+      "probe_name": "GPUDirect RDMA",
+      "available": false,
+      "output": "memory_peers directory not found at /sys/kernel/mm/memory_peers/. 3x NVIDIA GeForce RTX 3090 GPUs detected at bus locations 0000:01:00.0, 0000:21:00.0, 0000:4b:00.0. DMA Size: 47 bits each.",
+      "error": "/sys/kernel/mm/memory_peers/ does not exist (nvidia-peermem module not loaded). GPUDirect RDMA peer memory interface is not active."
+    },
+    {
+      "probe_name": "UCX submodule",
+      "available": false,
+      "output": "Directory /home/nathan/ScuffedRDMA/ucx/ exists but is empty.",
+      "error": null
+    },
+    {
+      "probe_name": "UCX system install",
+      "available": true,
+      "output": "ucx_info found at /usr/bin/ucx_info. Library version: 1.16.0. Packages installed: libucx-dev 1.16.0+ds-5ubuntu1, libucx0 1.16.0+ds-5ubuntu1, ucx-utils 1.16.0+ds-5ubuntu1. Configured with: --with-verbs --with-mlx5-dv --enable-rc --enable-dc --enable-ud --enable-mt --enable-cma.",
+      "error": null
+    },
+    {
+      "probe_name": "DOCA",
+      "available": false,
+      "output": null,
+      "error": "No DOCA packages found via dpkg. /opt/mellanox/doca does not exist."
+    },
+    {
+      "probe_name": "NIC model",
+      "available": true,
+      "output": "45:00.0 Ethernet controller: Aquantia Corp. AQtion AQC107 NBase-T/IEEE 802.3an Ethernet Controller [Atlantic 10G] (rev 02)\n47:00.0 Ethernet controller: Realtek Semiconductor Co., Ltd. RTL8125 2.5GbE Controller (rev 01)",
+      "error": null
+    },
+    {
+      "probe_name": "CUDA",
+      "available": true,
+      "output": "nvcc: CUDA compilation tools, release 12.4, V12.4.131. GPUs: 3x NVIDIA GeForce RTX 3090.",
+      "error": null
+    },
+    {
+      "probe_name": "OpenMPI",
+      "available": false,
+      "output": "mpirun not found. dpkg shows libopenmpi-dev 4.1.2-2ubuntu1 in 'rc' (removed, config remains) state.",
+      "error": "mpirun command not found. OpenMPI was previously installed but has been removed."
+    },
+    {
+      "probe_name": "Cerberus SSH",
+      "available": false,
+      "output": null,
+      "error": "Permission denied (publickey,password). SSH to cerberus failed with exit code 255."
+    },
+    {
+      "probe_name": "RDMA devices",
+      "available": true,
+      "output": "rdma link: rxe0/1 state ACTIVE physical_state LINK_UP netdev enp69s0. ibv_devices: rxe0 (node GUID aaa159fffe9d8dda).",
+      "error": null
+    },
+    {
+      "probe_name": "Python version",
+      "available": true,
+      "output": "Python 3.12.3",
+      "error": null
+    }
+  ],
+  "summary": {
+    "total_probes": 12,
+    "available": 6,
+    "unavailable": 6,
+    "available_list": [
+      "nvidia-peermem",
+      "UCX system install",
+      "NIC model",
+      "CUDA",
+      "RDMA devices",
+      "Python version"
+    ],
+    "unavailable_list": [
+      "pyverbs",
+      "GPUDirect RDMA",
+      "UCX submodule",
+      "DOCA",
+      "OpenMPI",
+      "Cerberus SSH"
+    ]
+  }
+}

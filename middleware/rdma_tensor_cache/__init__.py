@@ -13,6 +13,9 @@ from .quantization import AdaptiveQuantizer
 from .cache import RdmaTensorCache
 from .vllm_connector import RDMAKVCacheConnector, TensorClassifier
 from .sae_steering import SAEFeatureStore, steer_model
+from .dual_qp_pool import DualQPPool, QueueSelection, QueueStats, RegisteredBuffer
+from .wfa_classifier import WFAClassifier, Phase
+from .pmp_controller import PMPController
 
 __all__ = [
     'PrecisionFormat',
@@ -28,6 +31,13 @@ __all__ = [
     'TensorClassifier',
     'SAEFeatureStore',
     'steer_model',
+    'DualQPPool',
+    'QueueSelection',
+    'QueueStats',
+    'RegisteredBuffer',
+    'WFAClassifier',
+    'Phase',
+    'PMPController',
 ]
 
 __version__ = '0.1.0'
