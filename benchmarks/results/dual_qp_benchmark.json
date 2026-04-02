@@ -2,124 +2,124 @@
   "scenario_A": {
     "scenario": "A_single_qp",
     "small_percentiles": {
-      "p50": 13.590999969892437,
-      "p95": 15.530000155195012,
-      "p99": 19.670000028781942,
-      "mean": 13.918959998591163,
-      "count": 500
+      "p50": 13.92999547533691,
+      "p95": 19.099999917671084,
+      "p99": 52.310992032289505,
+      "mean": 15.05881897173822,
+      "count": 50
     },
     "large_percentiles": {
-      "p50": 2767.347999906633,
-      "p95": 2809.8290001707937,
-      "p99": 3103.5930001053202,
-      "mean": 2777.2672759888337,
-      "count": 500
+      "p50": 2789.1669888049364,
+      "p95": 2872.039010981098,
+      "p99": 3092.19301561825,
+      "mean": 2798.8027600804344,
+      "count": 50
     },
     "hot_stats": {
-      "p50_us": 2741.248000120322,
-      "p95_us": 2790.4179999040934,
-      "p99_us": 2930.419999984224,
-      "bytes_transferred": 524416000,
-      "ops_completed": 1000,
-      "poll_iterations": 15676,
+      "p50_us": 2760.636998573318,
+      "p95_us": 2822.1980028320104,
+      "p99_us": 3092.19301561825,
+      "bytes_transferred": 52441600,
+      "ops_completed": 100,
+      "poll_iterations": 1329,
       "avg_queue_depth": 0.0
     }
   },
   "scenario_B": {
     "scenario": "B_dual_qp",
     "small_hot_percentiles": {
-      "p50": 14.420999832509551,
-      "p95": 17.139999954451923,
-      "p99": 21.4010001400311,
-      "mean": 14.894945999913034,
-      "count": 500
+      "p50": 14.619989087805152,
+      "p95": 18.660997739061713,
+      "p99": 52.440998842939734,
+      "mean": 15.746362041682005,
+      "count": 50
     },
     "large_cold_percentiles": {
-      "p50": 2764.189000117767,
-      "p95": 2799.159000005602,
-      "p99": 3137.354000045889,
-      "mean": 2777.0756859940775,
-      "count": 500
+      "p50": 2781.3570050057024,
+      "p95": 2818.5879928059876,
+      "p99": 2904.7099815215915,
+      "mean": 2785.5619584443048,
+      "count": 50
     },
     "hot_stats": {
-      "p50_us": 14.420999832509551,
-      "p95_us": 17.139999954451923,
-      "p99_us": 21.4010001400311,
-      "bytes_transferred": 128000,
-      "ops_completed": 500,
-      "poll_iterations": 500,
+      "p50_us": 14.619989087805152,
+      "p95_us": 18.660997739061713,
+      "p99_us": 52.440998842939734,
+      "bytes_transferred": 12800,
+      "ops_completed": 50,
+      "poll_iterations": 50,
       "avg_queue_depth": 0.0
     },
     "cold_stats": {
-      "p50_us": 2764.189000117767,
-      "p95_us": 2799.159000005602,
-      "p99_us": 3137.354000045889,
-      "bytes_transferred": 524288000,
-      "ops_completed": 500,
-      "poll_iterations": 535,
+      "p50_us": 2781.3570050057024,
+      "p95_us": 2818.5879928059876,
+      "p99_us": 2904.7099815215915,
+      "bytes_transferred": 52428800,
+      "ops_completed": 50,
+      "poll_iterations": 51,
       "avg_queue_depth": 0.0
     },
     "classifier_stats": {
-      "total_classifications": 1000,
-      "hot_count": 500,
-      "cold_count": 500,
+      "total_classifications": 100,
+      "hot_count": 50,
+      "cold_count": 50,
       "hot_ratio": 0.5,
       "phase_distribution": {
-        "prefill": 781,
+        "prefill": 80,
         "decode": 0,
-        "unknown": 219
+        "unknown": 20
       }
     }
   },
   "scenario_C": {
     "scenario": "C_dual_qp_pmp",
     "small_hot_percentiles": {
-      "p50": 14.670000155092566,
-      "p95": 17.74999986992043,
-      "p99": 23.80000000812288,
-      "mean": 15.211509997243411,
-      "count": 500
+      "p50": 14.79001366533339,
+      "p95": 20.670006051659584,
+      "p99": 26.321009499952197,
+      "mean": 15.55146009195596,
+      "count": 50
     },
     "large_cold_percentiles": {
-      "p50": 2767.3979998326104,
-      "p95": 2788.489000067784,
-      "p99": 3141.993000099319,
-      "mean": 2775.578753996797,
-      "count": 500
+      "p50": 2789.9870183318853,
+      "p95": 2825.8879901841283,
+      "p99": 2925.3190150484443,
+      "mean": 2793.0898615159094,
+      "count": 50
     },
     "hot_stats": {
-      "p50_us": 14.670000155092566,
-      "p95_us": 17.74999986992043,
-      "p99_us": 23.80000000812288,
-      "bytes_transferred": 128000,
-      "ops_completed": 500,
-      "poll_iterations": 507,
+      "p50_us": 14.79001366533339,
+      "p95_us": 20.670006051659584,
+      "p99_us": 26.321009499952197,
+      "bytes_transferred": 12800,
+      "ops_completed": 50,
+      "poll_iterations": 50,
       "avg_queue_depth": 0.0
     },
     "cold_stats": {
-      "p50_us": 2767.3979998326104,
-      "p95_us": 2788.489000067784,
-      "p99_us": 3141.993000099319,
-      "bytes_transferred": 524288000,
-      "ops_completed": 500,
-      "poll_iterations": 526,
+      "p50_us": 2789.9870183318853,
+      "p95_us": 2825.8879901841283,
+      "p99_us": 2925.3190150484443,
+      "bytes_transferred": 52428800,
+      "ops_completed": 50,
+      "poll_iterations": 51,
       "avg_queue_depth": 0.0
     },
     "classifier_stats": {
-      "total_classifications": 1000,
-      "hot_count": 500,
-      "cold_count": 500,
+      "total_classifications": 100,
+      "hot_count": 50,
+      "cold_count": 50,
       "hot_ratio": 0.5,
       "phase_distribution": {
-        "prefill": 781,
+        "prefill": 80,
         "decode": 0,
-        "unknown": 219
+        "unknown": 20
       }
     },
     "pmp_stats": {
-      "total_decisions": 1000,
+      "total_decisions": 100,
       "hot_decisions": 0,
-      "cold_decisions": 1000,
+      "cold_decisions": 100,
       "switches": 0,
       "avg_switching_fn": 0.0
     }

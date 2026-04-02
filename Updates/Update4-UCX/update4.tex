@@ -939,9 +939,14 @@ SoftRoCE (\texttt{rdma\_rxe} kernel module) implements the RDMA verbs API in sof
 \section{Next Steps}
 
 \begin{enumerate}
-\item Follow the Scaling Book~\cite{scaling_book} Sections 7--8 (Inference, Serving LLaMA) and Section 12 (GPUs) as the analytical reference for all roofline calculations on Cerberus/Chimera.
-\item Establish working disaggregated serving with libscuffedrdma on SoftRoCE: baseline RDMA transport, dual QP separation, then vLLM connector integration.
-\item Advisor alignment: PMP formalization $\to$ Dr.\ Danesh; WFA decidability $\to$ Dr.\ Suchy.
+\item Cross-node benchmark between Chimera and Cerberus over real 10GbE (blocked on k8s firewall rules for the 10.0.0.x RDMA subnet).
+\item Concurrent workload benchmark: multi-threaded producers to demonstrate actual head-of-line blocking elimination under contention.
+\item UCX comparison: run \texttt{ucx\_perftest} at protocol boundary sizes to measure the eager/RNDV cliff, compare against our smooth latency curve.
+\item vLLM integration: implement \texttt{ScuffedRdmaConnector} as a \texttt{KvConnector} backend, replacing NixlConnector's transport path.
+\item KV cache compression: integrate LoRC/KVTC/TurboQuant to reduce transfer sizes before RDMA.
+\item Rust transport layer: \texttt{tch-rs} (Rust bindings for libtorch) could replace the Python pyverbs layer with a zero-overhead Rust transport that calls \texttt{ibv\_post\_send} through \texttt{rdma-core-sys} FFI bindings. This would eliminate Python's GIL as a bottleneck for concurrent QP polling and enable the lock-free SPSC ring buffer design planned for the hot QP path.
+\item Triton kernel integration: custom kernels (K-Search~\cite{cao2025ksearch}) for fused attention + RDMA notification, overlapping KV computation with RDMA writes to pipeline prefill and transfer.
+\item Advisor alignment: PMP formalization with Dr.\ Danesh; WFA decidability with Dr.\ Suchy.
 \end{enumerate}
 
 \begin{thebibliography}{99}
