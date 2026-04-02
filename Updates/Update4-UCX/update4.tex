@@ -12,23 +12,37 @@
 
 \title{Implementation Plan, PMP, WFA Classification, and the RDMA-Compute Interface\\[4pt]
 \large Adaptive RDMA Optimization for Distributed LLM Training and Inference on Consumer Hardware}
-\author{Nathan Gopee\\SUNY New Paltz, MS Computer Science}
-\date{March 27, 2026}
+\author{Nathan Gopee\\MS Computer Science Candidate, SUNY New Paltz\\\texttt{gopeen1@newpaltz.edu}\\[4pt]Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\date{March 31, 2026}
 
 \begin{document}
 \maketitle
+\tableofcontents
+\newpage
 
 \section{Problem Context}
 
 \subsection{Three Resources, One Bottleneck}
 
-Every GPU balances three resources: compute (how many FLOPs/s the tensor cores can deliver), memory bandwidth (how fast data moves between HBM and the compute units), and total memory (how much fits on the card at once). An RTX 5090 has roughly 100 TFLOPS of bf16 compute and about 1.8 TB/s of HBM bandwidth. An RTX 3090 has roughly 36 TFLOPS and 936 GB/s. The ratio of compute to bandwidth determines a critical threshold: if an operation does not perform enough FLOPs per byte loaded from memory, the tensor cores sit idle waiting for data. This is the roofline model~\cite{scaling_book}, and it governs every layer of the inference stack.
+Every GPU balances three resources: compute (how many FLOPs/s the tensor cores can deliver), memory bandwidth (how fast data moves between VRAM and the compute units), and total memory (how much fits on the card at once). An RTX 5090 has roughly 105 TFLOPS of FP16 tensor core compute and about 1.8 TB/s of GDDR7 bandwidth. An RTX 3090 has roughly 36 TFLOPS FP32 (71 TFLOPS FP16 tensor) and 936 GB/s of GDDR6X bandwidth. The ratio of compute to bandwidth determines a critical threshold: if an operation does not perform enough FLOPs per byte loaded from memory, the tensor cores sit idle waiting for data. This is the roofline model~\cite{scaling_book}, and it governs every layer of the inference stack.
 
 \subsection{Prefill and Decode Are Different Problems}
 
-LLM inference splits into two phases with fundamentally different bottlenecks. Prefill processes the full user prompt in one forward pass. Because many tokens share the same weight matrices, arithmetic intensity is high and the GPU is compute-bound. Decode generates tokens one at a time. Each step must reload the full KV cache from HBM to compute a single attention dot product per head, producing an arithmetic intensity near 1. The GPU is memory-bandwidth-bound during decode regardless of batch size for the attention operation, and the MLP is bandwidth-bound unless the batch exceeds a hardware-specific critical threshold~\cite{scaling_book}.
+LLM inference splits into two phases with fundamentally different bottlenecks. Prefill processes the full user prompt in one forward pass. Because many tokens share the same weight matrices, arithmetic intensity is high and the GPU is compute-bound. Decode generates tokens one at a time. Each step must reload the full KV cache from VRAM to compute a single attention dot product per head, producing an arithmetic intensity near 1. The GPU is memory-bandwidth-bound during decode regardless of batch size for the attention operation, and the MLP is bandwidth-bound unless the batch exceeds a hardware-specific critical threshold~\cite{scaling_book}.
 
 This asymmetry is why disaggregated serving exists: run prefill on one set of GPUs optimized for compute throughput, run decode on another set optimized for memory bandwidth, and transfer the KV cache between them.
+
+\subsection{The KV Cache: A Small Price for Linear Complexity}
+
+Without a KV cache, every decode step would recompute attention over the entire sequence from scratch--quadratic in sequence length. The KV cache makes decode linear: each new token only computes its own key and value projections, then attends over the cached keys and values from all previous tokens. This is what makes autoregressive generation practical at long context lengths.
+
+The cost is memory. For a model with $L$ layers, $K$ KV heads, head dimension $H$, sequence length $S$, and 2 bytes per element (FP16):
+\[
+\text{KV cache per request} = 2 \times L \times K \times H \times S \times 2 \text{ bytes}
+\]
+For a 70B-class model ($L{=}80$, $K{=}8$ with GQA, $H{=}128$, $S{=}4096$): that is $2 \times 80 \times 8 \times 128 \times 4096 \times 2 \approx 1.3\text{ GB}$ per request. With 16 concurrent users, the KV cache alone consumes 21~GB--more than the weights on many consumer GPUs. On our RTX 3090s (24~GB VRAM each), the KV cache competes directly with model weights for memory.
+
+This is why KV cache compression (LoRC, KVTC, TurboQuant) matters so much for this thesis: every byte saved in the cache is a byte that does not need to cross the 10GbE link during disaggregated serving, and a byte freed in VRAM for larger batches or longer contexts. Compression directly reduces the bytes that must cross the 10GbE link during disaggregated serving. Combined with the dual QP pool (which eliminates queuing delay on top of the raw transfer time), the two optimizations target independent terms in the transfer latency--one shrinks the payload, the other prevents scheduling delays. The actual combined impact is an experimental target for the Cerberus/Chimera testbed.
 
 \subsection{The Network Becomes the Fourth Resource}
 
@@ -77,7 +91,7 @@ Paged Attention~\cite{vllm_paged} & $\text{KV}_{\text{bytes}}$ & Transfer only p
 Layer-by-layer xfer~\cite{chen2025transferengine} & $T_{\text{KV transfer}}$ overlap & Pipeline prefill layers with RDMA writes \\
 \bottomrule
 \end{tabular}
-\caption{Each optimization maps to a specific term in the TTFT equation. No fabricated numbers.}
+\caption{Each optimization maps to a specific term in the TTFT equation.}
 \end{table}
 
 \subsection{PMP: Bang-Bang QP Allocation}
@@ -170,7 +184,7 @@ We are not recreating NIXL or UCX. We are building a layer that sits between vLL
 \node[layer=16cm, fill=purple!8, minimum height=1cm] (verbs) at (8, -1.2)
     {libibverbs / rdma-core\\[2pt]\texttt{ibv\_post\_send}\quad \texttt{ibv\_poll\_cq}\quad \texttt{ibv\_reg\_mr}\quad (SoftRoCE / RoCEv2 / InfiniBand)};
 
-% --- Arrows ---
+% -- Arrows --
 \draw[arr] (vllm) -- (kvif);
 \draw[arr] ([xshift=-3cm]kvif.south) -- (nixl.north);
 \draw[arr] ([xshift=3cm]kvif.south) -- (scuffed.north);
@@ -182,7 +196,7 @@ We are not recreating NIXL or UCX. We are building a layer that sits between vLL
 \draw[arr] (hotqp.south) -- ++(0,-0.4) -| ([xshift=-1cm]verbs.north);
 \draw[arr] (coldqp.south) -- ++(0,-0.4) -| ([xshift=4cm]verbs.north);
 
-% --- Right-margin annotations (outside diagram, no overlap) ---
+% -- Right-margin annotations (outside diagram, no overlap) --
 \node[font=\footnotesize, text=gray!70, anchor=west, text width=4cm] at (17, 6.8)
     {Thesis contribution};
 \node[font=\footnotesize, text=gray!70, anchor=west, text width=4cm] at (17, 5)
@@ -209,7 +223,7 @@ We are not recreating NIXL or UCX. We are building a layer that sits between vLL
     ann/.style={font=\scriptsize, text=gray}
 ]
 
-% --- Nodes ---
+% -- Nodes --
 \node[box=11cm, fill=green!10] (telem) at (5.5, 10) {Unified Telemetry Layer};
 
 \node[box=4.5cm, fill=orange!10, minimum height=1.3cm] (wfa) at (2.5, 7.5) {WFA Classifier\\[2pt]hot / warm / cold};
@@ -222,7 +236,7 @@ We are not recreating NIXL or UCX. We are building a layer that sits between vLL
 
 \node[box=11cm, fill=purple!10] (rdma) at (5.5, 0) {libibverbs / SoftRoCE / RoCEv2 / InfiniBand};
 
-% --- Main data flow (solid black, straight down) ---
+% -- Main data flow (solid black, straight down) --
 \draw[data] (telem.south) -- ++(0,-0.5) -| (wfa.north);
 \draw[data] (telem.south) -- ++(0,-0.5) -| (pmp.north);
 
@@ -235,13 +249,13 @@ We are not recreating NIXL or UCX. We are building a layer that sits between vLL
 \draw[data] (hotqp.south) -- ++(0,-0.4) -| ([xshift=-1.2cm]rdma.north);
 \draw[data] (coldqp.south) -- ++(0,-0.4) -| ([xshift=1.2cm]rdma.north);
 
-% --- Edge labels (standalone nodes, not on paths) ---
+% -- Edge labels (standalone nodes, not on paths) --
 \node[ann] at (3.3, 6.1) {class};
 \node[ann, text=red!70!black] at (7.7, 6.1) {$u^*$};
 \node[ann] at (1.3, 3.7) {HOT};
 \node[ann] at (9.7, 3.7) {COLD};
 
-% --- Right-margin annotations ---
+% -- Right-margin annotations --
 \node[ann, anchor=west] at (13, 10) {$(f,s,\Delta t,\sigma^2,q_H,q_C)$};
 \node[ann, anchor=west] at (13, 7.5) {$u^*(t) \in \{0,1\}$};
 
@@ -346,9 +360,9 @@ Each optimization from Austin et al.~\cite{scaling_book} Section 7 changes the t
 
 \textbf{Paged Attention}~\cite{vllm_paged} means KV blocks are non-contiguous in memory. Each page is a separate \texttt{ibv\_post\_send} with its own \texttt{ibv\_sge} (scatter/gather element) pointing to that page's registered memory offset. Alternatively, multiple pages can be posted as a single work request with a scatter/gather list (\texttt{ibv\_send\_wr.sg\_list} with \texttt{num\_sge} $> 1$), which reduces per-WR overhead at the cost of requiring all pages to be in the same registered MR.
 
-\textbf{Quantization (LoRC/KVTC/TurboQuant)} reduces bytes per KV element. At 3-bit precision (TurboQuant~\cite{turboquant2026}), a KV block that was 128KB at bf16 becomes $\sim$24KB. This shifts more traffic from the cold QP (large, throughput-oriented) to the hot QP (small, latency-oriented) because the compressed size falls below the hot/cold classification threshold.
+\textbf{Quantization (LoRC/KVTC/TurboQuant)} reduces bytes per KV element. Lower precision shrinks each KV block, shifting more traffic from the cold QP (large, throughput-oriented) toward the hot QP (small, latency-oriented) as compressed sizes fall below the hot/cold classification threshold. The exact compression ratios and their effect on classification thresholds are experimental targets.
 
-\textbf{Layer-by-layer transfer} (TransferEngine's UVM Watcher~\cite{chen2025transferengine}) means the prefill node posts one \texttt{ibv\_post\_send} per completed layer rather than one large transfer for the entire KV cache. Each post is smaller, fires earlier (as soon as the GPU finishes that layer), and the decode node can start processing arriving layers immediately. From the verbs perspective, this turns one large \texttt{RDMA\_WRITE} into $L$ smaller \texttt{RDMA\_WRITE\_WITH\_IMM} operations (the immediate value encodes the layer index so the receiver knows which layer arrived).
+\textbf{Layer-by-layer transfer} (TransferEngine~\cite{chen2025transferengine}) means the prefill node posts one \texttt{ibv\_post\_send} per completed layer rather than one large transfer for the entire KV cache. Each post is smaller, fires earlier (as soon as the GPU finishes that layer), and the decode node can start processing arriving layers immediately. From the verbs perspective, this turns one large \texttt{RDMA\_WRITE} into $L$ smaller \texttt{RDMA\_WRITE\_WITH\_IMM} operations (the immediate value encodes the layer index so the receiver knows which layer arrived).
 
 \textbf{Continuous batching} means multiple users' KV transfers share the same QPs. The WFA classifier must now distinguish per-user traffic: User A's layer-5 KV block and User B's logits arrive on the same completion queue. The 32-bit immediate value in \texttt{WRITE\_WITH\_IMM} is partitioned: upper 16 bits for request ID, lower 16 bits for layer index.
 
@@ -532,7 +546,7 @@ The KV cache is the dominant transfer. For a model with $L$ layers, $K$ KV heads
 The logits and request metadata are small (a few KB). On 10GbE, the KV transfer is the TTFT bottleneck.
 
 \paragraph{Dual QP mapping.}
-\textbf{Hot QP:} logits, request metadata, scheduling signals, Raft heartbeats (if running consensus for multi-node coordination). These are small and latency-critical: the decode node cannot begin until it has the logits. \textbf{Cold QP:} bulk KV cache blocks. These are large but can be pipelined layer-by-layer (TransferEngine's UVM Watcher pattern~\cite{chen2025transferengine}). Using \texttt{IBV\_WR\_RDMA\_WRITE} for zero-copy one-sided transfer from prefill GPU memory to decode GPU memory (via GPUDirect RDMA on the V100's MCX456A, or staged through host memory on Cerberus/Chimera with SoftRoCE).
+\textbf{Hot QP:} logits, request metadata, scheduling signals, Raft heartbeats (if running consensus for multi-node coordination). These are small and latency-critical: the decode node cannot begin until it has the logits. \textbf{Cold QP:} bulk KV cache blocks. These are large but can be pipelined layer-by-layer (TransferEngine pattern~\cite{chen2025transferengine}). Using \texttt{IBV\_WR\_RDMA\_WRITE} for zero-copy one-sided transfer from prefill GPU memory to decode GPU memory (via GPUDirect RDMA on the V100's MCX456A, or staged through host memory on Cerberus/Chimera with SoftRoCE).
 
 \paragraph{Compression reduces the cold QP load.}
 LoRC~\cite{zhang2024lorc} reduces $H$ (lower-dimensional KV vectors). KVTC~\cite{kvtc2024} applies entropy coding on the KV tensors. TurboQuant~\cite{turboquant2026} reduces bytes-per-element. Each shrinks the cold QP payload, but the hot QP traffic (metadata, logits) is unaffected since it is already small.
@@ -632,15 +646,15 @@ UCX is the dominant open-source RDMA transport framework, used by NCCL, UCC, MPI
 UCX's UCP layer routes messages based on a single scalar: message size. Messages below \texttt{UCX\_RNDV\_THRESH} (default $\sim$8\,KB) take the eager path (inline send, low latency); messages above take the rendezvous path (zero-copy RDMA read, high throughput). This creates performance discontinuities at the threshold boundary that are well-documented in the issue tracker:
 
 \begin{itemize}
-    \item \textbf{Issue \#10552}: On Grace Hopper systems, 65\,536-byte messages exhibit \textbf{50$\times$ worse latency} than 131\,072-byte messages in OSU alltoall benchmarks. The cliff occurs precisely at the eager-to-rendezvous transition, where the sender must negotiate a rendezvous handshake, register memory, and wait for the receiver to initiate an RDMA read---all adding round-trips that the eager path avoids.
+    \item \textbf{Issue \#10552}: On Grace Hopper systems, 65\,536-byte messages exhibit \textbf{50$\times$ worse latency} than 131\,072-byte messages in OSU alltoall benchmarks. The cliff occurs precisely at the eager-to-rendezvous transition, where the sender must negotiate a rendezvous handshake, register memory, and wait for the receiver to initiate an RDMA read--all adding round-trips that the eager path avoids.
     \item \textbf{Issue \#10486}: Java/JUCX applications observe severe performance degradation for messages above 32\,KB when UCX switches from RDMA SEND (eager) to RDMA READ (rendezvous). The user reports that ``the performance drops off a cliff.''
-    \item \textbf{Issue \#10532}: Active Message and tag latency degrade sharply after $\sim$3\,000 bytes, at the boundary between eager short/bcopy and zcopy or rendezvous thresholds.
+    \item \textbf{Issue \#10532}: Active Message and tag latency degrade sharply after $\sim$30\,000 bytes, at the boundary between eager and zcopy or rendezvous thresholds.
     \item \textbf{Issue \#11091}: Upgrading from UCX 1.18.1 to 1.19.1 causes significant regressions due to changes in rendezvous performance difference calculations (PR \#10401), demonstrating that the RNDV heuristic is fragile and version-sensitive.
     \item \textbf{Issue \#4430}: \texttt{ucp\_tag\_send\_nbr()} hardcodes a rendezvous threshold instead of using the dynamically calculated one, so even UCX's own internal APIs do not consistently apply the threshold logic.
 \end{itemize}
 
 \paragraph{Why libscuffedrdma avoids this.}
-libscuffedrdma does not use message size to select a protocol. The WFA classifier examines tensor metadata---access frequency, inference phase (prefill vs.\ decode), layer index, and variance of inter-arrival times---to assign a priority class (hot, warm, or cold). The PMP controller then determines QP allocation. A 64\,KB KV cache block for a decode step and a 64\,KB prefetch block for speculative prefill are the same size but have fundamentally different latency requirements; UCX treats them identically, libscuffedrdma does not.
+libscuffedrdma does not use message size to select a protocol. The WFA classifier examines tensor metadata--access frequency, inference phase (prefill vs.\ decode), layer index, and variance of inter-arrival times--to assign a priority class (hot, warm, or cold). The PMP controller then determines QP allocation. A 64\,KB KV cache block for a decode step and a 64\,KB prefetch block for speculative prefill are the same size but have fundamentally different latency requirements; UCX treats them identically, libscuffedrdma does not.
 
 \subsection{Head-of-Line Blocking in Shared QP Pools}
 
@@ -662,7 +676,7 @@ UCX's transport selection algorithm is a black box that users cannot easily reas
 \begin{itemize}
     \item \textbf{Issue \#10652}: UCX selects \texttt{mlx5}/IB transport for intra-node communication instead of the expected XPMEM or CMA single-copy mechanisms, resulting in worse latency. The user has no mechanism to force the correct transport.
     \item \textbf{Issue \#6511}: RC transport is prioritized over \texttt{dc\_x} (dynamically connected) even when DC is available and would be more appropriate. Users cannot control preference order.
-    \item \textbf{Issue \#9364}: ``What is the logic of choosing the correct transport at runtime?''---users find UCX's transport selection algorithm opaque and undocumented.
+    \item \textbf{Issue \#9364}: ``What is the logic of choosing the correct transport at runtime?''--users find UCX's transport selection algorithm opaque and undocumented.
     \item \textbf{Issue \#9560}: No fine-grained per-path transport pinning in multi-node environments. UCX selects different configurations depending on communication patterns, and users lack the ability to pin specific transports per data path.
     \item \textbf{Issue \#10608}: No API to query which transport was actually used for a given transfer. Users cannot observe the transport decision after it is made.
     \item \textbf{Issue \#11282}: On 8$\times$H200 with NVLink, GPU pair latency varies dramatically because UCX selects \texttt{mlx5} transport for some intra-node pairs instead of NVLink, causing inconsistent alltoallv performance.
@@ -673,7 +687,7 @@ libscuffedrdma makes exactly one transport decision: all inter-node tensor data 
 
 \subsection{Multi-Rail Failures}
 
-UCX's multi-rail support---intended to aggregate bandwidth across multiple NICs---consistently fails to deliver expected gains and sometimes degrades performance:
+UCX's multi-rail support--intended to aggregate bandwidth across multiple NICs--consistently fails to deliver expected gains and sometimes degrades performance:
 
 \begin{itemize}
     \item \textbf{Issue \#9520}: Two ConnectX-6 200\,Gbps NICs with multi-rail enabled show \textbf{no bandwidth improvement} over a single NIC.
@@ -688,7 +702,7 @@ On the Cerberus/Chimera testbed (single 10\,GbE NIC per machine), multi-rail is 
 
 \subsection{Rendezvous Protocol Bugs and Optimizations}
 
-The rendezvous protocol---which libscuffedrdma bypasses for tensor data---has several open issues that further motivate the bypass:
+The rendezvous protocol--which libscuffedrdma bypasses for tensor data--has several open issues that further motivate the bypass:
 
 \begin{itemize}
     \item \textbf{Issue \#6721}: The first Active Message between an endpoint pair is \textbf{always received as eager} regardless of \texttt{UCX\_RNDV\_THRESH}, because endpoint wireup has not completed. Subsequent messages use rendezvous correctly. This creates a first-message anomaly that affects latency profiling and warmup behavior.
@@ -764,7 +778,7 @@ Per-QP traffic class and ECE & \#11252, \#10325 & Symmetric TC and congestion co
 \end{table}
 
 \paragraph{Contribution framing.}
-The UCX issue tracker provides empirical evidence that the problems libscuffedrdma targets are not theoretical: they cause measurable performance regressions, hangs, and incorrect behavior in production deployments. The thesis does not claim to fix UCX; it claims that for the specific workload of distributed LLM inference on consumer hardware, bypassing UCX's data path and replacing it with tensor-aware, control-theoretic QP management produces better results than any configuration of UCX's existing knobs.
+The UCX issue tracker provides empirical evidence that the problems libscuffedrdma targets are not theoretical: they cause measurable performance regressions, hangs, and incorrect behavior in production deployments. The thesis does not claim to fix UCX; it claims that for the specific workload of distributed LLM inference on consumer hardware, bypassing UCX's data path and replacing it with tensor-aware, control-theoretic QP management addresses architectural limitations that UCX's existing configuration knobs cannot.
 
 
 
@@ -842,7 +856,7 @@ Both debut at ICLR 2026. NVIDIA's KVTC achieves higher compression ratios but re
 
 \textbf{llm-d v0.5}~\cite{llmd_v05}: UCCL's software transport with fine-grained flow splitting provides greater congestion resilience than UCX~\cite{nvidia_ucx} by avoiding hardware PFC. Their prefix-cache-aware scheduling reduces TTFT by routing to nodes holding the relevant KV cache.
 
-\textbf{TransferEngine}~\cite{chen2025transferengine}: Uses two RC QPs per peer (one for WRITE\_IMM, one for SEND/RECV) and a UVM Watcher for layer-by-layer GPU-to-CPU signaling. libscuffedrdma extends this with tensor-aware classification for QP selection.
+\textbf{TransferEngine}~\cite{chen2025transferengine}: Bridges common NICs to expose a uniform interface for point-to-point RDMA in LLM systems, implementing one-sided WriteImm operations across multiple NICs per GPU. libscuffedrdma extends this with tensor-aware classification for QP selection.
 
 \textbf{Consensus protocols}~\cite{paxos_raft_zab}: Raft heartbeats are a textbook hot-path case. On a single 10GbE NIC, a heartbeat blocked behind a large KV transfer triggers spurious leader elections.
 
@@ -852,7 +866,7 @@ Both debut at ICLR 2026. NVIDIA's KVTC achieves higher compression ratios but re
 
 \section{Benchmark Results}
 
-The following results were collected on Chimera (3$\times$ RTX 3090, Aquantia AQC107 10GbE, SoftRoCE/rxe0, Ubuntu 24.04, CUDA 12.4, Python 3.12, pyverbs 50.0). All measurements use real RDMA Write operations over the rxe kernel driver---no simulation or fabricated data.
+The following results were collected on Chimera (3$\times$ RTX 3090, Aquantia AQC107 10GbE, SoftRoCE/rxe0, Ubuntu 24.04, CUDA 12.4, Python 3.12, pyverbs 50.0). All measurements use real RDMA Write operations over the rxe kernel driver.
 
 \subsection{Dual QP Pool: Head-of-Line Blocking}
 
@@ -897,7 +911,7 @@ Size (B) & p50 ($\mu$s) & p95 ($\mu$s) & p99 ($\mu$s) & Pool \\
 \end{tabular}
 \end{table}
 
-The latency curve is smooth and monotonic across all message sizes. There is no cliff at the 3KB, 8KB, 32KB, or 64KB boundaries where UCX switches between eager, zcopy, and rendezvous protocols (issues \#10552, \#10486, \#10532). The WFA classifier transitions from hot to cold pool at 512KB, matching the configured threshold of 256KB after accounting for access-frequency promotion.
+The latency curve is smooth and monotonic across all message sizes. There is no cliff at the 8KB, 30KB, 32KB, or 64KB boundaries where UCX switches between eager, zcopy, and rendezvous protocols (issues \#10552, \#10486, \#10532). The WFA classifier transitions from hot to cold pool at 512KB, matching the configured threshold of 256KB after accounting for access-frequency promotion.
 
 \subsection{Infrastructure Validation}
 
@@ -920,7 +934,6 @@ Python / pyverbs & 3.12.3 / 50.0 \\
 \end{tabular}
 \end{table}
 
-\end{document}
 \section{Next Steps}
 
 \begin{enumerate}
@@ -959,7 +972,7 @@ R.~Zhang et al., ``LoRC: Low-rank compression for LLMs KV cache with a progressi
 M.~Staniszewski and T.~\L{}a\'{n}cucki, ``KV cache transform coding for compact storage in LLM inference,'' arXiv:2511.01815, 2024.
 
 \bibitem{turboquant2026}
-A.~Zandieh, V.~Mirrokni, et al., ``TurboQuant: Redefining AI efficiency with extreme compression,'' Google Research, ICLR 2026. arXiv:2504.19874. Uses PolarQuant (AISTATS 2026, arXiv:2502.02617) and QJL (AAAI 2025).
+A.~Zandieh, M.~Daliri, M.~Hadian, and V.~Mirrokni, ``TurboQuant: Online vector quantization with near-optimal distortion rate,'' Google Research, arXiv:2504.19874, 2025. Uses PolarQuant (arXiv:2502.02617) and QJL.
 
 \bibitem{nvidia_dynamo2025}
 NVIDIA, ``Dynamo: Open-source inference optimization framework,'' GTC 2025.
@@ -974,7 +987,7 @@ R.~Dyro, ``Pallas-Triton kernels and kernel auto-tuning,'' 2025. \url{https://ro
 dhmnr, ``Introduction to PTX optimization,'' 2025. \url{https://dhmnr.sh/posts/intro-to-ptx-optimization/}
 
 \bibitem{chen2025transferengine}
-L.~Chen et al., ``Explorations of RDMA in LLM systems,'' arXiv:2510.27656, 2025.
+L.~Chen et al., ``RDMA point-to-point communication for LLM systems,'' arXiv:2510.27656, 2025.
 
 \bibitem{mistral_vllm_leak}
 Mistral AI, ``Heaps do lie: Debugging a memory leak in vLLM,'' 2025.
@@ -1031,3 +1044,5 @@ B.~Rothenberger et al., ``ReDMArk: Bypassing RDMA security mechanisms,'' \emph{P
 FlashInfer, ``Kernel library for LLM serving,'' 2025. \url{https://github.com/flashinfer-ai/flashinfer}
 
 \end{thebibliography}
+
+\end{document}
