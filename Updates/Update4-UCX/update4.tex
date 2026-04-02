@@ -934,6 +934,159 @@ Python / pyverbs & 3.12.3 / 50.0 \\
 \end{tabular}
 \end{table}
 
+\section{Implementation: Python MVP on SoftRoCE}
+
+The Python implementation validates the dual QP architecture on real RDMA hardware before porting to C++. All code uses pyverbs (Python bindings for rdma-core) against the SoftRoCE kernel driver (\texttt{rdma\_rxe}) on Chimera's Aquantia AQC107 10GbE NIC. This section describes what the code does, how RDMA connections are established, and how testing works.
+
+\subsection{RDMA Connection Lifecycle}
+
+Every RDMA transfer requires a connected queue pair (QP). A QP starts in RESET state and must transition through three states before it can send data. Both sides must complete these transitions with each other's connection info (QP number, GID) exchanged out-of-band over TCP.
+
+\begin{verbatim}
+  SETUP:
+    ctx = open_device("rxe0")
+    pd  = alloc_protection_domain(ctx)
+    cq  = create_completion_queue(ctx, depth)
+    qp  = create_queue_pair(pd, cq, type=RC)
+
+  CONNECT (both sides, with remote info exchanged over TCP):
+    qp.to_init(port=1, access=LOCAL_WRITE|REMOTE_WRITE|REMOTE_READ)
+    qp.to_rtr(remote_qpn, remote_gid, mtu=1024)
+    qp.to_rts(timeout=14, retry=7)
+
+  REGISTER MEMORY:
+    mr = register_region(pd, size, access=LOCAL_WRITE|REMOTE_WRITE)
+    -- mr.buf is the virtual address, mr.lkey/rkey are access keys
+
+  TRANSFER (one-sided, no remote CPU involvement):
+    post_send(qp, opcode=RDMA_WRITE, local_buf, remote_addr, remote_rkey)
+    poll_cq(cq) -- blocks until NIC confirms completion
+\end{verbatim}
+
+The key insight: \texttt{RDMA\_WRITE} writes directly into remote memory using the remote address and rkey. The remote CPU never sees the transfer. This is what makes RDMA fast, and why QP isolation matters: if hot and cold traffic share a QP, the NIC processes them in FIFO order.
+
+\subsection{Dual QP Pool}
+
+The \texttt{DualQPPool} class creates two separate pools of QPs on the same protection domain. Each pool has its own completion queues, so polling one pool never touches the other.
+
+\begin{verbatim}
+  class DualQPPool:
+    open():
+      ctx = open_device("rxe0")
+      pd  = alloc_protection_domain(ctx)
+      gid = query_gid(port=1, index=1)  -- link-local IPv6
+
+      for i in 0..n_hot:
+        hot_qps[i] = create_qp(pd, cq_depth=16,  max_send=16)
+      for i in 0..n_cold:
+        cold_qps[i] = create_qp(pd, cq_depth=256, max_send=128)
+
+    post_write_hot(buf, remote_addr, remote_rkey, length):
+      qp = hot_qps[round_robin++ % n_hot]
+      t0 = now()
+      post_rdma_write(qp, buf, remote_addr, remote_rkey, length)
+      busy_poll(qp.cq)           -- spin until completion
+      return (now() - t0) in microseconds
+
+    post_write_cold(buf, remote_addr, remote_rkey, length):
+      qp = cold_qps[round_robin++ % n_cold]
+      t0 = now()
+      post_rdma_write(qp, buf, remote_addr, remote_rkey, length)
+      sleep_poll(qp.cq, 50us)   -- poll, sleep 50us, repeat
+      return (now() - t0) in microseconds
+\end{verbatim}
+
+Hot QPs busy-poll (spin on the CQ until a completion arrives). This burns CPU but gives minimum latency. Cold QPs sleep-poll (check, sleep 50$\mu$s, check again). This frees CPU for other work at the cost of up to 50$\mu$s added latency per poll cycle.
+
+\subsection{WFA Classifier}
+
+The classifier decides which pool handles each transfer. It examines three things: transfer size, access frequency, and inference phase.
+
+\begin{verbatim}
+  classify(tensor_id, size_bytes, layer_idx):
+    count = increment_access_count(tensor_id)
+    phase = detect_phase(layer_idx)
+
+    -- Size routing (primary decision)
+    if size < 4KB:       queue = HOT
+    elif size > 256KB:   queue = COLD
+    else:
+      if count >= 10:    queue = HOT    -- frequently accessed
+      else:              queue = COLD   -- infrequent
+
+    -- Phase adjustment
+    if phase == PREFILL and queue == HOT and size > 2KB:
+      queue = COLD       -- prefill is bulk, bias cold
+    if phase == DECODE and queue == COLD and count >= 5:
+      queue = HOT        -- decode is latency-sensitive, bias hot
+
+    return queue
+
+  detect_phase(layer_idx):
+    recent = last 8 layer indices seen
+    if recent == [L, L+1, L+2, ...]:  return PREFILL
+    if recent == [L, L, L, ...]:      return DECODE
+    else:                              return UNKNOWN
+\end{verbatim}
+
+Phase detection works by observing layer access order. Prefill sweeps sequentially through all layers (L0, L1, L2, ...). Decode repeatedly accesses the same layer as it generates tokens. This pattern is visible without any explicit signal from the inference engine.
+
+\subsection{PMP Bang-Bang Controller}
+
+The controller monitors queue depths and overrides the classifier when one pool is backing up relative to the other.
+
+\begin{verbatim}
+  decide(hot_depth, cold_depth):
+    -- Approximate costates by weighted queue depths
+    p_hot  = alpha * hot_depth    -- alpha=2.0
+    p_cold = beta  * cold_depth   -- beta=1.0
+
+    -- Switching function
+    S = p_hot * C * mu_hot - p_cold * C * mu_cold
+
+    if S > deadband:    return COLD   -- hot congested
+    if S < -deadband:   return HOT    -- cold congested
+    else:               return last_decision  -- hysteresis
+\end{verbatim}
+
+The deadband (0.1) prevents chattering: without it, the controller would flip between HOT and COLD every cycle when the queues are nearly balanced. The asymmetric weights ($\alpha{=}2$, $\beta{=}1$) encode the design priority: keeping the hot queue drained matters more than keeping the cold queue drained, because hot traffic is latency-sensitive.
+
+\subsection{How RDMA Testing Works on SoftRoCE}
+
+SoftRoCE (\texttt{rdma\_rxe} kernel module) implements the RDMA verbs API in software over any Ethernet NIC. It is not hardware RDMA: the kernel handles all QP state, packet construction, and completion notification. Latencies are higher than hardware RDMA (tens of microseconds vs single-digit), but the API is identical. Code that works on SoftRoCE works on ConnectX hardware with no changes.
+
+\paragraph{Loopback testing.} Two \texttt{DualQPPool} instances on the same machine, both using \texttt{rxe0}. QP info exchanged in-process, all QP pairs connected, then RDMA writes measured for completion latency.
+
+\begin{verbatim}
+  pool_a = DualQPPool("rxe0", n_hot=2, n_cold=2)
+  pool_b = DualQPPool("rxe0", n_hot=2, n_cold=2)
+  pool_a.open();  pool_b.open()
+
+  pool_a.connect_all(pool_b.get_local_info())
+  pool_b.connect_all(pool_a.get_local_info())
+
+  send_buf = pool_a.register_buffer("send", 1MB)
+  recv_buf = pool_b.register_buffer("recv", 1MB)
+
+  for i in 0..1000:
+    if i is even:
+      pool_a.post_write_hot(send_buf, recv_buf.addr,
+                            recv_buf.rkey, 256B)
+    else:
+      pool_a.post_write_cold(send_buf, recv_buf.addr,
+                             recv_buf.rkey, 1MB)
+\end{verbatim}
+
+\paragraph{Cross-node testing.} For Chimera $\leftrightarrow$ Cerberus, each machine runs one pool. QP info exchanges over TCP (192.168.1.x management network), RDMA traffic flows over the 10.0.0.x subnet (direct 10GbE cable). Both machines need SoftRoCE active and an IPv4-mapped GID in the RDMA GID table (populated by adding an IPv4 address to the RDMA-facing interface).
+
+\paragraph{Lessons learned.}
+\begin{itemize}
+\item pyverbs on Ubuntu 24.04 uses property setters for \texttt{QPAttr}, \texttt{set\_wr\_rdma(rkey, addr)} for RDMA work requests, and \texttt{cq.poll()} returns \texttt{(count, list)}. These differ from rdma-core documentation and required iterative testing.
+\item SoftRoCE requires a routable GID for cross-node connections. Link-local IPv6 works for loopback but not between machines. Adding an IPv4 address populates an IPv4-mapped GID at a higher index.
+\item The \texttt{rdma\_rxe} module enters a zombie state if processes exit without closing resources, requiring a reboot. Production code must handle cleanup carefully.
+\item With synchronous single-threaded SoftRoCE, head-of-line blocking does not manifest because each operation completes before the next starts. The dual QP benefit requires concurrent producers or hardware CQ offload.
+\end{itemize}
+
 \section{Next Steps}
 
 \begin{enumerate}
