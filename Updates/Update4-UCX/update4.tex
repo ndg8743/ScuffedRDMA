@@ -210,64 +210,7 @@ We are not recreating NIXL or UCX. We are building a layer that sits between vLL
 \label{fig:full_arch}
 \end{figure}
 
-\subsection{Five-Component Architecture with PMP}
-
-\begin{figure}[ht]
-\centering
-\resizebox{0.88\textwidth}{!}{
-\begin{tikzpicture}[
-    box/.style={rectangle, draw, rounded corners=3pt, minimum height=1.1cm, text centered, font=\small, text width=#1, align=center},
-    box/.default=5cm,
-    data/.style={-{Stealth[length=2.5mm]}, thick},
-    ctrl/.style={-{Stealth[length=2.5mm]}, thick, dashed, color=red!70!black},
-    ann/.style={font=\scriptsize, text=gray}
-]
-
-% -- Nodes --
-\node[box=11cm, fill=green!10] (telem) at (5.5, 10) {Unified Telemetry Layer};
-
-\node[box=4.5cm, fill=orange!10, minimum height=1.3cm] (wfa) at (2.5, 7.5) {WFA Classifier\\[2pt]hot / warm / cold};
-\node[box=4.5cm, fill=red!10, minimum height=1.3cm] (pmp) at (8.5, 7.5) {PMP Controller\\[2pt]bang-bang $u^* \in \{0,1\}$};
-
-\node[box=11cm, fill=yellow!10] (rules) at (5.5, 5) {Rule-Node Expression Trees};
-
-\node[box=4.5cm, fill=blue!10, minimum height=1.5cm] (hotqp) at (2.5, 2.5) {Hot RC QP Pool\\[2pt]{\footnotesize 2--4 QPs, inline data,}\\{\footnotesize busy-poll CQ}};
-\node[box=4.5cm, fill=blue!10, minimum height=1.5cm] (coldqp) at (8.5, 2.5) {Cold RC QP Pool\\[2pt]{\footnotesize 4--8 QPs, deep SQ,}\\{\footnotesize event-driven CQ}};
-
-\node[box=11cm, fill=purple!10] (rdma) at (5.5, 0) {libibverbs / SoftRoCE / RoCEv2 / InfiniBand};
-
-% -- Main data flow (solid black, straight down) --
-\draw[data] (telem.south) -- ++(0,-0.5) -| (wfa.north);
-\draw[data] (telem.south) -- ++(0,-0.5) -| (pmp.north);
-
-\draw[data] (wfa.south) -- ++(0,-0.5) -| ([xshift=-1cm]rules.north);
-\draw[ctrl] (pmp.south) -- ++(0,-0.5) -| ([xshift=1cm]rules.north);
-
-\draw[data] ([xshift=-1cm]rules.south) -- ++(0,-0.5) -| (hotqp.north);
-\draw[data] ([xshift=1cm]rules.south) -- ++(0,-0.5) -| (coldqp.north);
-
-\draw[data] (hotqp.south) -- ++(0,-0.4) -| ([xshift=-1.2cm]rdma.north);
-\draw[data] (coldqp.south) -- ++(0,-0.4) -| ([xshift=1.2cm]rdma.north);
-
-% -- Edge labels (standalone nodes, not on paths) --
-\node[ann] at (3.3, 6.1) {class};
-\node[ann, text=red!70!black] at (7.7, 6.1) {$u^*$};
-\node[ann] at (1.3, 3.7) {HOT};
-\node[ann] at (9.7, 3.7) {COLD};
-
-% -- Right-margin annotations --
-\node[ann, anchor=west] at (13, 10) {$(f,s,\Delta t,\sigma^2,q_H,q_C)$};
-\node[ann, anchor=west] at (13, 7.5) {$u^*(t) \in \{0,1\}$};
-
-\end{tikzpicture}
-}
-\caption{Five-component architecture with PMP controller. Solid: data flow. Dashed red: control signals. Two feedback loops (not shown for clarity): CQ completions from the verbs layer feed back to the telemetry layer, and costate estimates $\hat{\lambda}_{q_H}$ from the hot QP pool feed back to the PMP controller.}
-\end{figure}
-
-
-\subsection{The Three API Layers and Where libscuffedrdma Sits}
-
-Three layers of RDMA APIs exist, each at a different abstraction level. Understanding which layer libscuffedrdma operates at (and why) is critical to the implementation.
+\subsection{The Three API Layers}
 
 \begin{figure}[ht]
 \centering
@@ -313,73 +256,11 @@ Three layers of RDMA APIs exist, each at a different abstraction level. Understa
 \label{fig:api_layers}
 \end{figure}
 
-\paragraph{Why bypass UCX's transport selection.}
-UCX~\cite{nvidia_ucx} is designed to make optimal transport decisions automatically. Its UCP layer examines message size against \texttt{UCX\_RNDV\_THRESH} (default $\sim$8KB) and routes small messages via the ``eager'' protocol (inline send, low latency) and large messages via the ``rendezvous'' protocol (zero-copy RDMA read, high throughput). This is intelligent default behavior, but it creates exactly the head-of-line blocking problem the thesis targets: UCX makes transport decisions based on message size alone, with no knowledge of tensor access patterns, inference phase, or priority. A small eager message can still queue behind a large rendezvous transfer on the same QP because UCX uses a shared QP pool with static partitioning.
+libscuffedrdma bypasses UCX's transport selection and calls \texttt{ibv\_post\_send} directly. UCX routes messages by size alone (small = eager inline send, large = rendezvous RDMA read). This means UCX cannot distinguish between a latency-critical 64KB decode activation and a 64KB background prefetch. libscuffedrdma's WFA classifier makes that distinction, then posts to the correct QP.
 
-libscuffedrdma uses UCX's connection management infrastructure (\texttt{rdma\_create\_id}, \texttt{rdma\_resolve\_addr} via librdmacm, or UCX's own \texttt{ucp\_ep\_create} for initial handshake) but bypasses its data transfer path. For actual tensor transfers, libscuffedrdma calls \texttt{ibv\_post\_send} directly, choosing which QP to post to based on the WFA classification. This is the only way to guarantee that a hot-classified tensor is sent on the hot QP and never queued behind cold traffic.
+The existing vLLM call chain goes: \texttt{save\_kv\_layer()} $\to$ NIXL $\to$ UCX $\to$ \texttt{ibv\_post\_send()}. We replace the middle: \texttt{save\_kv\_layer()} $\to$ WFA classifies $\to$ \texttt{ibv\_post\_send()} on the selected QP.
 
-\paragraph{Mapping \texttt{rdma\_post\_*} to \texttt{ibv\_*} verbs.}
-The \texttt{rdma\_post\_*} convenience wrappers from librdmacm~\cite{rdmamojo} are thin wrappers around \texttt{ibv\_post\_send}/\texttt{ibv\_post\_recv} that pre-fill work request structures. The mapping:
-
-\begin{table}[ht]
-\centering\small
-\begin{tabular}{lll}
-\toprule
-\textbf{rdma\_post\_* (convenience)} & \textbf{ibv\_* (raw)} & \textbf{libscuffedrdma usage} \\
-\midrule
-\texttt{rdma\_post\_write} & \texttt{ibv\_post\_send} + \texttt{IBV\_WR\_RDMA\_WRITE} & Cold QP: bulk KV blocks \\
-\texttt{rdma\_post\_read} & \texttt{ibv\_post\_send} + \texttt{IBV\_WR\_RDMA\_READ} & Cold QP: decode pulls KV \\
-\texttt{rdma\_post\_send} & \texttt{ibv\_post\_send} + \texttt{IBV\_WR\_SEND} & Hot QP: metadata, logits \\
-\texttt{rdma\_post\_recv} & \texttt{ibv\_post\_recv} & Both: pre-post recv buffers \\
-\texttt{rdma\_post\_ud\_send} & \texttt{ibv\_post\_send} on UD QP & \textbf{Not used} (RC only) \\
-\texttt{rdma\_get\_send\_comp} & \texttt{ibv\_poll\_cq} & Hot QP: busy-poll \\
-\texttt{rdma\_get\_recv\_comp} & \texttt{ibv\_poll\_cq} & Cold QP: event-driven \\
-\bottomrule
-\end{tabular}
-\caption{Mapping between the three API layers. libscuffedrdma calls the \texttt{ibv\_*} column directly, not the \texttt{rdma\_post\_*} wrappers, because the wrappers hide QP selection.}
-\label{tab:verbs_map}
-\end{table}
-
-Note that \texttt{rdma\_post\_ud\_send} is for Unreliable Datagram QPs. libscuffedrdma does not use UD (Section 1.2 explains why: MTU fragmentation, no delivery guarantees, poor SoftRoCE performance). All traffic uses RC QPs with the hot/cold split controlling which RC QP receives each work request.
-
-\paragraph{What NixlConnector does that we replace.}
-The NixlConnector in vLLM~\cite{nvidia_dynamo2025} implements the \texttt{KvConnector} interface and delegates data movement to NIXL, which in turn uses UCX as its default transport backend. The call chain is:
-
-\texttt{save\_kv\_layer()} $\to$ NIXL \texttt{xfer()} $\to$ UCX \texttt{ucp\_am\_send\_nbx()} $\to$ UCT selects transport $\to$ \texttt{ibv\_post\_send()}
-
-libscuffedrdma replaces the middle of this chain:
-
-\texttt{save\_kv\_layer()} $\to$ libscuffedrdma \texttt{transfer()} $\to$ WFA classifies $\to$ \texttt{ibv\_post\_send()} on selected QP
-
-The \texttt{KvConnector} interface methods we implement are: \texttt{save\_kv\_layer()} (called per-layer during prefill to store KV projections), \texttt{get\_num\_new\_matched\_tokens()} (called by the decode scheduler to check if remote KV data has arrived), and \texttt{get\_finished()} (returns completed transfer request IDs). The handshake metadata exchange, request lifecycle management, and abort handling follow the same patterns as NixlConnector.
-
-\paragraph{How the scaling book's inference tricks change what verbs fire.}
-Each optimization from Austin et al.~\cite{scaling_book} Section 7 changes the traffic pattern that hits the RDMA layer:
-
-\textbf{GQA/MQA}~\cite{shazeer2019mqA,ainslie2023gqa} reduces KV heads, so each \texttt{ibv\_post\_send} for a KV cache block carries fewer bytes. With fewer heads, more per-layer KV blocks fall below the inline data threshold ($\leq$256B), meaning they can be embedded directly in the work request on the hot QP without a separate DMA read from the registered memory region. This is a latency win because inline sends avoid the NIC's DMA engine round-trip.
-
-\textbf{Paged Attention}~\cite{vllm_paged} means KV blocks are non-contiguous in memory. Each page is a separate \texttt{ibv\_post\_send} with its own \texttt{ibv\_sge} (scatter/gather element) pointing to that page's registered memory offset. Alternatively, multiple pages can be posted as a single work request with a scatter/gather list (\texttt{ibv\_send\_wr.sg\_list} with \texttt{num\_sge} $> 1$), which reduces per-WR overhead at the cost of requiring all pages to be in the same registered MR.
-
-\textbf{Quantization (LoRC/KVTC/TurboQuant)} reduces bytes per KV element. Lower precision shrinks each KV block, shifting more traffic from the cold QP (large, throughput-oriented) toward the hot QP (small, latency-oriented) as compressed sizes fall below the hot/cold classification threshold. The exact compression ratios and their effect on classification thresholds are experimental targets.
-
-\textbf{Layer-by-layer transfer} (TransferEngine~\cite{chen2025transferengine}) means the prefill node posts one \texttt{ibv\_post\_send} per completed layer rather than one large transfer for the entire KV cache. Each post is smaller, fires earlier (as soon as the GPU finishes that layer), and the decode node can start processing arriving layers immediately. From the verbs perspective, this turns one large \texttt{RDMA\_WRITE} into $L$ smaller \texttt{RDMA\_WRITE\_WITH\_IMM} operations (the immediate value encodes the layer index so the receiver knows which layer arrived).
-
-\textbf{Continuous batching} means multiple users' KV transfers share the same QPs. The WFA classifier must now distinguish per-user traffic: User A's layer-5 KV block and User B's logits arrive on the same completion queue. The 32-bit immediate value in \texttt{WRITE\_WITH\_IMM} is partitioned: upper 16 bits for request ID, lower 16 bits for layer index.
-
-\subsection{UD vs.\ RC: Why RC for Both Pools}
-
-Unreliable Datagram (\texttt{rdma\_post\_ud\_send}) has one advantage: a single QP can send to any remote endpoint without per-peer connection setup. But for LLM inference:
-
-(a) UD messages are limited to the path MTU (typically 4096 bytes). Any KV cache block larger than this requires application-level fragmentation and reassembly, reimplementing reliability in userspace.
-
-(b) UD provides no ordering or delivery guarantees. Lost packets require application-level sequence numbers, ACKs, and retransmission timers.
-
-(c) On SoftRoCE (Chimera's X710 running \texttt{rdma\_rxe}), UD adds per-packet kernel overhead that dominates at small message sizes because the kernel must handle each datagram independently rather than amortizing connection state across a stream.
-
-RC provides reliable, ordered delivery with hardware-managed retransmission. The cost (one QP per peer per priority class) is trivial: for Cerberus $\leftrightarrow$ Chimera, that is 2--4 hot QPs and 4--8 cold QPs total, well within any NIC's QP limits. Both the hot and cold pools use RC; they differ in QP configuration (SQ depth, inline threshold, CQ polling strategy), not transport type.
-
-\paragraph{RDMA security and memory protection.}
-RDMA's one-sided operations (\texttt{RDMA\_WRITE}, \texttt{RDMA\_READ}) bypass the remote CPU entirely, which means the remote OS cannot interpose on access. Rothenberger et al.~\cite{rothenberger2021} demonstrated that RDMA's memory protection (rkeys) is weaker than assumed: rkeys can be brute-forced or leaked, allowing unauthorized remote memory access. For the thesis testbed (two trusted machines on an isolated network), this is not a security concern. For production deployment, libscuffedrdma should rotate rkeys periodically and restrict QP access via the \texttt{ibv\_access\_flags} bitmask (\texttt{IBV\_ACCESS\_REMOTE\_WRITE} only on the cold QP's MR, no \texttt{IBV\_ACCESS\_REMOTE\_READ} unless decode-node pull is needed).
+Both QP pools use RC (Reliable Connected) transport. We do not use UD (Unreliable Datagram) because UD has a 4KB MTU limit requiring application-level fragmentation, no delivery guarantees, and poor SoftRoCE performance. RC handles reliability in hardware. The cost is one QP per peer per priority class, which is trivial for a two-node testbed.
 
 \begin{table}[ht]
 \centering\small
@@ -454,30 +335,27 @@ This is \textbf{tensor parallelism} (TP). Each layer's weight matrices are shard
 \label{fig:config_a}
 \end{figure}
 
-\paragraph{Data flow per decode step.}
-Each GPU computes its shard of $W_Q x$, $W_K x$, $W_V x$. The KV projections are appended to that GPU's KV cache shard (sharded by heads via GQA). Attention is computed locally per head group. The attention output projection $W_O$ produces a partial result that must be \textbf{AllReduced} across all GPUs to produce the full activation for the next layer. The MLP similarly requires an AllReduce after $W_{\text{out}}$. This happens at \emph{every layer}, making inter-GPU communication frequency very high.
+Each GPU computes its shard of the attention and MLP, then AllReduces the partial result with every other GPU. This happens at every layer. The AllReduce messages are small (a few KB to hundreds of KB) but every GPU blocks waiting for them. This is textbook \textbf{hot QP} traffic: small, frequent, latency-critical. On consumer hardware without NVLink, AllReduce goes over PCIe or 10GbE and becomes the bottleneck. vLLM falls back to NCCL for inter-node AllReduce when GPU IPC is unavailable, which is where libscuffedrdma enters.
 
-\paragraph{Where RDMA helps.}
-On a single machine with NVLink, this AllReduce is fast. On consumer hardware (PCIe only, or across machines via 10GbE), the per-layer AllReduce becomes the dominant latency. The AllReduce messages are small (activation size $= B \times D \times 2$ bytes, typically a few KB to a few hundred KB) but extremely latency-sensitive because every GPU is blocked waiting. This is textbook \textbf{hot QP} traffic: small, frequent, latency-critical. The cold QP is unused in this configuration.
+\subsection{Configuration B: Multiple Users, One Model, One Machine}
 
-\paragraph{vLLM's all-reduce stack: NCCL, custom, and FlashInfer.}
-vLLM does not always use NCCL for tensor-parallel AllReduce. It has three paths, selected at runtime based on hardware topology:
+Same as Config A but with continuous batching ($B > 1$ users). Each user has their own KV cache, so total KV memory per GPU scales as $B \times L \times 2 \times K \times H / N$. The RDMA traffic is the same (AllReduce on hot QP) but payloads grow with batch size.
 
-\textbf{Custom AllReduce} (\texttt{vllm/distributed/device\_communicators/custom\_all\_reduce.py}) uses GPU IPC (inter-process communication) shared memory for intra-node all-reduce, bypassing NCCL entirely. It checks P2P GPU accessibility via \texttt{torch.cuda.can\_device\_access\_peer()}, allocates a shared buffer (default 8MB), and performs the reduction directly in GPU memory. This only works for GPUs on the same machine with P2P access (NVLink or same-PCIe-switch).
-
-\textbf{FlashInfer fused AllReduce+RMSNorm}~\cite{flashinfer} (\texttt{flashinfer.comm.vllm\_all\_reduce}) goes further by fusing the AllReduce with the subsequent RMSNorm and optional FP8/FP4 quantization into a single GPU kernel. This eliminates a kernel launch boundary and an HBM round-trip between the AllReduce output and the norm input. vLLM's compilation pass \texttt{allreduce\_rms\_fusion.py} pattern-matches the compute graph and replaces separate AllReduce + RMSNorm nodes with the fused FlashInfer call.
-
-\textbf{NCCL} is the fallback for inter-node communication where GPU IPC is not available. On the Cerberus/Chimera testbed, GPUs are on different machines, so P2P access fails, the custom AllReduce is unavailable, and all tensor-parallel AllReduce traffic falls through to NCCL, which then uses the network. This is where libscuffedrdma enters: NCCL's AllReduce over 10GbE is the bottleneck, and replacing NCCL's default transport with priority-aware RDMA QPs would ensure AllReduce fragments (hot, latency-critical) are never queued behind bulk KV transfers (cold, throughput-oriented) on the same network path.
-
-\subsection{Configuration B: Multiple Users, One Model, Multiple GPUs on One Machine}
-
-Same tensor parallelism as Config A, but with \textbf{continuous batching}: multiple user requests are batched together. Each GPU still holds a shard of every layer, but now processes $B > 1$ sequences simultaneously.
-
-\paragraph{KV cache impact.}
-Each user has their own KV cache. With $B$ concurrent users and $L$ layers, total KV cache per GPU is $B \times L \times 2 \times H \times K/N$ (where $N$ is TP degree). The scaling book~\cite{scaling_book} shows that once KV cache memory exceeds parameter memory, throughput gains from increasing batch size plateau because attention is always bandwidth-bound and KV loading scales linearly with $B$.
-
-\paragraph{Where RDMA helps.}
-Same as Config A (per-layer AllReduce on the hot QP), but the activation payloads are larger (proportional to $B$). If $B$ exceeds $B_{\text{crit}}$, the MLP becomes compute-bound and the AllReduce can be overlapped with computation. On consumer 10GbE, reaching $B_{\text{crit}}$ is unlikely (would require hundreds of concurrent requests on a two-node cluster), so AllReduce remains the bottleneck.
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    box/.style={rectangle, draw, rounded corners=2pt, fill=#1, minimum width=2cm, minimum height=0.7cm, font=\scriptsize, align=center},
+    arr/.style={-{Stealth[length=2mm]}, thick}
+]
+\node[box=blue!8] (g0) at (0,0) {GPU 0\\KV: users 1..$B$};
+\node[box=blue!8] (g1) at (3.5,0) {GPU 1\\KV: users 1..$B$};
+\node[box=blue!8] (g2) at (7,0) {GPU $N{-}1$\\KV: users 1..$B$};
+\node at (5.25,0) {\dots};
+\draw[arr, color=red!70!black] (1.3,0) -- (2.2,0) node[midway, above, font=\scriptsize, text=red!70!black] {AllReduce};
+\draw[arr, color=red!70!black] (4.8,0) -- (5.7,0);
+\end{tikzpicture}
+\caption{\textbf{Config B:} Same as A with $B$ users batched. KV caches grow with batch size.}
+\end{figure}
 
 \subsection{Configuration C: Disaggregated Prefill/Decode Across Machines}
 \label{sec:config_c}
@@ -596,24 +474,30 @@ This combines Configs B and C: disaggregated prefill/decode with continuous batc
 \label{fig:config_d}
 \end{figure}
 
-\paragraph{The multiplexing problem.}
-Multiple users' KV transfers share the same 10GbE link. Without traffic separation, User A's large KV transfer can block User B's small metadata transfer, causing head-of-line blocking. This is the exact scenario the dual QP pool solves: each user's KV blocks go on the cold QP, while metadata and scheduling go on the hot QP. The PMP bang-bang controller dynamically allocates link bandwidth between the two pools based on queue depth.
-
-\paragraph{Prefix caching adds a new traffic pattern.}
-If User B's prompt shares a prefix with a previous request, the decode node may already hold the relevant KV cache blocks. The router detects this (llm-d's prefix-cache-aware scheduling~\cite{llmd_v05}) and skips the KV transfer for cached blocks. The WFA classifier sees this as a change in access pattern: previously-hot tensor IDs become cold (no longer transferred), while new tensor IDs appear. The WFA must adapt its classification thresholds dynamically.
+Multiple users' KV transfers share the same 10GbE link. Without traffic separation, User A's large KV transfer blocks User B's small metadata. This is the core head-of-line blocking scenario the dual QP pool solves. The PMP controller dynamically allocates bandwidth between pools based on queue depth. With prefix caching (llm-d~\cite{llmd_v05}), some KV blocks are already on the decode node, changing the traffic pattern the WFA observes.
 
 \subsection{Configuration E: Multiple Models, Multiple Machines}
 
-This covers MoE (Mixture-of-Experts) models and multi-model serving (e.g., a coding model and a chat model sharing infrastructure).
+MoE (Mixture-of-Experts) models and multi-model serving.
 
-\paragraph{MoE routing creates bursty, unpredictable traffic.}
-In MoE models like DeepSeek-V3, each token is routed to a subset of experts. If experts are distributed across machines (expert parallelism), the routing decision at each layer triggers an All-to-All communication: each GPU sends tokens to the GPUs hosting the selected experts, and receives processed tokens back. The number of tokens per expert is data-dependent and discovered at runtime, creating a bimodal traffic pattern: popular experts receive many tokens (large transfers), rare experts receive few (small transfers).
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    box/.style={rectangle, draw, rounded corners=2pt, fill=#1, minimum width=2.2cm, minimum height=0.7cm, font=\scriptsize, align=center},
+    arr/.style={-{Stealth[length=2mm]}, thick}
+]
+\node[box=yellow!12] (router) at (3.5,2) {MoE Router};
+\node[box=green!10] (e0) at (0,0) {Expert 0\\(popular)};
+\node[box=green!10] (e1) at (3.5,0) {Expert 1\\(rare)};
+\node[box=green!10] (e2) at (7,0) {Expert $N$\\(popular)};
+\draw[arr, color=red!70!black, ultra thick] (router) -- (e0) node[midway, left, font=\scriptsize, text=red!70!black] {cold};
+\draw[arr, color=blue!70!black, dashed] (router) -- (e1) node[midway, right, font=\scriptsize, text=blue!70!black] {hot};
+\draw[arr, color=red!70!black, ultra thick] (router) -- (e2) node[midway, right, font=\scriptsize, text=red!70!black] {cold};
+\end{tikzpicture}
+\caption{\textbf{Config E:} MoE expert parallelism. Popular experts get large batches (cold QP), rare experts get small urgent transfers (hot QP).}
+\end{figure}
 
-\paragraph{Dual QP mapping for MoE.}
-\textbf{Hot QP:} routing decisions (which tokens go to which expert), barrier synchronization between All-to-All phases, and the processed-token returns from rare experts (small, latency-sensitive because subsequent layers are blocked). \textbf{Cold QP:} bulk token transfers to popular experts (large, can tolerate batching). The WFA classifier distinguishes these based on per-expert access frequency: frequently-activated experts produce cold-path traffic (predictable, large batches), rarely-activated experts produce hot-path traffic (unpredictable, small, latency-critical).
-
-\paragraph{Multi-model serving.}
-When multiple models share the same GPU cluster (e.g., a small fast model for routing and a large model for generation), weight loading and KV cache management become concurrent. The cold QP handles weight prefetching for model switching, while the hot QP handles the active model's inference traffic. vLLM's elastic expert parallelism (PR \#34861~\cite{vllm_pr34861}) creates exactly this pattern during dynamic GPU scaling.
+In MoE models (e.g. DeepSeek-V3), each token routes to a subset of experts across machines, creating All-to-All traffic at every layer. Popular experts get large predictable batches (cold QP), rare experts get small urgent transfers (hot QP). The WFA classifies by per-expert access frequency. vLLM's elastic expert parallelism (PR \#34861~\cite{vllm_pr34861}) creates this pattern during dynamic GPU scaling.
 
 \subsection{Summary: QP and Verbs Mapping by Configuration}
 
@@ -643,7 +527,7 @@ UCX is the dominant open-source RDMA transport framework, used by NCCL, UCC, MPI
 
 \subsection{Protocol Transition Cliffs: The Core Problem}
 
-UCX's UCP layer routes messages based on a single scalar: message size. Messages below \texttt{UCX\_RNDV\_THRESH} (default $\sim$8\,KB) take the eager path (inline send, low latency); messages above take the rendezvous path (zero-copy RDMA read, high throughput). This creates performance discontinuities at the threshold boundary that are well-documented in the issue tracker:
+UCX routes messages based on size alone. Messages below \texttt{UCX\_RNDV\_THRESH} (default around 8\,KB) take the eager path (inline send, low latency); messages above take the rendezvous path (zero-copy RDMA read, high throughput). This creates latency cliffs at the threshold boundary:
 
 \begin{itemize}
     \item \textbf{Issue \#10552}: On Grace Hopper systems, 65\,536-byte messages exhibit \textbf{50$\times$ worse latency} than 131\,072-byte messages in OSU alltoall benchmarks. The cliff occurs precisely at the eager-to-rendezvous transition, where the sender must negotiate a rendezvous handshake, register memory, and wait for the receiver to initiate an RDMA read--all adding round-trips that the eager path avoids.
@@ -712,7 +596,7 @@ The rendezvous protocol--which libscuffedrdma bypasses for tensor data--has seve
 \end{itemize}
 
 \paragraph{Why bypassing RNDV is justified.}
-libscuffedrdma uses UCX's connection management but bypasses the rendezvous data path entirely. For tensor transfers, the middleware calls \texttt{ibv\_post\_send} directly with pre-registered memory regions (\texttt{ibv\_reg\_mr} at allocation time, amortized). This eliminates the rendezvous handshake (RTS/CTS round-trip), avoids the RNDV rail selection bugs, and removes the 3$\times$ wakeup overhead. The trade-off is that libscuffedrdma must manage memory registration itself, but for LLM inference the tensor buffers are long-lived and registration cost is amortized over thousands of transfers.
+libscuffedrdma bypasses the rendezvous data path. It calls \texttt{ibv\_post\_send} directly with pre-registered memory regions. This eliminates the rendezvous handshake, avoids rail selection bugs, and removes the wakeup overhead. The trade-off is managing memory registration directly, but LLM tensor buffers are long-lived so registration cost is paid once at startup.
 
 \subsection{Memory Registration Overhead}
 
@@ -794,61 +678,26 @@ k \xrightarrow{\text{LoRC (dim)}} k' \in \mathbb{R}^{d'} \xrightarrow{\text{KVTC
 \]
 LoRC reduces $d \to d'$ via SVD on the weight matrices. KVTC applies PCA decorrelation and entropy coding on the generated vectors. TurboQuant reduces the bits-per-element from 16 to as low as 3 while preserving inner product accuracy. Because each stage operates on a different axis of the representation, their effects should compound when combined.
 
-\subsection{TurboQuant: Algorithm and Math}
+\subsection{TurboQuant}
 
-TurboQuant~\cite{turboquant2026} (Zandieh, Mirrokni et al., Google Research, ICLR 2026) is a two-stage data-oblivious quantization algorithm. Unlike traditional quantization methods that store per-block normalization constants (adding 1--2 bits of overhead that can negate compression gains), TurboQuant eliminates this overhead entirely through its mathematical structure.
+TurboQuant~\cite{turboquant2026} (Zandieh, Mirrokni et al., Google Research) is a two-stage quantization algorithm that does not need per-block calibration data:
 
-\paragraph{Stage 1: PolarQuant (primary compression).}
-Given a $d$-dimensional key vector $k$, PolarQuant first applies a random orthogonal rotation $\Pi \in \mathbb{R}^{d \times d}$ (generated once via QR decomposition of a random Gaussian matrix and reused for all vectors):
+\begin{enumerate}
+\item \textbf{PolarQuant}: Apply a random rotation to the KV vector, then quantize. The rotation makes each coordinate's distribution predictable, so the quantizer can be pre-computed once and reused for all vectors. No per-block normalization constants needed.
+\item \textbf{QJL correction}: The quantization error creates bias in inner products. TurboQuant corrects this by storing a 1-bit sketch of the residual using the Quantized Johnson-Lindenstrauss transform. The corrected inner products are provably unbiased.
+\end{enumerate}
+
+The important detail for RDMA: TurboQuant preserves \emph{inner product accuracy}, not individual vector accuracy. Attention only needs inner products (query dot key), so this is fine. But it means the decode node needs a modified attention kernel that works directly on the quantized codes rather than decompressing first. The RDMA layer just moves the smaller compressed bytes.
+
+\subsection{How Compression and Transport Interact}
+
+Compression (TurboQuant, KVTC, LoRC) reduces the bytes that cross the link. The dual QP pool reduces the queuing delay on the link. These target different terms:
 \[
-y = \Pi k
+T_{\text{KV transfer}} = \underbrace{\frac{\text{KV}_{\text{bytes}}}{W_{\text{net}}}}_{\text{compression reduces this}} + \underbrace{T_{\text{queuing delay}}}_{\text{dual QP reduces this}}
 \]
-After rotation, each coordinate of $y$ follows a concentrated distribution. Specifically, for a unit vector on the $d$-sphere, the marginal distribution of each coordinate is:
-\[
-f_X(x) = \frac{\Gamma(d/2)}{\sqrt{\pi}\,\Gamma\!\left(\frac{d-1}{2}\right)} (1 - x^2)^{(d-3)/2}, \quad x \in [-1, 1]
-\]
-which concentrates sharply around zero as $d$ grows. PolarQuant pairs coordinates and converts them to polar form (radius + angle). Because the angular distribution is predictable and concentrated, a Lloyd-Max quantizer can be pre-computed offline for the known distribution, eliminating the need to store per-block normalization constants. The quantized representation is:
-\[
-\hat{y} = Q_b(y) \quad \text{where } Q_b \text{ is a } b\text{-bit Lloyd-Max quantizer for the Beta distribution}
-\]
-The MSE reconstruction is $k_{\text{mse}} = \Pi^T \hat{y}$.
+The RDMA layer does not care whether it is moving compressed or uncompressed bytes. The WFA classifies by size and access pattern, not data content. However, compression shifts the size distribution: blocks that were ``large'' (cold path) may become ``small'' (hot path) after compression, so the WFA thresholds should be tuned on compressed traffic.
 
-\paragraph{Stage 2: QJL (1-bit residual correction).}
-The quantization residual $r = k - k_{\text{mse}}$ introduces bias in inner product estimates. TurboQuant corrects this using the Quantized Johnson-Lindenstrauss (QJL) transform. Given a random Gaussian matrix $S \in \mathbb{R}^{m \times d}$:
-\[
-z = \text{sign}(S \cdot r) \in \{-1, +1\}^m
-\]
-Each residual element is reduced to a single sign bit. The key mathematical property: for any query $q$, the inner product estimate
-\[
-\langle q, k \rangle \approx \langle q, k_{\text{mse}} \rangle + \frac{\|r\|}{m} \langle S q, z \rangle
-\]
-is \emph{provably unbiased} with variance $O(1/d)$ where $d$ is the head dimension (typically 128). This means that while individual vector reconstruction has significant error, the attention scores (which are inner products) remain statistically identical to the unquantized version.
-
-\paragraph{The critical subtlety for RDMA.}
-TurboQuant does \emph{not} produce vectors that can be individually decompressed and used normally. The per-vector reconstruction error is significant. What TurboQuant preserves is inner product accuracy, which is exactly what attention requires. This has a direct implication for the disaggregated serving architecture: the decode node cannot simply decompress TurboQuant'd KV vectors and feed them to a standard attention kernel. It must use an asymmetric attention computation that operates directly on the quantized representation. This means the RDMA transfer carries the compact quantized codes, and the decode node's attention kernel must be modified to compute scores from those codes.
-
-\subsection{How TurboQuant Complements the Thesis Architecture}
-
-TurboQuant and libscuffedrdma operate at entirely different layers and complement each other without interference:
-
-\paragraph{TurboQuant reduces what crosses the link.}
-TurboQuant compresses each KV vector from 16 bits per element to 3--4 bits per element. For a KV cache being transferred from prefill to decode over the cold QP, this directly reduces $\text{KV}_{\text{bytes}}$ in the TTFT equation. The compression happens on the prefill node's GPU before the RDMA write is posted, and decompression (or rather, asymmetric score computation) happens on the decode node's GPU after the RDMA read completes. The RDMA layer itself is agnostic to whether it is transferring quantized or unquantized data: it moves bytes.
-
-\paragraph{libscuffedrdma manages how it crosses the link.}
-The dual QP pool, WFA classifier, and PMP controller are transport-level optimizations. They determine which queue pair carries each transfer, when to allocate bandwidth to each priority class, and how to avoid head-of-line blocking. These decisions are independent of the data's compression state. A 3-bit TurboQuant'd KV block and a 16-bit uncompressed KV block are both just byte buffers to the RDMA layer. The WFA classifies based on access pattern (frequency, size, recency), not data content.
-
-\paragraph{The interaction is multiplicative in the TTFT equation.}
-TurboQuant reduces $\text{KV}_{\text{bytes}}$ (numerator). The dual QP pool reduces $T_{\text{KV transfer}}$ by eliminating queuing delay (preventing small hot transfers from waiting behind large cold ones). These are independent reductions that apply to different terms:
-\[
-T_{\text{KV transfer}} = \underbrace{\frac{\text{KV}_{\text{bytes}}}{W_{\text{net}}}}_{\text{TurboQuant reduces this}} + \underbrace{T_{\text{queuing delay}}}_{\text{dual QP eliminates this}}
-\]
-Combining both: smaller data (TurboQuant) on a better-managed link (libscuffedrdma). The actual magnitude of the combined effect is an experimental target for the Cerberus/Chimera testbed.
-
-\paragraph{TurboQuant also affects the WFA's classification thresholds.}
-With TurboQuant applied, KV cache blocks are smaller. This shifts the size distribution that the WFA observes: what was previously a ``large'' transfer (cold path) may now fall below the hot/cold threshold after compression. The WFA must be trained on compressed traffic patterns, not uncompressed ones, to produce useful classifications. This means the WFA training data (from K-Search kernel traces) should include the TurboQuant compression step in the pipeline.
-
-\paragraph{KVTC vs.\ TurboQuant: competition at ICLR 2026.}
-Both debut at ICLR 2026. NVIDIA's KVTC achieves higher compression ratios but requires per-model calibration (computing PCA bases per layer). TurboQuant is data-oblivious (the random rotation and Lloyd-Max quantizer are model-independent) but achieves lower compression ratios. For the thesis, either or both can be used: they operate at different stages of the pipeline (KVTC after LoRC's dimension reduction, TurboQuant on the final representation). The thesis's contribution is orthogonal to both since it operates at the transport layer.
+KVTC (NVIDIA) requires per-model calibration but achieves higher compression. TurboQuant (Google) is model-independent but compresses less. They operate at different pipeline stages and can be combined. The thesis contribution is orthogonal to both.
 
 \section{Production Systems Context}
 
@@ -885,7 +734,7 @@ Dual QP + PMP controller & 14.7 & 17.7 & 23.8 \\
 \end{tabular}
 \end{table}
 
-With synchronous single-threaded SoftRoCE, each operation completes before the next is posted, so head-of-line blocking does not manifest. The dual QP overhead is $\sim$1--4$\mu$s from additional QP management and GlobalRoute construction. Under concurrent or hardware-offloaded completion (ConnectX NICs), the hot-path isolation becomes load-bearing: the cold QP's 1MB writes ($\sim$2767$\mu$s p50) cannot stall the hot QP's 256B writes ($\sim$14$\mu$s p50) because they occupy separate completion queues.
+With synchronous single-threaded SoftRoCE, each operation completes before the next starts, so head-of-line blocking does not appear. The dual QP overhead is 1--4$\mu$s from additional QP management. Under concurrent load or hardware-offloaded completion (ConnectX NICs), the isolation becomes important: the cold QP's 1MB writes (2767$\mu$s p50) cannot stall the hot QP's 256B writes (14$\mu$s p50) because they use separate completion queues.
 
 \subsection{Latency Across Message Sizes}
 
