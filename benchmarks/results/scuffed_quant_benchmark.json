@@ -1,0 +1,186 @@
+{
+  "bits_sweep": [
+    {
+      "label": "2-bit",
+      "n_keys": 512,
+      "n_queries": 8,
+      "dim": 128,
+      "bits": 2,
+      "with_qjl": {
+        "mean_abs_error": 2.734299421310425,
+        "max_abs_error": 13.602569580078125,
+        "mean_rel_error": 1.709877610206604,
+        "p99_rel_error": 17.724340343475394
+      },
+      "without_qjl": {
+        "mean_abs_error": 3.014698028564453,
+        "max_abs_error": 14.546518325805664,
+        "mean_rel_error": 2.2126147747039795,
+        "p99_rel_error": 20.523583698272965
+      },
+      "compression_ratio": 10.666666666666666,
+      "original_bytes": 262144,
+      "compressed_bytes": 102400
+    },
+    {
+      "label": "3-bit",
+      "n_keys": 512,
+      "n_queries": 8,
+      "dim": 128,
+      "bits": 3,
+      "with_qjl": {
+        "mean_abs_error": 1.8979430198669434,
+        "max_abs_error": 9.588643074035645,
+        "mean_rel_error": 1.2810518741607666,
+        "p99_rel_error": 13.867040872573954
+      },
+      "without_qjl": {
+        "mean_abs_error": 1.6238372325897217,
+        "max_abs_error": 9.693199157714844,
+        "mean_rel_error": 1.1533100605010986,
+        "p99_rel_error": 12.162301301956237
+      },
+      "compression_ratio": 8.0,
+      "original_bytes": 262144,
+      "compressed_bytes": 102400
+    },
+    {
+      "label": "4-bit",
+      "n_keys": 512,
+      "n_queries": 8,
+      "dim": 128,
+      "bits": 4,
+      "with_qjl": {
+        "mean_abs_error": 1.8044666051864624,
+        "max_abs_error": 9.60141372680664,
+        "mean_rel_error": 1.1118435859680176,
+        "p99_rel_error": 12.0312338829041
+      },
+      "without_qjl": {
+        "mean_abs_error": 0.8747549653053284,
+        "max_abs_error": 4.7732768058776855,
+        "mean_rel_error": 0.6480311751365662,
+        "p99_rel_error": 5.747303152084372
+      },
+      "compression_ratio": 6.4,
+      "original_bytes": 262144,
+      "compressed_bytes": 102400
+    },
+    {
+      "label": "6-bit",
+      "n_keys": 512,
+      "n_queries": 8,
+      "dim": 128,
+      "bits": 6,
+      "with_qjl": {
+        "mean_abs_error": 1.8874391317367554,
+        "max_abs_error": 8.598910331726074,
+        "mean_rel_error": 1.3095988035202026,
+        "p99_rel_error": 14.769272899627698
+      },
+      "without_qjl": {
+        "mean_abs_error": 0.30951395630836487,
+        "max_abs_error": 2.591433048248291,
+        "mean_rel_error": 0.24250687658786774,
+        "p99_rel_error": 2.284836113452914
+      },
+      "compression_ratio": 4.571428571428571,
+      "original_bytes": 262144,
+      "compressed_bytes": 102400
+    },
+    {
+      "label": "8-bit",
+      "n_keys": 512,
+      "n_queries": 8,
+      "dim": 128,
+      "bits": 8,
+      "with_qjl": {
+        "mean_abs_error": 1.9467732906341553,
+        "max_abs_error": 9.118447303771973,
+        "mean_rel_error": 1.2546229362487793,
+        "p99_rel_error": 14.27003974914551
+      },
+      "without_qjl": {
+        "mean_abs_error": 0.12008700519800186,
+        "max_abs_error": 1.8725090026855469,
+        "mean_rel_error": 0.08727368712425232,
+        "p99_rel_error": 0.8180491566658047
+      },
+      "compression_ratio": 3.5555555555555554,
+      "original_bytes": 262144,
+      "compressed_bytes": 102400
+    }
+  ],
+  "speed": [
+    {
+      "n_keys": 128,
+      "compress_ms": 0.6811918501625769,
+      "score_ms": 0.17810360004659742,
+      "raw_matmul_ms": 0.006988650420680642,
+      "score_overhead": 25.484691510618077
+    },
+    {
+      "n_keys": 512,
+      "compress_ms": 3.254128150001634,
+      "score_ms": 0.6862794500193559,
+      "raw_matmul_ms": 0.02848954900400713,
+      "score_overhead": 24.088814109441635
+    },
+    {
+      "n_keys": 2048,
+      "compress_ms": 13.160310449893586,
+      "score_ms": 4.115081649797503,
+      "raw_matmul_ms": 0.07839010067982599,
+      "score_overhead": 52.49491471640035
+    },
+    {
+      "n_keys": 8192,
+      "compress_ms": 87.25497840059688,
+      "score_ms": 14.133142700302415,
+      "raw_matmul_ms": 0.10713469964684919,
+      "score_overhead": 131.9193757661136
+    }
+  ],
+  "kv_cache": [
+    {
+      "num_heads": 32,
+      "head_dim": 128,
+      "seq_len": 128,
+      "bits": 3,
+      "compress_ms": 89.89622700028121,
+      "score_ms": 10.65457600634545,
+      "mean_rel_error": 1.5242743492126465,
+      "original_KB": 4096.0,
+      "compressed_KB": 1600.0,
+      "ratio": 2.56
+    },
+    {
+      "num_heads": 32,
+      "head_dim": 128,
+      "seq_len": 512,
+      "bits": 3,
+      "compress_ms": 324.6041480160784,
+      "score_ms": 22.134069993626326,
+      "mean_rel_error": 2.2835466861724854,
+      "original_KB": 16384.0,
+      "compressed_KB": 6400.0,
+      "ratio": 2.56
+    },
+    {
+      "num_heads": 32,
+      "head_dim": 128,
+      "seq_len": 2048,
+      "bits": 3,
+      "compress_ms": 1406.7519450036343,
+      "score_ms": 102.5977949902881,
+      "mean_rel_error": 3.119483709335327,
+      "original_KB": 65536.0,
+      "compressed_KB": 25600.0,
+      "ratio": 2.56
+    }
+  ],
+  "ranking": {
+    "top_k": 32,
+    "overlap_ratio": 0.8212890625
+  }
+}
