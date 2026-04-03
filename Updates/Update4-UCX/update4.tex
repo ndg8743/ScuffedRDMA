@@ -22,41 +22,25 @@
 
 \section{Problem Context}
 
-\subsection{Three Resources, One Bottleneck}
+Update 1 covers the hardware testbed (Cerberus 2$\times$RTX 5090, Chimera 3$\times$RTX 3090, 10GbE interconnect). Update 2 covers the problem statement and initial architecture. Update 3 covers the tensor cache architecture, precision pipeline, and transport abstractions. This update builds on all three with the concrete implementation, PMP control theory, and benchmark results.
 
-Every GPU balances three resources: compute (how many FLOPs/s the tensor cores can deliver), memory bandwidth (how fast data moves between VRAM and the compute units), and total memory (how much fits on the card at once). An RTX 5090 has roughly 105 TFLOPS of FP16 tensor core compute and about 1.8 TB/s of GDDR7 bandwidth. An RTX 3090 has roughly 36 TFLOPS FP32 (71 TFLOPS FP16 tensor) and 936 GB/s of GDDR6X bandwidth. The ratio of compute to bandwidth determines a critical threshold: if an operation does not perform enough FLOPs per byte loaded from memory, the tensor cores sit idle waiting for data. This is the roofline model~\cite{scaling_book}, and it governs every layer of the inference stack.
+\subsection{The KV Cache Problem}
 
-\subsection{Prefill and Decode Are Different Problems}
+Without a KV cache, every decode step recomputes attention over the entire sequence--quadratic in sequence length. The KV cache makes decode linear: each new token computes its own key/value projections and attends over the cached values from all previous tokens.
 
-LLM inference splits into two phases with fundamentally different bottlenecks. Prefill processes the full user prompt in one forward pass. Because many tokens share the same weight matrices, arithmetic intensity is high and the GPU is compute-bound. Decode generates tokens one at a time. Each step must reload the full KV cache from VRAM to compute a single attention dot product per head, producing an arithmetic intensity near 1. The GPU is memory-bandwidth-bound during decode regardless of batch size for the attention operation, and the MLP is bandwidth-bound unless the batch exceeds a hardware-specific critical threshold~\cite{scaling_book}.
-
-This asymmetry is why disaggregated serving exists: run prefill on one set of GPUs optimized for compute throughput, run decode on another set optimized for memory bandwidth, and transfer the KV cache between them.
-
-\subsection{The KV Cache: A Small Price for Linear Complexity}
-
-Without a KV cache, every decode step would recompute attention over the entire sequence from scratch--quadratic in sequence length. The KV cache makes decode linear: each new token only computes its own key and value projections, then attends over the cached keys and values from all previous tokens. This is what makes autoregressive generation practical at long context lengths.
-
-The cost is memory. For a model with $L$ layers, $K$ KV heads, head dimension $H$, sequence length $S$, and 2 bytes per element (FP16):
+The cost is memory. For $L$ layers, $K$ KV heads, head dimension $H$, sequence length $S$, FP16:
 \[
 \text{KV cache per request} = 2 \times L \times K \times H \times S \times 2 \text{ bytes}
 \]
-For a 70B-class model ($L{=}80$, $K{=}8$ with GQA, $H{=}128$, $S{=}4096$): that is $2 \times 80 \times 8 \times 128 \times 4096 \times 2 \approx 1.3\text{ GB}$ per request. With 16 concurrent users, the KV cache alone consumes 21~GB--more than the weights on many consumer GPUs. On our RTX 3090s (24~GB VRAM each), the KV cache competes directly with model weights for memory.
+For a 70B model ($L{=}80$, $K{=}8$ GQA, $H{=}128$, $S{=}4096$): 1.3~GB per request. With 16 concurrent users, 21~GB of KV cache alone on a 24~GB RTX 3090.
 
-This is why KV cache compression (LoRC, KVTC, TurboQuant) matters so much for this thesis: every byte saved in the cache is a byte that does not need to cross the 10GbE link during disaggregated serving, and a byte freed in VRAM for larger batches or longer contexts. Compression directly reduces the bytes that must cross the 10GbE link during disaggregated serving. Combined with the dual QP pool (which eliminates queuing delay on top of the raw transfer time), the two optimizations target independent terms in the transfer latency--one shrinks the payload, the other prevents scheduling delays. The actual combined impact is an experimental target for the Cerberus/Chimera testbed.
+In disaggregated serving (prefill on Cerberus, decode on Chimera), this entire cache must cross the 10GbE link ($\sim$1.2 GB/s). On InfiniBand this takes milliseconds. On our testbed it takes seconds. Compression (LoRC, KVTC, TurboQuant) reduces the payload; the dual QP pool reduces the queuing delay. These target independent terms in the transfer time.
 
-\subsection{The Network Becomes the Fourth Resource}
+\subsection{What This Update Adds}
 
-When the KV cache must cross a network to reach the decode GPU, a fourth resource enters: network bandwidth. On enterprise hardware, NVLink provides hundreds of GB/s between GPUs on the same node, and InfiniBand provides 25--50 GB/s between nodes. These are fast enough that many distributed operations remain compute-bound even after accounting for communication.
+UCX, NIXL, and NCCL treat all traffic equally or route by message size alone. They cannot distinguish a latency-critical decode activation from a background KV prefetch of the same size.
 
-On the consumer hardware in this thesis (Cerberus with 2x RTX 5090, Chimera with 3x RTX 3090, connected via 10GbE at roughly 1.2 GB/s effective throughput), the network roofline drops by two orders of magnitude compared to InfiniBand. Operations that are compute-bound in a datacenter become communication-bound on this testbed. A KV cache transfer that takes milliseconds on InfiniBand takes seconds on 10GbE. An AllReduce that overlaps with computation on NVLink dominates the step time on PCIe across machines.
-
-No GPU vendor designs their interconnect for this scenario. NVLink is intra-node only. InfiniBand requires enterprise NICs and switches. The network constraint at the consumer price point is a hardware limitation that software must compensate for.
-
-\subsection{The Gap This Thesis Fills}
-
-Existing RDMA transport libraries (UCX, NIXL, NCCL) treat all traffic equally or classify it by message size alone. UCX's eager/rendezvous threshold splits traffic at a static byte boundary. NCCL optimizes collective operations but provides no mechanism to prioritize one collective over another. Neither system knows that a small AllReduce fragment carrying a decode activation is more latency-critical than a large KV cache block being migrated for prefetch.
-
-The thesis introduces \textbf{tensor-aware RDMA traffic management}: a middleware that classifies each transfer by its role in the inference pipeline (via the WFA), determines optimal bandwidth allocation between priority classes (via PMP's bang-bang controller), and routes traffic to physically separated RDMA queue pairs (hot pool for latency-sensitive, cold pool for throughput-oriented). This is a software solution to a hardware limitation, and it produces larger relative gains on consumer interconnects precisely because the network is so constrained that every wasted microsecond of head-of-line blocking is measurable.
+This update introduces \textbf{tensor-aware RDMA traffic management}: classify each transfer by its role in the inference pipeline (WFA classifier), allocate bandwidth between priority classes (PMP bang-bang controller), and route traffic to separate RDMA queue pairs (hot pool for latency-sensitive, cold pool for throughput). This is validated with real RDMA writes on SoftRoCE.
 
 \section{Theoretical Foundation}
 
