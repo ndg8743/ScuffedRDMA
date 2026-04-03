@@ -1,96 +1,173 @@
 """
-scuffedQuant: two-stage KV cache quantization for RDMA transfer.
+scuffedQuant: KV cache compression via PolarQuant + QJL.
 
-Implements the PolarQuant + QJL approach from TurboQuant (Zandieh et al. 2025)
-from scratch. Pure numpy, runs on any platform (cluster GPUs, Mac, etc).
+Two stages, each doing one thing:
 
-Stage 1 - PolarQuant:
-  Rotate vectors with a random orthogonal matrix so coordinates concentrate
-  near zero. Quantize with a precomputed Lloyd-Max quantizer for the known
-  distribution. No per-block calibration needed.
+  Stage 1 (PolarQuant): Rotate the vector so all coordinates have the
+  same distribution, then quantize each coordinate with a precomputed
+  codebook. No calibration data needed.
 
-Stage 2 - QJL (Quantized Johnson-Lindenstrauss):
-  Store a 1-bit sketch of the quantization residual. This corrects the bias
-  in inner product estimates, making attention scores provably unbiased.
+  Stage 2 (QJL): Store 1-bit signs of a random projection of the
+  quantization residual. Used to correct bias in inner products.
 
-The key property: individual vector reconstruction is lossy, but inner
-products (what attention computes) are preserved accurately.
+Result: individual vectors are lossy, but attention scores (inner
+products) are accurate. That's all attention needs.
+
+Based on: Zandieh et al., "TurboQuant", arXiv:2504.19874, 2025.
 """
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 
-def _random_orthogonal(d: int, seed: int = 42) -> np.ndarray:
-    """Generate a random orthogonal matrix via QR decomposition."""
-    rng = np.random.RandomState(seed)
-    G = rng.randn(d, d).astype(np.float32)
-    Q, R = np.linalg.qr(G)
-    # Fix sign ambiguity so result is reproducible
-    Q *= np.sign(np.diag(R))
-    return Q
+# --- Stage 1: PolarQuant ---
 
-
-def _build_lloyd_max_codebook(bits: int, d: int, n_samples: int = 100000,
-                               seed: int = 123) -> np.ndarray:
+def _walsh_hadamard(x: np.ndarray) -> np.ndarray:
     """
-    Build a Lloyd-Max codebook for the post-rotation coordinate distribution.
+    Fast Walsh-Hadamard transform, in-place.
+    O(d log d) instead of O(d^2) for a full rotation matrix.
+    Input length must be a power of 2.
+    """
+    d = x.shape[-1]
+    h = 1
+    while h < d:
+        # Butterfly operation on pairs separated by h
+        for i in range(0, d, h * 2):
+            a = x[..., i:i+h].copy()
+            b = x[..., i+h:i+2*h].copy()
+            x[..., i:i+h] = a + b
+            x[..., i+h:i+2*h] = a - b
+        h *= 2
+    x /= np.sqrt(d)
+    return x
 
-    After rotating a unit-norm vector by a random orthogonal matrix,
-    each coordinate follows a distribution concentrated near zero.
-    For large d, this is approximately Gaussian with variance 1/d.
-    We build the quantizer empirically by sampling.
+
+def _random_signs(d: int, seed: int) -> np.ndarray:
+    """Random +1/-1 diagonal for randomized Hadamard."""
+    rng = np.random.RandomState(seed)
+    return (rng.randint(0, 2, size=d) * 2 - 1).astype(np.float32)
+
+
+def _pad_to_power_of_2(x: np.ndarray) -> Tuple[np.ndarray, int]:
+    """Pad last dimension to next power of 2."""
+    d = x.shape[-1]
+    d2 = 1
+    while d2 < d:
+        d2 *= 2
+    if d2 == d:
+        return x, d
+    pad_width = [(0, 0)] * (x.ndim - 1) + [(0, d2 - d)]
+    return np.pad(x, pad_width), d
+
+
+def _build_codebook(bits: int, d: int, n_samples: int = 200000,
+                    seed: int = 123) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Build Lloyd-Max codebook for the post-rotation distribution.
+
+    After a randomized Hadamard rotation, each coordinate of a unit
+    vector is approximately Gaussian with mean 0 and variance 1/d.
+    The codebook is precomputed once and reused for all vectors.
+
+    Returns (sorted_codebook, boundaries).
     """
     rng = np.random.RandomState(seed)
-    # Sample from the marginal distribution: project random unit vectors
+
+    # Sample the marginal: first coordinate of random unit vectors
     vecs = rng.randn(n_samples, d).astype(np.float32)
     vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
-    samples = vecs[:, 0]  # marginal of first coordinate
+    samples = vecs[:, 0]
 
-    # Lloyd-Max iteration (k-means on 1D data)
     n_levels = 2 ** bits
-    # Initialize with uniform quantiles
-    percentiles = np.linspace(0, 100, n_levels + 1)
-    boundaries = np.percentile(samples, percentiles[1:-1])
+
+    # Initialize codebook from uniform quantiles
+    pcts = np.linspace(0, 100, n_levels + 1)
+    boundaries = np.percentile(samples, pcts[1:-1])
     codebook = np.zeros(n_levels, dtype=np.float32)
 
+    # Lloyd-Max: iterate centroid/boundary updates
     for _ in range(50):
-        # Assign samples to nearest boundary region
-        indices = np.digitize(samples, boundaries)
-        # Update codebook: centroid of each region
+        bins = np.digitize(samples, boundaries)
         for i in range(n_levels):
-            mask = indices == i
+            mask = bins == i
             if mask.any():
                 codebook[i] = samples[mask].mean()
-        # Update boundaries: midpoints between adjacent centroids
         boundaries = (codebook[:-1] + codebook[1:]) / 2
 
-    return codebook
+    # Sort for searchsorted
+    order = np.argsort(codebook)
+    codebook = codebook[order]
+    boundaries = (codebook[:-1] + codebook[1:]) / 2
+
+    return codebook, boundaries
 
 
-def _quantize_with_codebook(values: np.ndarray,
-                             codebook: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Quantize values using a codebook. Returns (indices, reconstructed)."""
-    # For each value, find nearest codebook entry
-    dists = np.abs(values[:, None] - codebook[None, :])
-    indices = dists.argmin(axis=1).astype(np.uint8)
+def _quantize(values: np.ndarray, codebook: np.ndarray,
+              boundaries: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Quantize values using sorted codebook + boundaries.
+    O(n log k) via searchsorted instead of O(n * k).
+    """
+    indices = np.searchsorted(boundaries, values).astype(np.uint8)
     reconstructed = codebook[indices]
     return indices, reconstructed
 
 
+# --- Stage 2: QJL sign sketch ---
+
+def _qjl_sketch(residual: np.ndarray, S: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Compute QJL sign sketch of residual vectors.
+
+    residual: (n, d) -- quantization error vectors
+    S: (m, d) -- random sign matrix
+
+    Returns:
+      signs: (n, m) uint8 -- sign(S @ r_unit) for each vector
+      norms: (n,) float32 -- ||r|| for scaling during correction
+    """
+    norms = np.linalg.norm(residual, axis=1)
+    safe_norms = np.maximum(norms, 1e-8)
+
+    # Sketch the unit residual so signs encode direction only
+    r_unit = residual / safe_norms[:, None]
+    projected = r_unit @ S.T                      # (n, m)
+    signs = (projected >= 0).astype(np.uint8)
+
+    return signs, norms.astype(np.float32)
+
+
+def _qjl_correct(queries: np.ndarray, signs: np.ndarray,
+                  residual_norms: np.ndarray, S: np.ndarray) -> np.ndarray:
+    """
+    Compute QJL inner product correction.
+
+    For jointly Gaussian X, Y with cov(X,Y) = sigma_xy:
+      E[sign(X) * Y] = sqrt(2/pi) * sigma_xy / sigma_X
+
+    Applied to X = (S @ r_unit)_j, Y = (S @ q)_j:
+      sigma_xy = <r_unit, q>,  sigma_X = 1  (since ||r_unit|| = 1)
+      E[z_j * (Sq)_j] = sqrt(2/pi) * <r_unit, q>
+
+    So: <r, q> = ||r|| * sqrt(pi/2) / m * sum_j z_j * (Sq)_j
+    """
+    m = S.shape[0]
+    q_proj = queries @ S.T                        # (n_q, m)
+    z = signs.astype(np.float32) * 2 - 1          # (n_k, m): +1/-1
+    raw = q_proj @ z.T                            # (n_q, n_k)
+    return raw * residual_norms[None, :] * (np.sqrt(np.pi / 2.0) / m)
+
+
+# --- Main class ---
+
 @dataclass
 class CompressedKV:
-    """Compressed KV cache block ready for RDMA transfer."""
-    # Stage 1: quantized indices (n_vectors x d), packed to bits
-    indices: np.ndarray
-    # Stage 1: norms for rescaling
-    norms: np.ndarray
-    # Stage 2: QJL sign bits (n_vectors x m), packed
-    qjl_signs: np.ndarray
-    # Stage 2: residual norms for correction scaling
-    residual_norms: np.ndarray
-    # Metadata
+    """Compressed KV cache block."""
+    indices: np.ndarray       # (n, d_padded) uint8 codebook indices
+    norms: np.ndarray         # (n,) float32 original vector norms
+    qjl_signs: np.ndarray     # (n, m) uint8 sign bits
+    residual_norms: np.ndarray  # (n,) float32 residual norms
     n_vectors: int
     dim: int
     bits: int
@@ -104,13 +181,11 @@ class CompressedKV:
 
 class ScuffedQuant:
     """
-    Two-stage KV cache quantizer.
+    KV cache quantizer: PolarQuant rotation + Lloyd-Max codebook + QJL correction.
 
-    Usage:
         sq = ScuffedQuant(dim=128, bits=3)
-        compressed = sq.compress(keys)           # n x d float32 -> CompressedKV
-        scores = sq.attention_scores(queries, compressed)  # exact-ish inner products
-        reconstructed = sq.decompress(compressed) # lossy per-vector reconstruction
+        compressed = sq.compress(keys)
+        scores = sq.attention_scores(queries, compressed)
     """
 
     def __init__(self, dim: int, bits: int = 3, qjl_dim: int = 64,
@@ -119,122 +194,86 @@ class ScuffedQuant:
         self.bits = bits
         self.qjl_dim = qjl_dim
 
-        # Stage 1: random orthogonal rotation (fixed, reused for all vectors)
-        self.rotation = _random_orthogonal(dim, seed=seed)
+        # Pad dim to power of 2 for Walsh-Hadamard
+        self._d_pad = 1
+        while self._d_pad < dim:
+            self._d_pad *= 2
 
-        # Stage 1: Lloyd-Max codebook for the post-rotation distribution
-        self.codebook = _build_lloyd_max_codebook(bits, dim, seed=seed + 1)
+        # Stage 1: randomized Hadamard = diag(signs) @ WHT
+        self._signs = _random_signs(self._d_pad, seed)
+        self.codebook, self.boundaries = _build_codebook(bits, self._d_pad, seed=seed + 1)
 
-        # Stage 2: random sign matrix for QJL (Rademacher entries)
+        # Stage 2: random sign matrix for QJL
         rng = np.random.RandomState(seed + 2)
-        self.qjl_matrix = (rng.randint(0, 2, size=(qjl_dim, dim)) * 2 - 1).astype(np.float32)
+        self.S = (rng.randint(0, 2, size=(qjl_dim, dim)) * 2 - 1).astype(np.float32)
+
+    def _rotate(self, x: np.ndarray) -> np.ndarray:
+        """Randomized Walsh-Hadamard: multiply by signs, then WHT."""
+        x = x * self._signs[:x.shape[-1]]
+        return _walsh_hadamard(x)
+
+    def _unrotate(self, x: np.ndarray) -> np.ndarray:
+        """Inverse: WHT is self-inverse, then multiply by signs."""
+        x = _walsh_hadamard(x)
+        return x * self._signs[:x.shape[-1]]
 
     def compress(self, vectors: np.ndarray) -> CompressedKV:
-        """
-        Compress a batch of vectors (e.g. KV cache keys for one layer).
-
-        Args:
-            vectors: (n, d) float32 array
-
-        Returns:
-            CompressedKV with quantized indices + QJL correction bits
-        """
+        """Compress (n, dim) float32 vectors."""
         n, d = vectors.shape
-        assert d == self.dim
 
-        # Save norms for rescaling (quantizer works on unit vectors)
-        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        # Normalize to unit vectors (store norms for rescaling)
+        norms = np.linalg.norm(vectors, axis=1)
         safe_norms = np.maximum(norms, 1e-8)
-        unit_vectors = vectors / safe_norms
+        unit = vectors / safe_norms[:, None]
 
-        # Stage 1: rotate
-        rotated = unit_vectors @ self.rotation.T  # (n, d)
+        # Pad and rotate
+        padded, _ = _pad_to_power_of_2(unit)
+        rotated = self._rotate(padded.copy())
 
-        # Stage 1: quantize each coordinate independently
+        # Quantize each coordinate
         flat = rotated.reshape(-1)
-        indices, reconstructed_flat = _quantize_with_codebook(flat, self.codebook)
-        indices = indices.reshape(n, d)
-        reconstructed_rotated = reconstructed_flat.reshape(n, d)
+        indices, recon_flat = _quantize(flat, self.codebook, self.boundaries)
+        indices = indices.reshape(n, self._d_pad)
+        recon_rotated = recon_flat.reshape(n, self._d_pad)
 
-        # Undo rotation for MSE reconstruction
-        reconstructed_unit = reconstructed_rotated @ self.rotation  # (n, d)
-        reconstructed = reconstructed_unit * safe_norms
+        # Unrotate and rescale to get MSE reconstruction
+        recon_unit = self._unrotate(recon_rotated.copy())[:, :d]
+        recon = recon_unit * safe_norms[:, None]
 
-        # Stage 2: QJL sign sketch of the residual
-        residual = vectors - reconstructed
-        residual_norms = np.linalg.norm(residual, axis=1)
-
-        # Project residual and take sign (don't normalize -- the norm is stored separately)
-        projected = residual @ self.qjl_matrix.T  # (n, qjl_dim)
-        qjl_signs = (projected >= 0).astype(np.uint8)
+        # QJL sketch of the residual
+        residual = vectors - recon
+        qjl_signs, residual_norms = _qjl_sketch(residual, self.S)
 
         return CompressedKV(
-            indices=indices,
-            norms=norms.squeeze(1).astype(np.float32),
-            qjl_signs=qjl_signs,
-            residual_norms=residual_norms.astype(np.float32),
-            n_vectors=n,
-            dim=d,
-            bits=self.bits,
-            qjl_dim=self.qjl_dim,
+            indices=indices, norms=norms.astype(np.float32),
+            qjl_signs=qjl_signs, residual_norms=residual_norms,
+            n_vectors=n, dim=d, bits=self.bits, qjl_dim=self.qjl_dim,
         )
 
-    def decompress(self, compressed: CompressedKV) -> np.ndarray:
+    def decompress(self, c: CompressedKV) -> np.ndarray:
+        """Lossy reconstruction. Use attention_scores() for accurate inner products."""
+        recon_rotated = self.codebook[c.indices]
+        recon_unit = self._unrotate(recon_rotated.copy())[:, :c.dim]
+        return recon_unit * c.norms[:, None]
+
+    def attention_scores(self, queries: np.ndarray, c: CompressedKV) -> np.ndarray:
         """
-        Reconstruct vectors from compressed representation.
-        NOTE: This is lossy. Use attention_scores() for accurate inner products.
+        Compute query @ key^T with QJL bias correction.
+
+        More accurate than queries @ decompress().T because the QJL
+        correction removes systematic quantization bias from inner products.
         """
-        # Look up codebook values
-        reconstructed_rotated = self.codebook[compressed.indices]  # (n, d)
-        # Undo rotation
-        reconstructed_unit = reconstructed_rotated @ self.rotation
-        # Rescale
-        return reconstructed_unit * compressed.norms[:, None]
-
-    def attention_scores(self, queries: np.ndarray,
-                         compressed: CompressedKV) -> np.ndarray:
-        """
-        Compute attention scores (query @ key^T) with QJL bias correction.
-
-        This is more accurate than decompress() @ queries.T because the
-        QJL correction removes the systematic bias from quantization.
-
-        Args:
-            queries: (n_q, d) float32
-            compressed: CompressedKV from compress()
-
-        Returns:
-            (n_q, n_k) float32 attention scores
-        """
-        # Stage 1: MSE reconstruction scores
-        keys_mse = self.decompress(compressed)
-        scores_mse = queries @ keys_mse.T  # (n_q, n_k)
-
-        # Stage 2: QJL bias correction
-        # z = sign(S @ r) where S is a random sign matrix (m x d)
-        # <q, r> ~ (1/m) * <S@q, z> * ||S@r||_1 ... but simpler:
-        # sign sketch gives: E[z_j * (S@q)_j] = (2/pi) * <q, r> / ||r||
-        # We stored z = sign(S@r), so:
-        #   <q, r> ~ (||r|| * pi / (2*m)) * sum_j (S@q)_j * z_j
-        q_projected = queries @ self.qjl_matrix.T  # (n_q, qjl_dim)
-        signs = compressed.qjl_signs.astype(np.float32) * 2 - 1  # (n_k, qjl_dim)
-
-        correction = q_projected @ signs.T  # (n_q, n_k)
-        m = self.qjl_dim
-        # Scale: each sign bit recovers ~(2/pi)/sqrt(d) of the inner product
-        correction *= (np.pi / (2.0 * m))
-
-        return scores_mse + correction
+        scores = queries @ self.decompress(c).T
+        scores += _qjl_correct(queries, c.qjl_signs, c.residual_norms, self.S)
+        return scores
 
     def compression_ratio(self, n_vectors: int) -> float:
-        """Compute compression ratio vs FP32."""
-        original = n_vectors * self.dim * 4  # float32
-        # indices: bits per coordinate, norms: 4 bytes each
-        # qjl_signs: 1 bit per dim, residual_norms: 4 bytes each
+        """Compression ratio vs FP32."""
+        original = n_vectors * self.dim * 4
         compressed = (
-            n_vectors * self.dim * self.bits / 8 +  # indices
-            n_vectors * 4 +                          # norms
-            n_vectors * self.qjl_dim / 8 +           # qjl signs
-            n_vectors * 4                            # residual norms
+            n_vectors * self._d_pad * self.bits / 8 +  # indices
+            n_vectors * 4 +                              # norms
+            n_vectors * self.qjl_dim / 8 +               # qjl signs
+            n_vectors * 4                                # residual norms
         )
         return original / compressed
