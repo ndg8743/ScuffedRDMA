@@ -46,6 +46,17 @@ TOKEN_SIZE = NUM_HEADS * HEAD_DIM * 2  # = 8KB per token
 OOB_PORT = 19877
 
 
+def _recv_exact(sock, n: int) -> bytes:
+    """Receive exactly n bytes from a socket."""
+    buf = b''
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("Socket closed during recv")
+        buf += chunk
+    return buf
+
+
 def exchange_qp_info_server(port: int, local_info: dict) -> dict:
     """TCP server for QP info exchange."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -56,13 +67,12 @@ def exchange_qp_info_server(port: int, local_info: dict) -> dict:
     conn, addr = sock.accept()
     print(f"  Client connected from {addr}")
 
-    # Serialize gid
     info_to_send = _serialize_info(local_info)
     data = json.dumps(info_to_send).encode()
     conn.sendall(len(data).to_bytes(4, 'big') + data)
 
-    size = int.from_bytes(conn.recv(4), 'big')
-    remote_data = _deserialize_info(json.loads(conn.recv(size).decode()))
+    size = int.from_bytes(_recv_exact(conn, 4), 'big')
+    remote_data = _deserialize_info(json.loads(_recv_exact(conn, size).decode()))
 
     conn.close()
     sock.close()
@@ -76,11 +86,9 @@ def exchange_qp_info_client(host: str, port: int, local_info: dict) -> dict:
     print(f"  Connecting to {host}:{port}...")
     sock.connect((host, port))
 
-    # Receive server info
-    size = int.from_bytes(sock.recv(4), 'big')
-    remote_data = _deserialize_info(json.loads(sock.recv(size).decode()))
+    size = int.from_bytes(_recv_exact(sock, 4), 'big')
+    remote_data = _deserialize_info(json.loads(_recv_exact(sock, size).decode()))
 
-    # Send client info
     info_to_send = _serialize_info(local_info)
     data = json.dumps(info_to_send).encode()
     sock.sendall(len(data).to_bytes(4, 'big') + data)
@@ -124,13 +132,13 @@ def run_kv_transfer_single_qp(pool: DualQPPool, recv_buf: RegisteredBuffer,
             # full-layer chunks (simulating prefill)
             if iteration % 2 == 0:
                 # Prefill: full layer transfer (8MB)
-                size = min(KV_LAYER_SIZE, send_buf.array.size)
+                size = min(KV_LAYER_SIZE, send_buf.size)
                 lat = pool.post_write_hot(
                     send_buf, recv_buf.addr, recv_buf.rkey, size
                 )
             else:
                 # Decode: single token (8KB)
-                size = min(TOKEN_SIZE, send_buf.array.size)
+                size = min(TOKEN_SIZE, send_buf.size)
                 lat = pool.post_write_hot(
                     send_buf, recv_buf.addr, recv_buf.rkey, size
                 )
@@ -179,10 +187,10 @@ def run_kv_transfer_dual_qp(pool: DualQPPool, recv_buf: RegisteredBuffer,
     for iteration in range(iterations):
         for layer in range(NUM_LAYERS):
             if iteration % 2 == 0:
-                size = min(KV_LAYER_SIZE, send_buf.array.size)
+                size = min(KV_LAYER_SIZE, send_buf.size)
                 transfer_type = 'prefill'
             else:
-                size = min(TOKEN_SIZE, send_buf.array.size)
+                size = min(TOKEN_SIZE, send_buf.size)
                 transfer_type = 'decode'
 
             tensor_id = f"kv_L{layer}_{transfer_type}"
@@ -295,8 +303,7 @@ def main():
     recv_buf = pool.register_buffer('recv', max_size)
 
     # Fill send buffer with pattern
-    np.copyto(send_buf.array[:min(4096, max_size)],
-              np.frombuffer(b'\xAA' * min(4096, max_size), dtype=np.uint8))
+    send_buf.write(b'\xAA' * min(4096, max_size))
 
     results = {}
 
@@ -306,7 +313,8 @@ def main():
         results['scenario_A'] = run_kv_transfer_single_qp(
             pool, recv_buf, send_buf, args.iterations
         )
-        print(f"      Decode p99: {results['scenario_A']['decode_stats'].get('p99', 'N/A'):.1f} us")
+        p99 = results['scenario_A']['decode_stats'].get('p99')
+        print(f"      Decode p99: {p99:.1f} us" if p99 else "      Decode p99: N/A")
 
         # Reset stats
         pool.hot_stats = type(pool.hot_stats)()
@@ -316,7 +324,8 @@ def main():
         results['scenario_B'] = run_kv_transfer_dual_qp(
             pool, recv_buf, send_buf, args.iterations
         )
-        print(f"      Hot-decode p99: {results['scenario_B']['hot_decode_stats'].get('p99', 'N/A'):.1f} us")
+        p99 = results['scenario_B']['hot_decode_stats'].get('p99')
+        print(f"      Hot-decode p99: {p99:.1f} us" if p99 else "      Hot-decode p99: N/A")
 
         pool.hot_stats = type(pool.hot_stats)()
         pool.cold_stats = type(pool.cold_stats)()
@@ -325,7 +334,8 @@ def main():
         results['scenario_C'] = run_kv_transfer_dual_qp(
             pool, recv_buf, send_buf, args.iterations, use_pmp=True
         )
-        print(f"      Hot-decode p99: {results['scenario_C']['hot_decode_stats'].get('p99', 'N/A'):.1f} us")
+        p99 = results['scenario_C']['hot_decode_stats'].get('p99')
+        print(f"      Hot-decode p99: {p99:.1f} us" if p99 else "      Hot-decode p99: N/A")
 
         # Save results
         output_file = os.path.join(args.output, 'dual_qp_remote_benchmark.json')
