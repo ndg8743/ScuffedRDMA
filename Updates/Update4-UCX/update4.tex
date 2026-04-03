@@ -734,7 +734,18 @@ Dual QP + PMP controller & 14.7 & 17.7 & 23.8 \\
 \end{tabular}
 \end{table}
 
-With synchronous single-threaded SoftRoCE, each operation completes before the next starts, so head-of-line blocking does not appear. The dual QP overhead is 1--4$\mu$s from additional QP management. Under concurrent load or hardware-offloaded completion (ConnectX NICs), the isolation becomes important: the cold QP's 1MB writes (2767$\mu$s p50) cannot stall the hot QP's 256B writes (14$\mu$s p50) because they use separate completion queues.
+The dual QP scenarios are 1--4$\mu$s slower than the single QP baseline. This is expected for two reasons:
+
+\paragraph{Why dual QP is slower here.} SoftRoCE is synchronous and single-threaded: each transfer posts, the kernel processes it, completion arrives, then the next transfer starts. Nothing is ever queued behind anything else, so there is no head-of-line blocking to eliminate. The overhead comes from managing two pools instead of one: round-robin QP selection, building separate GlobalRoute and AHAttr structures per QP, running the WFA classifier (access count lookup, phase detection, threshold checks), and running the PMP controller (switching function, history tracking). These are the costs of the classification and routing logic.
+
+\paragraph{Why this changes with real hardware.} SoftRoCE implements RDMA in the kernel. The CPU handles every QP state transition, packet construction, and completion notification in software. On a hardware NIC (e.g. ConnectX-6), the NIC itself processes the send queue and generates completions independently of the CPU. This changes two things:
+
+\begin{itemize}
+\item \textbf{Base latency drops.} Hardware RDMA on ConnectX typically achieves 1--2$\mu$s for small messages vs our 13--14$\mu$s on SoftRoCE. The classification overhead (1--4$\mu$s) becomes a larger fraction of the transfer time but is still small relative to the cold path.
+\item \textbf{QP isolation becomes real.} With hardware offload, the NIC processes each QP's send queue independently. A 1MB write occupying the cold QP does not block the hot QP because the NIC has separate hardware contexts for each. With SoftRoCE, the kernel processes everything sequentially regardless of which QP it belongs to. Hardware RDMA is where the dual QP architecture pays off: concurrent producers can post to hot and cold QPs simultaneously, and the NIC drains them in parallel.
+\end{itemize}
+
+\paragraph{When head-of-line blocking appears.} The benefit requires at least one of: (a) multiple threads posting transfers concurrently, so one thread's 1MB cold write is in-flight while another thread's 256B hot write needs to go out; or (b) async posting with queue depth $> 0$, where multiple work requests are queued before any complete. In both cases, sharing a single QP means the 256B message waits behind the 1MB message in the send queue. Separate QPs eliminate this wait. The concurrent workload benchmark and cross-node testing on real hardware are the next steps to measure this.
 
 \subsection{Latency Across Message Sizes}
 
