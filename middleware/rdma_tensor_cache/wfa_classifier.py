@@ -12,7 +12,7 @@ Addresses UCX transport selection opacity issues:
 Also addresses protocol transition cliffs:
   - #10552: 50x latency cliff at eager->RNDV boundary
   - #10486: >32KB messages switch RDMA send->read
-  - #10532: Latency drop at eager->zcopy transition (~3000B)
+  - #10532: Latency drop at eager->zcopy transition (~30,000B)
   By routing explicitly based on size, we avoid UCX's heuristic cliffs.
 """
 

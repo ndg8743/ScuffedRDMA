@@ -14,8 +14,8 @@ where:
   C = link capacity (constant for a given NIC)
   mu_H, mu_C = service rates for hot/cold pools
 
-When S > 0: allocate to hot (u=1)
-When S < 0: allocate to cold (u=0)
+When S > 0: hot is congested, allocate to cold (u=0)
+When S < 0: cold is congested, allocate to hot (u=1)
 """
 
 import time
