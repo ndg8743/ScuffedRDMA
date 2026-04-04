@@ -20,7 +20,7 @@ from middleware.rdma_tensor_cache.scuffed_quant import ScuffedQuant
 
 
 def main():
-    model_name = "mlx-community/Llama-3.2-3B-Instruct-4bit"
+    model_name = "mlx-community/granite-3.3-2b-instruct-4bit"
     bits = 3
     qjl_dim = 64
     output_dir = str(Path(__file__).parent / "results")
