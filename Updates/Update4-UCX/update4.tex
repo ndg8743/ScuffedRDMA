@@ -504,150 +504,79 @@ E: MoE / multi-model & Rare expert tokens & Popular expert tokens & \texttt{WRIT
 \paragraph{What to optimize first.}
 Config C (disaggregated prefill/decode, single user) is the simplest configuration that exercises the full dual QP architecture. It has a clear hot/cold separation (metadata vs.\ KV blocks), a measurable TTFT metric, and maps directly onto the Cerberus/Chimera testbed. Once Config C works, extending to Config D (multiple users) adds the multiplexing problem that makes the PMP controller's bang-bang allocation necessary. Config E (MoE) is the most complex but produces the richest WFA training data due to the bimodal expert access pattern.
 
-\section{UCX Issue Landscape and libscuffedrdma's Position}
+\section{UCX Issue Landscape and Upstream Contributions}
 
-UCX is the dominant open-source RDMA transport framework, used by NCCL, UCC, MPI implementations, and distributed ML frameworks including PyTorch and Dask. The UCX issue tracker (\url{https://github.com/openucx/ucx/issues}) shows recurring problems caused by architectural decisions that libscuffedrdma avoids. This section maps those issues to the thesis contributions.
+UCX is the dominant open-source RDMA transport framework, used by NCCL, MPI, PyTorch, and Dask. While building libscuffedrdma, we identified recurring architectural issues in UCX's issue tracker and contributed six fixes upstream. This section summarizes the problems and our responses -- both the libscuffedrdma bypass and the direct UCX patches.
 
-\subsection{Protocol Transition Cliffs: The Core Problem}
+\subsection{Problems Identified}
 
-UCX routes messages based on size alone. Messages below \texttt{UCX\_RNDV\_THRESH} (default around 8\,KB) take the eager path (inline send, low latency); messages above take the rendezvous path (zero-copy RDMA read, high throughput). This creates latency cliffs at the threshold boundary:
+UCX makes three design choices that create friction for LLM inference workloads:
 
-\begin{itemize}
-    \item \textbf{Issue \#10552}: On Grace Hopper systems, 65\,536-byte messages exhibit \textbf{50$\times$ worse latency} than 131\,072-byte messages in OSU alltoall benchmarks. The cliff occurs precisely at the eager-to-rendezvous transition, where the sender must negotiate a rendezvous handshake, register memory, and wait for the receiver to initiate an RDMA read--all adding round-trips that the eager path avoids.
-    \item \textbf{Issue \#10486}: Java/JUCX applications observe severe performance degradation for messages above 32\,KB when UCX switches from RDMA SEND (eager) to RDMA READ (rendezvous). The user reports that ``the performance drops off a cliff.''
-    \item \textbf{Issue \#10532}: Active Message and tag latency degrade sharply after $\sim$30\,000 bytes, at the boundary between eager and zcopy or rendezvous thresholds.
-    \item \textbf{Issue \#11091}: Upgrading from UCX 1.18.1 to 1.19.1 causes significant regressions due to changes in rendezvous performance difference calculations (PR \#10401), showing the RNDV heuristic is fragile across versions.
-    \item \textbf{Issue \#4430}: \texttt{ucp\_tag\_send\_nbr()} hardcodes a rendezvous threshold instead of using the dynamically calculated one, so even UCX's own internal APIs do not consistently apply the threshold logic.
-\end{itemize}
+\begin{enumerate}
+    \item \textbf{Size-only routing.} Messages below \texttt{UCX\_RNDV\_THRESH} take the eager path; messages above take rendezvous. This creates latency cliffs at the threshold and cannot distinguish a latency-critical decode transfer from a background prefetch of the same size (Issues \#10552, \#10486, \#10532, \#4430, \#11091).
 
-\paragraph{Why libscuffedrdma avoids this.}
-libscuffedrdma does not use message size to select a protocol. libscuffedrdma's WFA classifier uses tensor metadata--access frequency, inference phase, layer index, and inter-arrival time variance--to assign a priority class, and the PMP controller allocates QPs accordingly. A 64\,KB KV cache block for a decode step and a 64\,KB prefetch block for speculative prefill are the same size but need very different latencies; UCX treats them identically, libscuffedrdma does not.
+    \item \textbf{Shared QP pools.} All traffic shares the same QPs, so a small message can queue behind a large transfer. Processes share UDP source ports (breaking bond hashing, \#11004), contend on spinlocks (\#11034), and cannot defer QP allocation (\#1319).
 
-\subsection{Head-of-Line Blocking in Shared QP Pools}
+    \item \textbf{Opaque transport selection.} Users cannot inspect, override, or query which transport UCX chose (\#10652, \#6511, \#9364, \#10608). Multi-rail often degrades performance instead of improving it (\#9520, \#10669, \#10420). The rendezvous path has open bugs since 2017 (\#6721, \#10568, \#1298--\#1300).
+\end{enumerate}
 
-UCX uses a shared pool of RC queue pairs with static partitioning. A small eager message can queue behind a large rendezvous transfer on the same QP because QP selection ignores message priority. Several issues trace directly to this design:
+Additional friction for ML workloads includes silent memory registration failures (\#7989), 25--75\% TCP slowdown when CUDA is compiled in (\#7880), and asymmetric traffic class application (\#10325).
 
-\begin{itemize}
-    \item \textbf{Issue \#11004}: All RoCE QPs across different processes use the \textbf{same UDP source port}, causing bond/LAG layer3+4 hashing to route all RDMA traffic through a single physical link. This happens because the shared QP pool does not differentiate flows. libscuffedrdma's per-classification QP pools (hot pool: 2--4 QPs, cold pool: 4--8 QPs) naturally produce different 5-tuple flow hashes, distributing traffic across bond members with no switch or bond configuration changes.
-    \item \textbf{Issue \#11034}: Eight UCP workers sharing a \texttt{ucp\_context} contend on a \texttt{pthread\_spin\_lock} even when each operates in \texttt{THREAD\_MODE\_SINGLE}, preventing linear scaling. All workers share the same QP and CQ resources, causing contention. libscuffedrdma's dedicated QPs per traffic class eliminate this shared-resource bottleneck.
-    \item \textbf{Issue \#1319}: A long-standing request to defer QP allocation until the first message, rather than at \texttt{ucp\_ep\_create} time. libscuffedrdma already implements this pattern: QPs are created per classification when the first tensor of that class is submitted, not at connection establishment.
-\end{itemize}
+\subsection{libscuffedrdma's Response}
 
-\paragraph{The fundamental issue.}
-UCX's QP pool is a shared resource managed by size-based heuristics. libscuffedrdma treats QPs as \emph{class-dedicated resources} managed by a control-theoretic policy (PMP). A hot-classified tensor always posts to the hot QP pool and never queues behind cold traffic. The \texttt{ibv\_post\_send} call targets a QP chosen by the WFA+PMP pipeline, not UCX's internal dispatcher.
+libscuffedrdma bypasses UCX's data path entirely. Instead of size-based routing through shared QPs, the WFA classifier assigns each transfer a priority class based on tensor metadata (access frequency, inference phase, layer index), and the PMP controller routes it to a dedicated hot or cold QP. All data-path calls go through \texttt{ibv\_post\_send} directly with pre-registered memory regions. The mapping from tensor to QP is deterministic -- no opaque scoring, no rendezvous handshake, no shared resources.
 
-\subsection{Transport Selection Opacity}
-
-UCX's transport selection algorithm is a black box that users cannot inspect or override:
-
-\begin{itemize}
-    \item \textbf{Issue \#10652}: UCX selects \texttt{mlx5}/IB transport for intra-node communication instead of the expected XPMEM or CMA single-copy mechanisms, resulting in worse latency. The user has no mechanism to force the correct transport.
-    \item \textbf{Issue \#6511}: RC transport is prioritized over \texttt{dc\_x} (dynamically connected) even when DC is available and better suited. Users cannot control preference order.
-    \item \textbf{Issue \#9364}: ``What is the logic of choosing the correct transport at runtime?''--users find UCX's transport selection algorithm opaque and undocumented.
-    \item \textbf{Issue \#9560}: No fine-grained per-path transport pinning in multi-node environments. UCX selects different configurations depending on communication patterns, and users cannot pin specific transports per data path.
-    \item \textbf{Issue \#10608}: Users cannot query which transport was actually used for a given transfer.
-    \item \textbf{Issue \#11282}: On 8$\times$H200 with NVLink, GPU pair latency varies dramatically because UCX selects \texttt{mlx5} transport for some intra-node pairs instead of NVLink, causing inconsistent alltoallv performance.
-\end{itemize}
-
-\paragraph{libscuffedrdma's transparency.}
-libscuffedrdma makes one transport decision: all inter-node tensor data goes through \texttt{ibv\_post\_send} on a QP selected by the WFA classifier. The mapping from tensor metadata to QP is deterministic given the WFA state and PMP signal $u^*(t)$ -- no opaque scoring or multi-transport negotiation. UCX's connection management (\texttt{rdma\_create\_id}, \texttt{rdma\_resolve\_addr}) handles only the initial handshake; libscuffedrdma controls the data path.
-
-\subsection{Multi-Rail Failures}
-
-UCX's multi-rail support--intended to aggregate bandwidth across multiple NICs--often fails to improve performance and can degrade it:
-
-\begin{itemize}
-    \item \textbf{Issue \#9520}: Two ConnectX-6 200\,Gbps NICs with multi-rail enabled show \textbf{no bandwidth improvement} over a single NIC.
-    \item \textbf{Issue \#10249}: Configuring two NICs in GDR mode results in dramatically worse performance than a single NIC, suggesting path interference.
-    \item \textbf{Issue \#10669}: On quad-socket systems with per-socket NICs, UCX uses remote-socket NICs, adding cross-NUMA latency that degrades rather than improves performance.
-    \item \textbf{Issue \#10420}: Multi-rail with two bond devices causes \texttt{ucx\_perftest} to hang entirely.
-    \item \textbf{Issue \#11284}: The hardcoded \texttt{UCP\_MAX\_LANES=64} limit prevents configurations with 8 GPUs and 9 NICs from utilizing all available bandwidth lanes.
-\end{itemize}
-
-\paragraph{Relevance to the thesis.}
-On the Cerberus/Chimera testbed (single 10\,GbE NIC per machine), multi-rail is not directly applicable. But the underlying issue -- NIC and NUMA awareness in QP placement -- is relevant: libscuffedrdma's direct \texttt{ibv\_post\_send} with NUMA-aware QP placement avoids the lane-selection logic that causes these failures. With a second NIC, hot QPs would be pinned to the NUMA-local NIC and cold QPs to the other, bypassing UCX's lane scoring.
-
-\subsection{Rendezvous Protocol Bugs and Optimizations}
-
-The rendezvous protocol--which libscuffedrdma bypasses for tensor data--has several open issues that reinforce this decision:
-
-\begin{itemize}
-    \item \textbf{Issue \#6721}: The first Active Message between an endpoint pair is \textbf{always received as eager} regardless of \texttt{UCX\_RNDV\_THRESH}, because endpoint wireup has not completed. Subsequent messages use rendezvous correctly. This means the first message always takes the eager path, skewing latency measurements and warmup.
-    \item \textbf{Issue \#10568}: Setting \texttt{UCX\_MAX\_RNDV\_RAILS=1} causes segfaults and hangs on multi-NIC GPU systems, indicating fragility in RNDV rail selection.
-    \item \textbf{Issue \#3542}: Rendezvous causes $\sim$3$\times$ the wakeup overhead compared to eager (3 wakeup notifications vs.\ 1), impacting event-driven progress engines used by ucxpy/Dask.
-    \item \textbf{Issues \#1298, \#1299, \#1300}: Missing optimizations for \texttt{get\_bcopy}, \texttt{put\_bcopy}, and receiver-side buffer registration in the rendezvous path. These have been open since 2017.
-\end{itemize}
-
-\paragraph{Why bypassing RNDV is justified.}
-libscuffedrdma bypasses the rendezvous data path. It calls \texttt{ibv\_post\_send} directly with pre-registered memory regions. This eliminates the rendezvous handshake, avoids rail selection bugs, and removes the wakeup overhead. The trade-off is manual memory registration, but LLM tensor buffers are long-lived so registration cost is paid once at startup.
-
-\subsection{Memory Registration Overhead}
-
-\begin{itemize}
-    \item \textbf{Issue \#10719}: \texttt{ucp\_mem\_map} registers memory at only 6--13\,GB/s, meaning an 80\,GB GPU memory region takes $\sim$13 seconds to register. For LLM serving with large KV caches, this is a significant startup cost.
-    \item \textbf{Issue \#7989}: \texttt{ucp\_mem\_map} returns success even if the NIC memory domain fails to register CUDA memory, silently falling back to software emulation paths.
-    \item \textbf{Issue \#6264}: \texttt{ibv\_reg\_mr} fails with ``Cannot allocate memory'' during long-running simulations due to resource exhaustion.
-\end{itemize}
-
-\paragraph{libscuffedrdma's approach.}
-The middleware pre-registers KV cache buffers at allocation time using \texttt{ibv\_reg\_mr} directly, with explicit error checking (no silent fallback). Because vLLM's PagedAttention~\cite{vllm_paged} allocates KV cache blocks from a fixed pool, the registration set is fixed at startup. Registration cost is paid once, not per-transfer.
-
-\subsection{GPU and ML Workload Friction}
-
-Several issues document friction between UCX and ML workloads specifically:
-
-\begin{itemize}
-    \item \textbf{Issue \#10936}: 8$\times$H20 GPUs with 400\,GB/s theoretical NVLink bandwidth achieve only $\sim$80\,GB/s (one-fourth of peak) in UCX performance tests.
-    \item \textbf{Issue \#9908}: Multi-node distributed training fails with any \texttt{UCX\_TLS} other than \texttt{rc}, and changing \texttt{UCX\_NET\_DEVICES} from ``all'' causes failures.
-    \item \textbf{Issue \#11006}: PyTorch's distributed training creates multiple threads, but UCX's TCP transport is not thread-safe, raising correctness concerns.
-    \item \textbf{Issue \#8572}: CUDA-enabled UCX adds significant startup overhead to MPI initialization, even when CUDA is not used for the current run.
-    \item \textbf{Issue \#7880}: TCP transport is 25--75\% slower when CUDA support is compiled in, due to memory type detection overhead on every buffer, even for host-memory transfers.
-\end{itemize}
-
-UCX was designed as a general-purpose communication framework and retrofitted for GPU/ML workloads, not built around them. libscuffedrdma is purpose-built for tensor transport: the WFA encodes knowledge of KV cache blocks, attention layers, and inference phases directly.
-
-\subsection{Congestion Control and QoS Gaps}
-
-\begin{itemize}
-    \item \textbf{Issue \#11252}: Enhanced Connection Establishment (ECE) defaults do not activate ZTR-RTT hardware congestion control on mlx5 even when the hardware supports it.
-    \item \textbf{Issue \#10325}: DSCP/traffic class settings via \texttt{UCX\_IB\_TRAFFIC\_CLASS} only apply to the local direction; the remote side sends with TC=0, breaking QoS-based routing in the fabric.
-\end{itemize}
-
-\paragraph{Relevance.}
-Because libscuffedrdma calls \texttt{ibv\_post\_send} directly, it can set ECE bits and traffic class per QP at creation time (\texttt{ibv\_modify\_qp} with \texttt{IBV\_QP\_QKEY} and traffic class attributes). Hot QPs can be assigned a higher traffic class than cold QPs, enabling hardware-level prioritization on DSCP-capable switches. UCX's asymmetric TC bug (Issue \#10325) does not apply because libscuffedrdma controls both endpoints.
-
-\subsection{Summary: Where libscuffedrdma Intersects UCX's Limitations}
-
-Table~\ref{tab:ucx_issue_map} maps the thesis contributions to the UCX issues they address.
+Table~\ref{tab:ucx_issue_map} maps each libscuffedrdma component to the UCX issues it addresses.
 
 \begin{table}[ht]
-\centering
-\small
-\begin{tabular}{@{}p{4.2cm}p{3.2cm}p{5.5cm}@{}}
+\centering\small
+\begin{tabular}{@{}p{4.2cm}p{3.0cm}p{5.5cm}@{}}
 \toprule
-\textbf{Thesis Component} & \textbf{UCX Issues} & \textbf{Mechanism} \\
+\textbf{Component} & \textbf{UCX Issues} & \textbf{What It Does} \\
 \midrule
-WFA classifier (tensor-aware routing) & \#10552, \#10486, \#10532, \#4430, \#11091 & Replaces size-only threshold with multi-dimensional tensor metadata classification \\
+WFA classifier & \#10552, \#10486, \#10532, \#4430, \#11091 & Replaces size-only threshold with tensor metadata classification \\
 \addlinespace
-Hot/cold QP separation & \#11004, \#11034, \#1319 & Dedicated QPs per traffic class eliminate head-of-line blocking and shared-resource contention \\
+Hot/cold QP pools & \#11004, \#11034, \#1319 & Dedicated QPs per traffic class eliminate head-of-line blocking \\
 \addlinespace
-Direct \texttt{ibv\_post\_send} bypass & \#6721, \#10568, \#3542, \#1298--\#1300 & Avoids rendezvous handshake, rail selection bugs, and wakeup overhead \\
+Direct \texttt{ibv\_post\_send} & \#6721, \#10568, \#3542, \#1298--\#1300 & Bypasses rendezvous handshake, rail selection, and wakeup overhead \\
 \addlinespace
-Pre-registration of KV cache buffers & \#10719, \#7989, \#6264 & Amortized \texttt{ibv\_reg\_mr} at allocation time with explicit error handling \\
+Pre-registered MRs & \#10719, \#7989, \#6264 & One-time \texttt{ibv\_reg\_mr} at startup with explicit error handling \\
 \addlinespace
-PMP bang-bang controller & \#9520, \#10669 & Control-theoretic QP allocation replaces static lane scoring \\
+PMP controller & \#9520, \#10669 & Control-theoretic QP allocation replaces static lane scoring \\
 \addlinespace
-Per-QP traffic class and ECE & \#11252, \#10325 & Symmetric TC and congestion control configuration via direct \texttt{ibv\_modify\_qp} \\
+Per-QP traffic class & \#11252, \#10325 & Symmetric TC via direct \texttt{ibv\_modify\_qp} on both endpoints \\
 \bottomrule
 \end{tabular}
-\caption{Mapping of libscuffedrdma components to UCX issues they address.}
+\caption{libscuffedrdma components mapped to the UCX issues they address.}
 \label{tab:ucx_issue_map}
 \end{table}
 
-\paragraph{Contribution framing.}
-The UCX issue tracker shows these problems are real: they cause performance regressions, hangs, and incorrect behavior in production. The thesis does not fix UCX. For distributed LLM inference on consumer hardware, bypassing UCX's data path and using tensor-aware, control-theoretic QP management solves problems that UCX's configuration knobs cannot.
+\subsection{Upstream UCX Contributions}
 
+Beyond the bypass, we submitted six pull requests to \texttt{openucx/ucx} that fix the issues directly (Table~\ref{tab:ucx_prs}).
 
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}llp{7.8cm}@{}}
+\toprule
+\textbf{PR} & \textbf{Fixes} & \textbf{Change} \\
+\midrule
+\href{https://github.com/openucx/ucx/pull/11304}{\#11304} & \#4430 & Use calculated RNDV threshold for \texttt{ucp\_tag\_send\_nbr()} instead of hardcoded 256KB \\
+\addlinespace
+\href{https://github.com/openucx/ucx/pull/11305}{\#11305} & \#1307 & Adaptive TX CQ moderation -- force signaled send when CQ credits run low, preventing TX stalls \\
+\addlinespace
+\href{https://github.com/openucx/ucx/pull/11306}{\#11306} & \#4275 & Allow eager inline sends for host memory when CUDA memory domains are loaded \\
+\addlinespace
+\href{https://github.com/openucx/ucx/pull/11307}{\#11307} & \#4794 & Add TCP as fallback wireup transport for RC/DC on SoftRoCE where UD is unavailable \\
+\addlinespace
+\href{https://github.com/openucx/ucx/pull/11308}{\#11308} & \#6254 & Add \texttt{ucp\_ep\_query()} bandwidth estimate for informed application placement decisions \\
+\addlinespace
+\href{https://github.com/openucx/ucx/pull/11309}{\#11309} & \#10325 & Propagate traffic class in IB address for symmetric QoS on both connection directions \\
+\bottomrule
+\end{tabular}
+\caption{Upstream UCX pull requests submitted to \texttt{openucx/ucx} on GitHub.}
+\label{tab:ucx_prs}
+\end{table}
 
 \section{KV Cache Compression Pipeline and TurboQuant}
 
