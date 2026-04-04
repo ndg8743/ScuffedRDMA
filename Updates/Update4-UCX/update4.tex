@@ -382,13 +382,13 @@ This is the primary target of the thesis. Prefill and decode run on \textbf{sepa
 
 % KV cache transfer (top arrow through network zone)
 \draw[bigarr] (pkv.east) -- ++(1, 0) -- ++(5, 0) -- (dkv.west);
-\node[font=\small\bfseries, text=red!70!black] at (6.5, 0.6) {KV cache transfer};
-\node[font=\scriptsize, text=red!60!black] at (6.5, 0.2) {Cold QP: \texttt{IBV\_WR\_RDMA\_WRITE}};
+\node[font=\small\bfseries, text=red!70!black] at (6.5, 0.8) {KV cache transfer};
+\node[font=\scriptsize, text=red!60!black] at (6.5, 0.4) {Cold QP: \texttt{IBV\_WR\_RDMA\_WRITE}};
 
-% Logits + metadata (bottom arrow, dashed)
-\draw[arr, dashed, color=blue!60!black] (pl.east) -- ++(1, 0) -- ++(5, 0) -- (da.west);
-\node[font=\scriptsize, text=blue!60!black] at (6.5, -0.8) {logits + metadata};
-\node[font=\scriptsize, text=blue!50!black] at (6.5, -1.2) {Hot QP: \texttt{WRITE\_WITH\_IMM}};
+% Logits + metadata (bottom arrow, dashed, shifted down to avoid overlap)
+\draw[arr, dashed, color=blue!60!black] (pl.east) -- ++(1, 0) -- ++(0, -0.8) -- ++(5, 0) -- ++(0, 0.8) -- (da.west);
+\node[font=\scriptsize, text=blue!60!black] at (6.5, -1.6) {logits + metadata};
+\node[font=\scriptsize, text=blue!50!black] at (6.5, -2.0) {Hot QP: \texttt{WRITE\_WITH\_IMM}};
 
 \end{tikzpicture}
 }
