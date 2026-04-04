@@ -40,7 +40,7 @@ In disaggregated serving (prefill on Cerberus, decode on Chimera), this entire c
 
 UCX, NIXL, and NCCL treat all traffic equally or route by message size alone. They cannot distinguish a latency-critical decode activation from a background KV prefetch of the same size.
 
-This update introduces \textbf{tensor-aware RDMA traffic management}. The WFA classifier labels each transfer by its role in the inference pipeline. The PMP bang-bang controller allocates bandwidth between priority classes. Traffic routes to separate RDMA queue pairs: a hot pool for latency-sensitive transfers, a cold pool for throughput. We validate with real RDMA writes on SoftRoCE.
+This update adds \textbf{tensor-aware RDMA traffic management}. The WFA classifier labels each transfer by its role in the inference pipeline, and the PMP bang-bang controller allocates bandwidth between priority classes. Traffic routes to separate RDMA queue pairs: a hot pool for latency-sensitive transfers, a cold pool for throughput. We validate with real RDMA writes on SoftRoCE.
 
 \section{Theoretical Foundation}
 
@@ -117,7 +117,7 @@ Timescale & Per-tensor ($\mu$s) & Per-scheduling-epoch (ms) \\
 
 \section{Implementation Plan}
 
-This section describes the architecture of libscuffedrdma, the thesis's RDMA middleware. The current prototype is written in Python using pyverbs (rdma-core bindings); a C++ port is a future production goal. Design decisions follow Austin et al.'s roofline framework and decode step time model~\cite{scaling_book}.
+libscuffedrdma is the thesis's RDMA middleware. The current prototype is Python on top of pyverbs (rdma-core bindings); a C++ port is a future production goal. The design follows Austin et al.'s roofline framework and decode step time model~\cite{scaling_book}.
 
 \subsection{What We Are Building (and Not Building)}
 
@@ -318,7 +318,7 @@ This is \textbf{tensor parallelism} (TP). Each layer's weight matrices are shard
 \label{fig:config_a}
 \end{figure}
 
-Each GPU computes its shard of the attention and MLP, then AllReduces the partial result with every other GPU. This happens at every layer. The AllReduce messages are small (a few KB to hundreds of KB) but every GPU blocks waiting for them. This is textbook \textbf{hot QP} traffic: small, frequent, latency-critical. On consumer hardware without NVLink, AllReduce goes over PCIe or 10GbE and becomes the bottleneck. When GPU IPC is unavailable, vLLM falls back to NCCL for inter-node AllReduce -- this is where libscuffedrdma enters.
+Each GPU computes its shard of the attention and MLP, then AllReduces the partial result with every other GPU. This happens at every layer. The AllReduce messages are small (a few KB to hundreds of KB) but every GPU blocks waiting for them. This is textbook \textbf{hot QP} traffic: small, frequent, latency-critical. On consumer hardware without NVLink, AllReduce goes over PCIe or 10GbE and becomes the bottleneck. When GPU IPC is unavailable, vLLM falls back to NCCL for inter-node AllReduce, which is where libscuffedrdma enters.
 
 \subsection{Configuration B: Multiple Users, One Model, One Machine}
 
@@ -457,7 +457,7 @@ This combines Configs B and C: disaggregated prefill/decode with continuous batc
 \label{fig:config_d}
 \end{figure}
 
-Multiple users' KV transfers share the same 10GbE link. Without traffic separation, User A's large KV transfer blocks User B's small metadata -- the head-of-line blocking problem the dual QP pool solves. The PMP controller dynamically allocates bandwidth between pools based on queue depth. With prefix caching (llm-d~\cite{llmd_v05}), some KV blocks are already on the decode node, changing the traffic pattern the WFA observes.
+Multiple users' KV transfers share the same 10GbE link. Without traffic separation, User A's large KV transfer blocks User B's small metadata. That's the head-of-line blocking problem the dual QP pool solves. The PMP controller allocates bandwidth between pools based on queue depth. With prefix caching (llm-d~\cite{llmd_v05}), some KV blocks are already on the decode node, which changes the traffic pattern the WFA observes.
 
 \subsection{Configuration E: Multiple Models, Multiple Machines}
 
@@ -506,7 +506,7 @@ Config C (disaggregated prefill/decode, single user) is the simplest configurati
 
 \section{UCX Issue Landscape and Upstream Contributions}
 
-UCX is the dominant open-source RDMA transport framework, used by NCCL, MPI, PyTorch, and Dask. While building libscuffedrdma, we identified recurring architectural issues in UCX's issue tracker and contributed six fixes upstream. This section summarizes the problems and our responses -- both the libscuffedrdma bypass and the direct UCX patches.
+UCX is the dominant open-source RDMA transport framework. NCCL, MPI, PyTorch, and Dask all use it. While building libscuffedrdma we ran into recurring architectural issues in UCX's issue tracker, and ended up contributing six fixes upstream. This section covers the problems we hit, the bypass we built in libscuffedrdma, and the patches we sent to UCX.
 
 \subsection{Problems Identified}
 
@@ -524,7 +524,7 @@ Additional friction for ML workloads includes silent memory registration failure
 
 \subsection{libscuffedrdma's Response}
 
-libscuffedrdma bypasses UCX's data path entirely. Instead of size-based routing through shared QPs, the WFA classifier assigns each transfer a priority class based on tensor metadata (access frequency, inference phase, layer index), and the PMP controller routes it to a dedicated hot or cold QP. All data-path calls go through \texttt{ibv\_post\_send} directly with pre-registered memory regions. The mapping from tensor to QP is deterministic -- no opaque scoring, no rendezvous handshake, no shared resources.
+libscuffedrdma bypasses UCX's data path entirely. Instead of size-based routing through shared QPs, the WFA classifier assigns each transfer a priority class based on tensor metadata (access frequency, inference phase, layer index), and the PMP controller routes it to a dedicated hot or cold QP. All data-path calls go through \texttt{ibv\_post\_send} directly with pre-registered memory regions. The mapping from tensor to QP is deterministic: there's no opaque scoring or rendezvous handshake, and the hot and cold pools don't share QPs.
 
 Table~\ref{tab:ucx_issue_map} maps each libscuffedrdma component to the UCX issues it addresses.
 
@@ -563,7 +563,7 @@ Beyond the bypass, we submitted six pull requests to \texttt{openucx/ucx} that f
 \midrule
 \href{https://github.com/openucx/ucx/pull/11304}{\#11304} & \#4430 & Use calculated RNDV threshold for \texttt{ucp\_tag\_send\_nbr()} instead of hardcoded 256KB \\
 \addlinespace
-\href{https://github.com/openucx/ucx/pull/11305}{\#11305} & \#1307 & Adaptive TX CQ moderation -- force signaled send when CQ credits run low, preventing TX stalls \\
+\href{https://github.com/openucx/ucx/pull/11305}{\#11305} & \#1307 & Adaptive TX CQ moderation: force signaled send when CQ credits run low to prevent TX stalls \\
 \addlinespace
 \href{https://github.com/openucx/ucx/pull/11306}{\#11306} & \#4275 & Allow eager inline sends for host memory when CUDA memory domains are loaded \\
 \addlinespace
@@ -599,7 +599,7 @@ TurboQuant~\cite{turboquant2026} (Zandieh, Mirrokni et al., Google Research) is 
 \item \textbf{QJL correction}: The quantization error creates bias in inner products. TurboQuant corrects this by storing a 1-bit sketch of the residual using the Quantized Johnson-Lindenstrauss transform. The corrected inner products are provably unbiased.
 \end{enumerate}
 
-The key detail for RDMA: TurboQuant preserves \emph{inner product accuracy}, not individual vector accuracy. Since attention only needs inner products (query dot key), this suffices -- but the decode node needs a modified attention kernel that operates on quantized codes directly. The RDMA layer just moves the smaller compressed bytes.
+The key detail for RDMA: TurboQuant preserves \emph{inner product accuracy}, not individual vector accuracy. Attention only needs inner products (query dot key), so this works, but the decode node needs a modified attention kernel that operates on the quantized codes directly. The RDMA layer just moves the smaller compressed bytes.
 
 \subsection{How Compression and Transport Interact}
 
@@ -801,7 +801,7 @@ The classifier decides which pool handles each transfer. It examines three thing
     else:                              return UNKNOWN
 \end{verbatim}
 
-Phase detection works by observing layer access order. Prefill sweeps sequentially through all layers (L0, L1, L2, ...). Decode repeatedly accesses the same layer as it generates tokens. The classifier detects the phase automatically -- no signal from the inference engine needed.
+Phase detection works by observing layer access order. Prefill sweeps sequentially through all layers (L0, L1, L2, ...). Decode repeatedly accesses the same layer as it generates tokens. The classifier figures out the phase on its own, so the inference engine doesn't have to signal it.
 
 \subsection{PMP Bang-Bang Controller}
 
@@ -821,11 +821,11 @@ The controller monitors queue depths and overrides the classifier when one pool 
     else:               return last_decision  -- hysteresis
 \end{verbatim}
 
-The deadband (0.1) prevents chattering: without it, the controller would flip between HOT and COLD every cycle when the queues are nearly balanced. The weights are asymmetric ($\alpha{=}2$, $\beta{=}1$) because draining the hot queue matters more -- hot traffic is latency-sensitive.
+The deadband (0.1) prevents chattering: without it, the controller would flip between HOT and COLD every cycle when the queues are nearly balanced. The weights are asymmetric ($\alpha{=}2$, $\beta{=}1$) because hot traffic is latency-sensitive, so draining the hot queue matters more.
 
 \subsection{How RDMA Testing Works on SoftRoCE}
 
-SoftRoCE (\texttt{rdma\_rxe} kernel module) implements RDMA verbs in software over any Ethernet NIC. The kernel handles QP state, packet construction, and completions, so latencies are higher (tens of microseconds vs. single-digit). But the API is identical -- code that works on SoftRoCE runs on ConnectX hardware unchanged.
+SoftRoCE (\texttt{rdma\_rxe} kernel module) implements RDMA verbs in software over any Ethernet NIC. The kernel handles QP state, packet construction, and completions, so latencies are higher (tens of microseconds vs. single-digit). The API is identical though, so code that works on SoftRoCE runs on ConnectX hardware unchanged.
 
 \paragraph{Loopback testing.} Two \texttt{DualQPPool} instances on the same machine, both using \texttt{rxe0}. QP info exchanged in-process, all QP pairs connected, then RDMA writes measured for completion latency.
 
