@@ -849,7 +849,14 @@ SoftRoCE (\texttt{rdma\_rxe} kernel module) implements RDMA verbs in software ov
                              recv_buf.rkey, 1MB)
 \end{verbatim}
 
-\paragraph{Cross-node testing.} For Chimera $\leftrightarrow$ Cerberus, each machine runs one pool. QP info exchanges over TCP (192.168.1.x management network), RDMA traffic flows over the 10.0.0.x subnet (direct 10GbE cable). Both machines need SoftRoCE active and an IPv4-mapped GID in the RDMA GID table (populated by adding an IPv4 address to the RDMA-facing interface). A few things bit us along the way: pyverbs on Ubuntu 24.04 uses property setters for \texttt{QPAttr}, \texttt{set\_wr\_rdma(rkey, addr)} for RDMA work requests, and \texttt{cq.poll()} returns \texttt{(count, list)}. These differ from the rdma-core docs, so we found them by trial and error. SoftRoCE also needs a routable GID for cross-node connections -- link-local IPv6 works for loopback but not between machines, and adding an IPv4 address populates an IPv4-mapped GID at a higher index. The \texttt{rdma\_rxe} module enters a zombie state if processes exit without closing resources, requiring a reboot, so production code has to handle cleanup carefully. Finally, in synchronous single-threaded SoftRoCE, head-of-line blocking doesn't appear because each operation finishes before the next starts; the dual QP benefit only shows up with concurrent producers or hardware CQ offload.
+\paragraph{Cross-node testing.} For Chimera $\leftrightarrow$ Cerberus, each machine runs one pool. QP info exchanges over TCP (192.168.1.x management network), RDMA traffic flows over the 10.0.0.x subnet (direct 10GbE cable). Both machines need SoftRoCE active and an IPv4-mapped GID in the RDMA GID table (populated by adding an IPv4 address to the RDMA-facing interface). A few things bit us along the way:
+
+\begin{itemize}
+\item pyverbs on Ubuntu 24.04 uses property setters for \texttt{QPAttr}, \texttt{set\_wr\_rdma(rkey, addr)} for RDMA work requests, and \texttt{cq.poll()} returns \texttt{(count, list)}. These differ from the rdma-core docs, so we found them by trial and error.
+\item SoftRoCE needs a routable GID for cross-node connections. Link-local IPv6 works for loopback but not between machines. Adding an IPv4 address populates an IPv4-mapped GID at a higher index.
+\item The \texttt{rdma\_rxe} module enters a zombie state if processes exit without closing resources, requiring a reboot. Production code has to handle cleanup carefully.
+\item In synchronous single-threaded SoftRoCE, head-of-line blocking doesn't appear because each operation finishes before the next starts. The dual QP benefit only shows up with concurrent producers or hardware CQ offload.
+\end{itemize}
 
 \section{Next Steps}
 
