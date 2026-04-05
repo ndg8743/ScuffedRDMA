@@ -22,7 +22,7 @@ from middleware.rdma_tensor_cache.scuffed_quant import ScuffedQuant
 def main():
     model_name = "mlx-community/granite-3.3-2b-instruct-4bit"
     bits = 3
-    qjl_dim = 64
+    qjl_dim = 256  # match cluster benchmark_scuffed_quant_llm.py
     output_dir = str(Path(__file__).parent / "results")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -53,14 +53,18 @@ def main():
     print(f"  Loaded in {time.time()-t0:.1f}s")
 
     n_layers = len(model.model.layers)
-    head_dim = model.model.head_dim
+    head_dim = model.model.layers[0].self_attn.head_dim
     n_kv_heads = model.model.layers[0].self_attn.n_kv_heads
     print(f"  {n_layers} layers, {n_kv_heads} kv_heads, {head_dim} head_dim")
 
-    # Prefill
+    # Prefill with the same prompt the cluster benchmark uses, so seq_len
+    # and top-k selectivity line up with benchmark_scuffed_quant_llm.py.
     prompt = (
-        "The key-value cache in transformer inference trades memory "
-        "for computation. Without it, decode is quadratic."
+        "The key-value cache in transformer inference trades memory for "
+        "computation. Without it, each decode step would recompute attention "
+        "over the entire sequence, which is quadratic in sequence length. "
+        "With the cache, decode is linear: each new token only computes its "
+        "own key and value projections."
     )
     tokens = mx.array(tokenizer.encode(prompt))
     cache = make_prompt_cache(model)

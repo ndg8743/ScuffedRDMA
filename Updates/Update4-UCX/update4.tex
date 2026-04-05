@@ -34,13 +34,13 @@ The cost is memory. For $L$ layers, $K$ KV heads, head dimension $H$, sequence l
 \]
 For a 70B model ($L{=}80$, $K{=}8$ GQA, $H{=}128$, $S{=}4096$): 1.3~GB per request. With 16 concurrent users, 21~GB of KV cache alone on a 24~GB RTX 3090.
 
-In disaggregated serving (prefill on Cerberus, decode on Chimera), this entire cache must cross the 10GbE link ($\sim$1.2 GB/s). On InfiniBand this takes milliseconds. On our testbed it takes seconds. Compression (LoRC, KVTC, TurboQuant) reduces the payload; the dual QP pool reduces the queuing delay. Each targets a different factor in total transfer time (Equation~\ref{eq:ttft}).
+In disaggregated serving (prefill on Cerberus, decode on Chimera), this entire cache must cross the 10GbE link ($\sim$1.2 GB/s). On InfiniBand this takes milliseconds. On my testbed it takes seconds. Compression (LoRC, KVTC, TurboQuant) reduces the payload; the dual QP pool reduces the queuing delay. Each targets a different factor in total transfer time (Equation~\ref{eq:ttft}).
 
 \subsection{What This Update Adds}
 
 UCX, NIXL, and NCCL treat all traffic equally or route by message size alone. They cannot distinguish a latency-critical decode activation from a background KV prefetch of the same size.
 
-This update adds \textbf{tensor-aware RDMA traffic management}. The WFA classifier labels each transfer by its role in the inference pipeline, and the PMP bang-bang controller allocates bandwidth between priority classes. Traffic routes to separate RDMA queue pairs: a hot pool for latency-sensitive transfers, a cold pool for throughput. We validate with real RDMA writes on SoftRoCE.
+This update adds \textbf{tensor-aware RDMA traffic management}. The WFA classifier labels each transfer by its role in the inference pipeline, and the PMP bang-bang controller allocates bandwidth between priority classes. Traffic routes to separate RDMA queue pairs: a hot pool for latency-sensitive transfers, a cold pool for throughput. I validate with real RDMA writes on SoftRoCE.
 
 \section{Theoretical Foundation}
 
@@ -97,7 +97,7 @@ $u^*(t) = 0$ (route to cold) if $S > 0$, $u^*(t) = 1$ (route to hot) if $S < 0$,
 \[
 S = p_H \cdot C \cdot \mu_H - p_C \cdot C \cdot \mu_C
 \]
-is the switching function and $p_H, p_C$ are the costate (adjoint) variables satisfying $\dot{p}_i = -\partial \mathcal{H}/\partial q_i$. In the implementation, we approximate the costates by weighted queue depths: $p_H \approx \alpha \cdot q_H$, $p_C \approx \beta \cdot q_C$, which turns the switching function into something computable from observable state: $S = \alpha \cdot q_H \cdot C \cdot \mu_H - \beta \cdot q_C \cdot C \cdot \mu_C$.
+is the switching function and $p_H, p_C$ are the costate (adjoint) variables satisfying $\dot{p}_i = -\partial \mathcal{H}/\partial q_i$. In the implementation, I approximate the costates by weighted queue depths: $p_H \approx \alpha \cdot q_H$, $p_C \approx \beta \cdot q_C$, which turns the switching function into something computable from observable state: $S = \alpha \cdot q_H \cdot C \cdot \mu_H - \beta \cdot q_C \cdot C \cdot \mu_C$.
 \end{proposition}
 
 \subsection{WFA vs.\ PMP: Complementary Roles}
@@ -119,9 +119,9 @@ Timescale & Per-tensor ($\mu$s) & Per-scheduling-epoch (ms) \\
 
 libscuffedrdma is the thesis's RDMA middleware. The current prototype is Python on top of pyverbs (rdma-core bindings); a C++ port is a future production goal. The design follows Austin et al.'s roofline framework and decode step time model~\cite{scaling_book}.
 
-\subsection{What We Are Building (and Not Building)}
+\subsection{What I Am Building (and Not Building)}
 
-We are not recreating NIXL or UCX. libscuffedrdma sits between vLLM's \texttt{KvConnector} interface and the raw \texttt{libibverbs} API, adding tensor-aware classification and priority QP routing that neither NIXL nor UCX provides. The full stack:
+I am not recreating NIXL or UCX. libscuffedrdma sits between vLLM's \texttt{KvConnector} interface and the raw \texttt{libibverbs} API, adding tensor-aware classification and priority QP routing that neither NIXL nor UCX provides. The full stack:
 
 \begin{figure}[ht]
 \centering
@@ -240,9 +240,9 @@ We are not recreating NIXL or UCX. libscuffedrdma sits between vLLM's \texttt{Kv
 
 libscuffedrdma bypasses UCX's transport selection and calls \texttt{ibv\_post\_send} directly. UCX routes messages by size alone (small = eager inline send, large = rendezvous RDMA read). This means UCX cannot distinguish between a latency-critical 64KB decode activation and a 64KB background prefetch. libscuffedrdma's WFA classifier makes that distinction, then posts to the correct QP.
 
-The existing vLLM call chain goes: \texttt{save\_kv\_layer()} $\to$ NIXL $\to$ UCX $\to$ \texttt{ibv\_post\_send()}. We replace the middle: \texttt{save\_kv\_layer()} $\to$ WFA classifies $\to$ \texttt{ibv\_post\_send()} on the selected QP.
+The existing vLLM call chain goes: \texttt{save\_kv\_layer()} $\to$ NIXL $\to$ UCX $\to$ \texttt{ibv\_post\_send()}. I replace the middle: \texttt{save\_kv\_layer()} $\to$ WFA classifies $\to$ \texttt{ibv\_post\_send()} on the selected QP.
 
-Both QP pools use RC (Reliable Connected) transport. We do not use UD (Unreliable Datagram) because UD has a 4KB MTU limit requiring application-level fragmentation, no delivery guarantees, and poor SoftRoCE performance. RC handles reliability in hardware. The cost is one QP per peer per priority class, which is trivial for a two-node testbed.
+Both QP pools use RC (Reliable Connected) transport. I do not use UD (Unreliable Datagram) because UD has a 4KB MTU limit requiring application-level fragmentation, no delivery guarantees, and poor SoftRoCE performance. RC handles reliability in hardware. The cost is one QP per peer per priority class, which is trivial for a two-node testbed.
 
 \begin{table}[ht]
 \centering\small
@@ -506,7 +506,7 @@ Config C (disaggregated prefill/decode, single user) is the simplest configurati
 
 \section{UCX Issue Landscape and Upstream Contributions}
 
-UCX is the dominant open-source RDMA transport framework. NCCL, MPI, PyTorch, and Dask all use it. While building libscuffedrdma we ran into recurring architectural issues in UCX's issue tracker, and ended up contributing six fixes upstream. This section covers the problems we hit, the bypass we built in libscuffedrdma, and the patches we sent to UCX.
+UCX is the dominant open-source RDMA transport framework. NCCL, MPI, PyTorch, and Dask all use it. While building libscuffedrdma I ran into recurring architectural issues in UCX's issue tracker, and ended up contributing six fixes upstream. This section covers the problems I hit, the bypass I built in libscuffedrdma, and the patches I sent to UCX.
 
 \subsection{Problems Identified}
 
@@ -553,36 +553,13 @@ Per-QP traffic class & \#11252, \#10325 & Symmetric TC via direct \texttt{ibv\_m
 
 \subsection{Upstream UCX Contributions}
 
-Beyond the bypass, we submitted six pull requests to \texttt{openucx/ucx} that fix the issues directly (Table~\ref{tab:ucx_prs}).
-
-\begin{table}[ht]
-\centering\small
-\begin{tabular}{@{}llp{7.8cm}@{}}
-\toprule
-\textbf{PR} & \textbf{Fixes} & \textbf{Change} \\
-\midrule
-\href{https://github.com/openucx/ucx/pull/11304}{\#11304} & \#4430 & Use calculated RNDV threshold for \texttt{ucp\_tag\_send\_nbr()} instead of hardcoded 256KB \\
-\addlinespace
-\href{https://github.com/openucx/ucx/pull/11305}{\#11305} & \#1307 & Adaptive TX CQ moderation: force signaled send when CQ credits run low to prevent TX stalls \\
-\addlinespace
-\href{https://github.com/openucx/ucx/pull/11306}{\#11306} & \#4275 & Allow eager inline sends for host memory when CUDA memory domains are loaded \\
-\addlinespace
-\href{https://github.com/openucx/ucx/pull/11307}{\#11307} & \#4794 & Add TCP as fallback wireup transport for RC/DC on SoftRoCE where UD is unavailable \\
-\addlinespace
-\href{https://github.com/openucx/ucx/pull/11308}{\#11308} & \#6254 & Add \texttt{ucp\_ep\_query()} bandwidth estimate for informed application placement decisions \\
-\addlinespace
-\href{https://github.com/openucx/ucx/pull/11309}{\#11309} & \#10325 & Propagate traffic class in IB address for symmetric QoS on both connection directions \\
-\bottomrule
-\end{tabular}
-\caption{Upstream UCX pull requests submitted to \texttt{openucx/ucx} on GitHub.}
-\label{tab:ucx_prs}
-\end{table}
+Beyond the bypass, I submitted six pull requests to \texttt{openucx/ucx} (\href{https://github.com/openucx/ucx/pulls?q=is\%3Apr+author\%3Andg8743}{\#11304--\#11309}) that fix the underlying issues directly: calculated RNDV threshold instead of the hardcoded 256KB, adaptive TX CQ moderation to prevent stalls, eager inline sends with CUDA memory domains loaded, a TCP wireup fallback for SoftRoCE where UD is unavailable, a bandwidth-estimate query for informed placement, and traffic-class propagation in the IB address for symmetric QoS.
 
 \section{KV Cache Compression Pipeline and TurboQuant}
 
 \subsection{Three Compression Stages on Orthogonal Axes}
 
-\textbf{LoRC}~\cite{zhang2024lorc} applies SVD to $W_K, W_V$, producing lower-dimensional KV vectors at every forward pass without retraining. The progressive strategy retains more singular values in shallow layers (sensitive to truncation) and compresses deep layers aggressively. Zhang et al.\ report significant compression with negligible quality degradation across LLaMA-8B through 70B~\cite{zhang2024lorc}. Whether this improves TTFT on our testbed is untested.
+\textbf{LoRC}~\cite{zhang2024lorc} applies SVD to $W_K, W_V$, producing lower-dimensional KV vectors at every forward pass without retraining. The progressive strategy retains more singular values in shallow layers (sensitive to truncation) and compresses deep layers aggressively. Zhang et al.\ report significant compression with negligible quality degradation across LLaMA-8B through 70B~\cite{zhang2024lorc}. Whether this improves TTFT on my testbed is untested.
 
 LoRC, KVTC~\cite{kvtc2024}, and TurboQuant~\cite{turboquant2026} target orthogonal representation axes and compose as a pipeline. The pipeline for a KV vector $k \in \mathbb{R}^d$ is:
 \[
@@ -653,7 +630,7 @@ The dual QP scenarios are 0.5--5.5$\mu$s slower than the single QP baseline (p50
 \paragraph{Why this changes with real hardware.} SoftRoCE implements RDMA in the kernel: the CPU handles QP state transitions, packet construction, and completions in software. On hardware (e.g., ConnectX-6), the NIC processes the send queue and generates completions without CPU involvement. This changes two things:
 
 \begin{itemize}
-\item \textbf{Base latency drops.} Hardware RDMA on ConnectX typically achieves 1--2$\mu$s for small messages vs our 13--14$\mu$s on SoftRoCE. The measured dual-QP overhead (0.5--5.5$\mu$s, including classification, routing, and PMP) becomes a larger fraction of the transfer time but is still small relative to the cold path.
+\item \textbf{Base latency drops.} Hardware RDMA on ConnectX typically achieves 1--2$\mu$s for small messages vs the 13--14$\mu$s I measured on SoftRoCE. The measured dual-QP overhead (0.5--5.5$\mu$s, including classification, routing, and PMP) becomes a larger fraction of the transfer time but is still small relative to the cold path.
 \item \textbf{QP isolation becomes real.} With hardware offload, the NIC processes each QP's send queue independently. A 1MB write occupying the cold QP does not block the hot QP because the NIC has separate hardware contexts for each. With SoftRoCE, the kernel processes everything sequentially regardless of which QP it belongs to. Hardware RDMA is where the dual QP architecture pays off: concurrent producers can post to hot and cold QPs simultaneously, and the NIC drains them in parallel.
 \end{itemize}
 
@@ -684,6 +661,31 @@ Size (B) & p50 ($\mu$s) & p95 ($\mu$s) & p99 ($\mu$s) & Pool \\
 \end{table}
 
 The latency curve is smooth and monotonic across all message sizes. There is no cliff at the 8KB, 30KB, 32KB, or 64KB boundaries where UCX switches between eager, zcopy, and rendezvous protocols (issues \#10552, \#10486, \#10532). The WFA classifier switches from hot to cold at 512KB. The configured size threshold is 256KB, but frequently-accessed tensors get promoted to hot, pushing the effective crossover to 512KB.
+
+\subsection{scuffedQuant: 3-bit KV Compression on Granite 3.3-2B}
+\label{sec:scuffedquant-results}
+
+scuffedQuant is my implementation of the TurboQuant pipeline (PolarQuant rotation $+$ Lloyd--Max codebook $+$ QJL sign sketch) in \texttt{middleware/rdma\_tensor\_cache/scuffed\_quant.py}. I validate it on real KV activations, not synthetic vectors: load Granite 3.3-2B (40 layers, 8 KV heads, head dim 64), run prefill on a 58-token prompt, extract the per-layer KV cache, compress each head at 3 bits, and compare exact vs.\ reconstructed attention scores. The metric is top-8 ranking overlap --- attention cares which keys score highest, not their exact magnitudes.
+
+\begin{table}[h]
+\centering
+\caption{scuffedQuant 3-bit top-8 ranking overlap, mean across all layers. Same quantizer (bits~$=$~3, \texttt{qjl\_dim}~$=$~256), same 58-token prompt; only the stored weight precision differs. FP32 run uses \texttt{ibm-granite/granite-3.3-2b-instruct}; 4-bit run uses \texttt{mlx-community/granite-3.3-2b-instruct-4bit}.}
+\label{tab:scuffedquant_mlx}
+\begin{tabular}{llr}
+\toprule
+Platform & Weight precision & Mean top-8 overlap \\
+\midrule
+Chimera, PyTorch CPU & FP32 & 91.1\% \\
+Apple Silicon, MLX   & 4-bit & 100.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The FP32 run lands at 91.1\% mean with per-layer overlap ranging from 82.8\% (L1) to 96.9\% (L4, L20, L33, L38). The MLX run hits 100\% on every layer.
+
+\paragraph{Why 4-bit weights give \emph{higher} KV fidelity under further quantization.} This looks backwards at first --- a 4-bit model should produce noisier activations than a full-precision one --- but for ranking fidelity it runs the other way. Aggressive weight quantization rounds $W_K$ onto a coarse grid, which pushes the resulting key activations into more widely-separated clusters. The gaps between the top-8 keys and the rest of the sequence grow, so a second round of 3-bit KV quantization cannot reorder them. FP32 weights produce KVs with more continuous tails, where the 9th-through-20th most-similar keys sit close to the top-8 boundary and occasionally swap rank under quantization noise. This is a useful signal for the deployment story: on already-quantized stacks (MXFP4 on Blackwell, 4-bit MLX on Apple Silicon, AWQ/GPTQ on consumer GPUs), scuffedQuant's effective accuracy floor sits above the paper-theoretical numbers measured against FP32 baselines.
+
+\paragraph{Compression ratio.} Both configurations achieve 4.0$\times$ compression over FP32 KV ($\approx$2.0$\times$ over FP16, the actual wire format), dominated at $d=64$ by the QJL sketch overhead rather than the 3-bit indices themselves.
 
 \subsection{Infrastructure Validation}
 
@@ -849,10 +851,10 @@ SoftRoCE (\texttt{rdma\_rxe} kernel module) implements RDMA verbs in software ov
                              recv_buf.rkey, 1MB)
 \end{verbatim}
 
-\paragraph{Cross-node testing.} For Chimera $\leftrightarrow$ Cerberus, each machine runs one pool. QP info exchanges over TCP (192.168.1.x management network), RDMA traffic flows over the 10.0.0.x subnet (direct 10GbE cable). Both machines need SoftRoCE active and an IPv4-mapped GID in the RDMA GID table (populated by adding an IPv4 address to the RDMA-facing interface). A few things bit us along the way:
+\paragraph{Cross-node testing.} For Chimera $\leftrightarrow$ Cerberus, each machine runs one pool. QP info exchanges over TCP (192.168.1.x management network), RDMA traffic flows over the 10.0.0.x subnet (direct 10GbE cable). Both machines need SoftRoCE active and an IPv4-mapped GID in the RDMA GID table (populated by adding an IPv4 address to the RDMA-facing interface). A few things bit me along the way:
 
 \begin{itemize}
-\item pyverbs on Ubuntu 24.04 uses property setters for \texttt{QPAttr}, \texttt{set\_wr\_rdma(rkey, addr)} for RDMA work requests, and \texttt{cq.poll()} returns \texttt{(count, list)}. These differ from the rdma-core docs, so we found them by trial and error.
+\item pyverbs on Ubuntu 24.04 uses property setters for \texttt{QPAttr}, \texttt{set\_wr\_rdma(rkey, addr)} for RDMA work requests, and \texttt{cq.poll()} returns \texttt{(count, list)}. These differ from the rdma-core docs, so I found them by trial and error.
 \item SoftRoCE needs a routable GID for cross-node connections. Link-local IPv6 works for loopback but not between machines. Adding an IPv4 address populates an IPv4-mapped GID at a higher index.
 \item The \texttt{rdma\_rxe} module enters a zombie state if processes exit without closing resources, requiring a reboot. Production code has to handle cleanup carefully.
 \item In synchronous single-threaded SoftRoCE, head-of-line blocking doesn't appear because each operation finishes before the next starts. The dual QP benefit only shows up with concurrent producers or hardware CQ offload.
