@@ -25,6 +25,10 @@ _OP_SEND = 0x04
 _HEADER_FMT = '<BIQQI'  # opcode, buf_id, offset, length, checksum
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)
 
+# Upper bound for a single RDMA Read response. Defense-in-depth against
+# a crafted peer reporting an 8-byte resp_len near 2^63.
+MAX_RDMA_READ_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
+
 
 @dataclass
 class SimBuffer:
@@ -245,6 +249,11 @@ class TcpSimTransport:
 
         resp_header = await self._reader.readexactly(_HEADER_SIZE)
         _, _, _, resp_len, _ = struct.unpack(_HEADER_FMT, resp_header)
+        if not 0 < resp_len <= MAX_RDMA_READ_BYTES:
+            raise ValueError(
+                f"RDMA Read response length out of range: {resp_len} "
+                f"(max {MAX_RDMA_READ_BYTES})"
+            )
         data = await self._reader.readexactly(resp_len)
         local_buf.write(data, local_offset)
         self._bytes_recv += resp_len

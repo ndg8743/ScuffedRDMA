@@ -1,0 +1,571 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  showstringspaces=false,
+  xleftmargin=1em,
+  frame=single,
+  framesep=3pt,
+}
+
+\title{Update 5: Upstream UCX Pull Request Review, External Validation,
+  and Middleware Hardening\\[4pt]
+  \large Post-Submission Follow-Up to Update 4}
+\author{Nathan Gopee\\MS Computer Science Candidate, SUNY New Paltz\\\texttt{gopeen1@newpaltz.edu}\\[4pt]Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\date{April 12, 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Recap}
+
+Update 4 introduced libscuffedrdma's dual-QP architecture, the PMP
+bang-bang controller, the WFA classifier, and the landscape of upstream
+UCX issues that motivated six pull requests (\#11304--\#11309). This
+update collects what happened after those PRs were submitted:
+
+\begin{itemize}
+  \item The actual code diffs landed on each branch and their current
+        commit hashes.
+  \item External validation that arrived in the same month, most
+        importantly the \texttt{autoscriptlabs/libmesh-rdma} project and
+        its accompanying r/HPC thread.
+  \item Two contrasting designs from the production LLM systems space
+        (Apple MLX PR \#3094 and Pure Storage TurboQuant + FlashBlade).
+  \item A security audit of all six PRs and of the libscuffedrdma
+        middleware, triggered by a memory-safety bug the author found
+        in libmesh-rdma's \texttt{mesh\_mpi\_pt2pt.c}.
+  \item A set of hardening commits applied to libscuffedrdma's Python
+        layer, adapting three modules from libmesh-rdma while
+        remediating four high-severity middleware findings.
+\end{itemize}
+
+Update 4 stays as-is; everything below is additive.
+
+\section{Pull Request Review with Real Diffs}
+
+Each PR is summarised below with the exact fix landed on the branch.
+All hashes come from the \texttt{ndg8743/ucx} fork at the time of
+writing.
+
+\subsection{PR \#11304 --- Calculated rndv threshold for \texttt{ucp\_tag\_send\_nbr()}}
+\label{sec:pr_11304}
+
+Fixes \href{https://github.com/openucx/ucx/issues/4430}{\#4430}. Head
+commit \texttt{694b20db8}. Default value flipped to \texttt{auto} so
+both send paths use the transport-aware threshold:
+
+\begin{lstlisting}[language=C]
+-  {"RNDV_SEND_NBR_THRESH", "256k",
++  {"RNDV_SEND_NBR_THRESH", "auto",
+   "Threshold for switching from eager to rendezvous protocol in "
+   "ucp_tag_send_nbr().\n"
++  "\"auto\" means to use the same dynamically calculated threshold "
++  "as for regular sends.\n"
+\end{lstlisting}
+
+With the ``auto'' sentinel in place, the rendezvous threshold derivation
+falls through to \texttt{rndv\_thresh} (the calculated value) rather than
+the hardcoded 256 KB:
+
+\begin{lstlisting}[language=C]
+- rndv_local_thresh = context->config.ext.rndv_send_nbr_thresh;
++ if (context->config.ext.rndv_send_nbr_thresh == UCS_MEMUNITS_AUTO) {
++     rndv_local_thresh = rndv_thresh;
++ } else {
++     rndv_local_thresh = context->config.ext.rndv_send_nbr_thresh;
++ }
+\end{lstlisting}
+
+This is a pure behavior-flip: no new code paths, no new allocations,
+and no change to any on-wire protocol. Explicit values
+(\texttt{UCX\_RNDV\_SEND\_NBR\_THRESH=256k}) still work for users who
+want the old behavior.
+
+\subsection{PR \#11305 --- Adaptive TX CQ moderation}
+\label{sec:pr_11305}
+
+Fixes \href{https://github.com/openucx/ucx/issues/1307}{\#1307}. Head
+commit \texttt{e1e419982}. Three lines in one inline function:
+
+\begin{lstlisting}[language=C]
+-    return (txqp->unsignaled >= iface->config.tx_moderation) ? flag : 0;
++    return (txqp->unsignaled >= iface->config.tx_moderation) ||
++           (iface->tx.cq_available <= (signed)iface->config.tx_moderation)
++           ? flag : 0;
+\end{lstlisting}
+
+Without the second disjunct, fan-out workloads where each RC endpoint
+sends fewer than \texttt{tx\_moderation} messages never produce a
+signaled send. The TX CQ fills up with unsignaled completions, credits
+are never reclaimed, and the buffer pool deadlocks. Adding the
+iface-level \texttt{cq\_available} check forces the next send on any
+endpoint to be signaled once CQ credits drop to the moderation
+threshold.
+
+\subsection{PR \#11306 --- Eager inline sends for host memory when CUDA MDs are present}
+\label{sec:pr_11306}
+
+Fixes \href{https://github.com/openucx/ucx/issues/4275}{\#4275}. Head
+commit \texttt{39939fb4e}. Adds a memory-type cache lookup to
+\texttt{ucp\_proto\_is\_inline}:
+
+\begin{lstlisting}[language=C]
++  /* Look up the buffer in the memory type cache. If not found, it
++   * is host memory; otherwise it is inline-eligible only if the
++   * cache entry says host. */
++  status = ucs_memtype_cache_lookup(buffer, length, &mem_info);
++  return (status == UCS_ERR_NO_ELEM) ||
++         ((status == UCS_OK) && (mem_info.type == UCS_MEMORY_TYPE_HOST));
+\end{lstlisting}
+
+The previous code was a blanket disable: once the memtype cache became
+non-empty (which happens as soon as any CUDA buffer is registered), all
+sends lost the inline-eligible fast path, including plain host buffers.
+The fix restores the fast path for host memory while still excluding
+GPU memory.
+
+\subsection{PR \#11307 --- TCP as fallback wireup transport for RC/DC aliases}
+\label{sec:pr_11307}
+
+Fixes \href{https://github.com/openucx/ucx/issues/4794}{\#4794}. Head
+commit \texttt{1554563a5} (test fix) + parent \texttt{a2ccbcb1f}
+(production change). The production change is five lines in the
+transport alias table:
+
+\begin{lstlisting}[language=C]
+-  { "rc_v",  { "rc_verbs", UCP_TL_AUX("ud_verbs"), NULL } },
+-  { "rc_x",  { "rc_mlx5", UCP_TL_AUX("ud_mlx5"), NULL } },
++  { "rc_v",  { "rc_verbs", UCP_TL_AUX("ud_verbs"), UCP_TL_AUX("tcp"), NULL } },
++  { "rc_x",  { "rc_mlx5", UCP_TL_AUX("ud_mlx5"), UCP_TL_AUX("tcp"), NULL } },
+   { "rc",    { "rc_mlx5", UCP_TL_AUX("ud_mlx5"), "rc_verbs",
+-               UCP_TL_AUX("ud_verbs"), NULL } },
+-  { "dc",    { "dc_mlx5", UCP_TL_AUX("ud_mlx5"), NULL } },
+-  { "dc_x",  { "dc_mlx5", UCP_TL_AUX("ud_mlx5"), NULL } },
++               UCP_TL_AUX("ud_verbs"), UCP_TL_AUX("tcp"), NULL } },
++  { "dc",    { "dc_mlx5", UCP_TL_AUX("ud_mlx5"), UCP_TL_AUX("tcp"), NULL } },
++  { "dc_x",  { "dc_mlx5", UCP_TL_AUX("ud_mlx5"), UCP_TL_AUX("tcp"), NULL } },
+\end{lstlisting}
+
+The \texttt{UCP\_TL\_AUX(...)} macro marks a transport as
+wireup-eligible only; it is not used for data traffic. UD remains the
+preferred auxiliary (lower latency). TCP is only selected when UD is
+unavailable, which happens precisely in the SoftRoCE / direct-connect
+scenario that the r/HPC post described (see
+Section~\ref{sec:reddit}).
+
+The test-side fix (commit \texttt{1554563a5}) moves the TCP-skip
+decision in \texttt{test\_ucp\_address\_v2.pack\_iface\_attrs} from a
+macro-level condition into the test body, avoiding a segfault on
+variants where \texttt{sender()} is not yet initialised when the skip
+check fires.
+
+\subsection{PR \#11308 --- Estimated bandwidth query on \texttt{ucp\_ep\_query}}
+\label{sec:pr_11308}
+
+Fixes \href{https://github.com/openucx/ucx/issues/6254}{\#6254}. Head
+commit \texttt{ed3d69e91}. Adds \texttt{UCP\_EP\_ATTR\_FIELD\_ESTIMATED\_BW}
+to the public \texttt{ucp\_ep\_attr\_t}, letting the caller specify a
+local/remote memory type pair and receive the summed lane bandwidth.
+For applications doing data-placement decisions (libscuffedrdma's own
+WFA classifier is one), this removes the need to duplicate UCX's
+internal lane-scoring code in user space. The implementation is a
+read-only pass over \texttt{ucp\_ep\_config(ep)->key.rma\_bw\_lanes[]}
+that is O(lanes) and cannot fail.
+
+\subsection{PR \#11309 --- Symmetric traffic class propagation}
+\label{sec:pr_11309}
+
+Fixes \href{https://github.com/openucx/ucx/issues/10325}{\#10325}. Head
+commit \texttt{8962d27d7}. Pure bit-field isolation fix in
+\texttt{uct\_ib\_address\_unpack}: the traffic-class flag bit (bit 7)
+was corrupting the RoCE version bits (5--6) because the unpack code
+right-shifted without first masking. The fix adds an
+\texttt{\textasciitilde UCT\_IB\_ADDRESS\_FLAG\_TRAFFIC\_CLASS} mask
+before the shift, then uses the traffic class from the packed address
+when the local interface has none configured. After this fix, both
+endpoints end up with the same QoS class regardless of which one
+configured it.
+
+\section{External Validation: libmesh-rdma and the r/HPC Thread}
+\label{sec:reddit}
+
+On 2026-03-16, \texttt{autoscriptlabs/libmesh-rdma} appeared on GitHub:
+an MIT-licensed C library (75~KB compiled) implementing RDMA networking
+and a 55-function MPI subset for consumer GPU clusters \emph{without a
+managed switch}. The author (user
+\href{https://www.reddit.com/user/Ok-Pomegranate1314}{Ok-Pomegranate1314})
+also posted to r/HPC describing exactly the problem PR~\#11307
+addresses~\cite{reddit_directconnect_roce}:
+
+\begin{quote}\small\itshape
+Spent today fighting UCX's UD bootstrap on a direct-connect
+ConnectX-7 ring (4x DGX Spark, no switch). You already know how this
+goes: \texttt{ibv\_create\_ah()} needs ARP, ARP needs L2 resolution,
+L2 resolution needs a subnet that both endpoints share or a switch
+that routes between them. Without the switch, UCX dies in
+\texttt{initial\_address\_exchange} and takes MPICH with it.
+\end{quote}
+
+The crucial measurement that validates the RC-over-TCP-bootstrap
+architecture:
+
+\begin{quote}\small\itshape
+RC QPs don't need any of this. \texttt{ibv\_modify\_qp()} to RTR takes
+the destination GID directly. No AH object. No ARP. No subnet
+requirement beyond what the GID encodes. The firmware transitions the
+QP just fine. 77~GB/s. 11.6~$\mu$s RTT. The transport layer works
+perfectly on direct-connect RoCE. It's only the connection management
+that's broken.
+\end{quote}
+
+The comment thread is equally illuminating because two independent
+users tried to configure around the bug at the UCX layer:
+
+\begin{itemize}
+  \item \texttt{plan-bean} suggested \texttt{UCX\_TLS=\textasciicircum
+    ud,ud:aux} to skip UD entirely. The OP rejected this because on
+    RoCE, UCX's connection-manager path can still hit RDMACM, which in
+    turn uses the same ARP-based address resolution. (This is true only
+    when the application explicitly uses \texttt{UCP\_EP\_PARAM\_FIELD\_SOCK\_ADDR};
+    the default \texttt{UCT}-auxiliary wireup path that PR~\#11307
+    extends does not.)
+  \item \texttt{MissionDependent4401} proposed a three-variable
+    configuration: \texttt{UCX\_TLS=rc,tcp},
+    \texttt{UCX\_RC\_VERBS\_TLS=rc}, \texttt{UCX\_TCP\_TLS=tcp}. This
+    \emph{is} the environment-variable form of what PR~\#11307 makes
+    the default behavior. It works, but requires the user to know that
+    TCP can serve as a wireup auxiliary, and to set three variables
+    correctly.
+\end{itemize}
+
+Read carefully, the thread is a real-time record of a contributor
+abandoning UCX because the community consensus was that UCX could not
+be made to work on direct-connect RoCE. PR~\#11307 is the minimal
+in-tree fix that collapses those three environment variables into a
+stock UCX build, and the 77~GB/s measurement from libmesh-rdma
+demonstrates the underlying hardware path is already
+production-quality once the bootstrap is sorted out. The PR is
+therefore a contribution to a publicly-documented pain point with an
+existence proof that it is worth fixing.
+
+\paragraph{A footnote on RDMACM.} UCX supports two distinct wireup
+paths: its native UCT-auxiliary wireup (which PR~\#11307 extends by
+adding TCP as a valid auxiliary) and RDMACM-based wireup (a separate
+code path used when the application supplies
+\texttt{UCP\_EP\_PARAM\_FIELD\_SOCK\_ADDR} during
+\texttt{ucp\_ep\_create}). PR~\#11307 targets the former. RDMACM-based
+wireup remains unaffected; fixing that path would require either a
+patch to \texttt{librdmacm} itself or an opt-out flag in UCX's
+connection manager.
+
+\section{Contrasting Production Designs}
+
+\subsection{Apple MLX PR \#3094 (JACCL distributed backend)}
+
+Apple's MLX framework added ring-topology distributed training support
+via a custom ``JACCL'' backend~\cite{mlx_pr3094}. JACCL chose
+\emph{CPU-mediated} collectives rather than async RDMA: sender and
+receiver are tightly coupled via sequential send/recv operations to
+prevent data corruption. Reported throughput is +124\% on 4-node
+Devstral2 inference (135 $\to$ 303 tokens/sec on the prompt phase).
+
+The tradeoff: the tight coupling eliminates entire classes of
+race conditions (helpful for a research framework where correctness
+trumps raw throughput), but it also serialises transfers and
+prevents overlap. This is the opposite pole of the
+async-CQ-with-priorities design UCX targets; libscuffedrdma's PMP
+controller is specifically what makes async overlap manageable when
+multiple priority classes share the same link.
+
+\subsection{Pure Storage TurboQuant + FlashBlade}
+
+Pure Storage's blog post~\cite{turboquant_flashblade} reports a
+production deployment of TurboQuant KV cache compression paired with
+FlashBlade object storage, achieving up to 10$\times$ faster KV cache
+restores (5--6$\times$ compression, sustained 900--1000 MB/s per GPU on
+DGX A100-40GB). The transport is RDMA plus GPUDirect Storage into GPU
+memory; the compression layer is TurboQuant.
+
+This is relevant to the thesis for two reasons. First, it demonstrates
+that the TurboQuant-over-RDMA combination is already shipping in a
+production storage product, not a research prototype. Second, it
+clarifies where libscuffedrdma's contribution sits: FlashBlade moves
+compressed bytes fast and NIXL abstracts the transport, but neither
+classifies traffic by priority class or routes across a dual QP pool.
+The WFA/PMP layer is the part that remains libscuffedrdma's.
+
+\subsection{NVIDIA HPC-X}
+
+NVIDIA HPC-X~\cite{nvidia_hpcx} is the reference downstream distribution
+that bundles Open MPI, UCX, SHARP, UCC, and the NCCL UCX plug-in into a
+single optimised toolkit. HPC-X ships with ConnectX firmware and
+Quantum switch integrations; the SHARP component in particular is
+NVIDIA-fabric-only because it offloads collective operations onto the
+switch silicon. HPC-X is the correct choice for an all-NVIDIA
+datacenter cluster.
+
+\section{CI Status and Infrastructure Flakiness}
+
+At time of writing, CI status across the six PRs is dominated by
+infrastructure flakiness on the \texttt{swx-rain03} RoCE test node
+(UMR CQ poll timeouts, UD endpoint timeouts, DC performance-envelope
+timeouts). The same set of jobs fails across every PR regardless of
+the code change, confirming that the failures are independent of the
+patches under test. PR \#11304 is currently in a closed state after a
+simultaneous force-push and close event on 2026-04-04; whether to
+reopen it is deferred to Section~\ref{sec:next_steps} because the user
+has not confirmed whether the close was intentional.
+
+A separate survey of the ten most-recently-merged PRs in
+\texttt{openucx/ucx} shows all of them merged with 151/152 checks
+green, so the UCX maintainer workflow is to force-push-to-retrigger
+until clean rather than to override red RoCE checks. The current
+bottleneck is therefore scheduling (maintainer attention +
+infrastructure stability) rather than code correctness.
+
+No comments have been posted on any of the six PRs during this update
+cycle: the author's preference is to keep the PR trackers focused on
+code review and document context on the thesis side.
+
+\section{Security Audit Findings}
+
+Triggered by a memory-safety bug the author discovered in
+libmesh-rdma's \texttt{mpi/mesh\_mpi\_pt2pt.c}
+(\texttt{malloc(rhdr->length) + memcpy} using a network-supplied length
+without validation against \texttt{wc.byte\_len}), this section
+documents a parallel audit of both the six UCX PRs and the
+libscuffedrdma middleware.
+
+\subsection{UCX PRs --- all clean}
+
+All six PRs were audited against the libmesh-rdma pattern and nine
+related classes (integer overflow, signed/unsigned mismatch, NULL
+dereference, buffer-over-read in address parsing, TCP bootstrap trust,
+traffic class validation, pack/unpack symmetry, exception handling,
+and \texttt{wc.byte\_len} validation). \textbf{No findings.} Confidence
+is high across all six PRs. The changes are either configuration
+threshold logic (\#11304), local state comparison (\#11305), send-side
+application data only (\#11306), test fixes (\#11307), API additions
+(\#11308), or bit-field isolation (\#11309). None introduce new
+network-data-handling code paths.
+
+One pre-existing concern, noted but \emph{not} in scope for these PRs:
+\texttt{ucp\_am\_long\_first\_handler()} in
+\texttt{src/ucp/core/ucp\_am.c} sums several network-supplied length
+fields without an overflow check. This is unrelated to the thesis
+PRs and would require a separate upstream patch.
+
+\subsection{Middleware --- four high-severity findings}
+
+Four places in \texttt{/home/nathan/ScuffedRDMA/middleware/} read a
+network-supplied length and passed it to \texttt{recv()},
+\texttt{frombuffer()}, or an array allocation without bounds checking.
+All four are the direct Python analogue of the libmesh-rdma bug that
+triggered the audit.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{@{}p{4.5cm}p{7cm}p{3cm}@{}}
+\toprule
+\textbf{Finding} & \textbf{Fix} & \textbf{Severity} \\
+\midrule
+\#1: \texttt{roce\_transport.py} JSON handshake unbounded recv &
+Replaced entire JSON code path with fixed-size 64-byte binary
+\texttt{QpInfo} via \texttt{rdma\_bootstrap} port &
+Critical \\
+\addlinespace
+\#2: \texttt{vllm\_connector.py} unbounded \texttt{k\_len + v\_len} in
+KV layer transfer &
+Added \texttt{MAX\_KV\_LAYER\_BYTES = 500MB} constant and pre-recv
+bounds check; wrapped \texttt{reshape()} in try/except on
+\texttt{ValueError} &
+Critical \\
+\addlinespace
+\#3: \texttt{sae\_steering.py} unbounded \texttt{nnz} in
+\texttt{SparseVector.from\_bytes} &
+Added \texttt{MAX\_SPARSE\_NNZ} / \texttt{MAX\_SPARSE\_DIM} bounds,
+explicit buffer length check before \texttt{frombuffer}; narrowed the
+\texttt{except} in \texttt{sync\_from\_remote} to only swallow
+\texttt{ValueError} &
+Critical \\
+\addlinespace
+\#4: \texttt{transport\_tcp\_sim.py} unbounded \texttt{resp\_len} in
+async RDMA Read &
+Added \texttt{MAX\_RDMA\_READ\_BYTES = 1GB} bound before
+\texttt{readexactly} &
+High \\
+\bottomrule
+\end{tabular}
+\caption{Middleware findings and their remediation. All four are
+  closed as of this update.}
+\label{tab:sec_findings}
+\end{table}
+
+The attack model is trusted-peer on a management network, so these
+findings are defense-in-depth rather than active-exploitation targets.
+They matter for two reasons: a crashing handshake during a benchmark
+run is a thesis-result-ruining event even without an adversary, and
+the same code is on a path toward multi-tenant deployment
+(Configurations D and E from Update 4) where crafted peers become a
+real concern.
+
+\section{Middleware Hardening: Adapting libmesh-rdma}
+
+Alongside the audit, three new modules were added to
+\texttt{middleware/}, each adapting a production-tested piece of
+libmesh-rdma's C code into Python. Attribution is in a
+\texttt{LICENSE-THIRD-PARTY} file at the middleware root. The MIT
+license permits redistribution and adaptation with notice.
+
+\subsection{\texttt{rdma\_gid\_discovery.py}}
+
+Ports \texttt{mesh\_rdma\_find\_ipv4\_gid\_index()} and helpers from
+\texttt{src/mesh\_rdma\_core.c}. Replaces the hardcoded
+\texttt{gid\_index = 0} in \texttt{roce\_transport.py} with a scan of
+the GID table that detects IPv4-mapped GIDs (10 zero bytes + 0xffff +
+4 bytes of IPv4). When a \texttt{preferred\_ip} is given, the highest
+matching index wins (RoCEv2 lives above RoCEv1 in the GID table).
+Raises \texttt{RuntimeError} with a diagnostic summary if no
+IPv4-mapped GID is found.
+
+\subsection{\texttt{rdma\_bootstrap.py}}
+
+Ports the \texttt{mesh\_rdma\_qp\_info\_t} struct and
+\texttt{mesh\_rdma\_send\_handshake} / \texttt{mesh\_rdma\_accept\_handshake}
+from \texttt{src/mesh\_rdma\_core.c}. The wire format is 64 bytes of
+fixed-layout, network-byte-order struct: QPN, PSN, 16-byte GID, IPv4
+address, GID index, MTU, and 28 bytes of padding for binary
+compatibility with the C struct. The Python API is two functions
+(\texttt{send\_handshake}, \texttt{accept\_handshake}) and one
+dataclass (\texttt{QpInfo}) with \texttt{pack()} / \texttt{unpack()}
+methods. A \texttt{\_recv\_exact} helper handles TCP's partial-read
+semantics, which the previous JSON-based code ignored.
+
+This module is what closes Security Finding \#1 from
+Table~\ref{tab:sec_findings}: because the wire format is fixed size,
+there is no length field for a crafted peer to manipulate, so the
+unbounded-\texttt{recv} class of bug is gone by construction.
+
+\subsection{\texttt{rdma\_qp\_state\_machine.py}}
+
+Ports \texttt{mesh\_rdma\_create\_qp} and
+\texttt{mesh\_rdma\_connect\_qp}. Wraps pyverbs's \texttt{QP} with a
+\texttt{QueuePair} class that exposes
+\texttt{to\_init() / to\_rtr() / to\_rts() / verify\_rts() / close()}.
+Each transition is wrapped in a retry loop with exponential backoff
+(10, 20, 40, 80, 160 ms), and \texttt{verify\_rts()} queries the QP
+state after the final transition to catch silent failures.
+\texttt{close()} forces a transition back to RESET before
+\texttt{QP.close()} to avoid the \texttt{rdma\_rxe} zombie state
+documented in Update 4 Section 9.5.
+
+The key detail ported from libmesh-rdma is that \texttt{to\_rtr()} sets
+the GRH fields (\texttt{dgid}, \texttt{sgid\_index}, \texttt{hop\_limit})
+directly on the \texttt{AHAttr} rather than allocating an
+\texttt{AH} object. This is what makes the wireup work on direct-connect
+RoCE: the kernel never has to resolve an ARP entry because the
+destination GID is embedded in the QP state machine transition.
+
+\subsection{Integration with \texttt{roce\_transport.py}}
+
+The existing \texttt{RoCETransport.connect()} method was retargeted to
+use the three new modules: \texttt{find\_ipv4\_gid\_index} picks the
+GID index, \texttt{send\_handshake} or \texttt{accept\_handshake}
+exchanges \texttt{QpInfo} over TCP, and a \texttt{QueuePair} handles
+the state machine. The old JSON handshake, the hardcoded
+\texttt{gid\_index = 0}, and the inline RTR/RTS transitions are all
+deleted. Net line change is approximately $-80$ LOC inline
+$+30$ LOC call sites $+300$ LOC across the three new modules, plus a
+test file.
+
+\subsection{Testing}
+
+\texttt{middleware/tests/test\_rdma\_bootstrap.py} contains 17 tests:
+16 pure Python (wire format, handshake loopback, GID helpers, and
+regression tests for the three non-handshake security findings) and
+one hardware-dependent smoke test that verifies \texttt{QueuePair.to\_init()}
+against real \texttt{rxe0}. The full RTR/RTS loopback test is guarded
+so that it skips on SoftRoCE builds where the kernel refuses loopback
+GRH transitions with EINVAL (a known rxe limitation that does not
+apply to real ConnectX hardware). On the local testbed, 16 tests pass
+and 1 skips.
+
+\section{Next Steps and Open Questions}
+\label{sec:next_steps}
+
+Carried over from Update 4:
+
+\begin{enumerate}
+  \item Multi-threaded concurrent workload on SoftRoCE to demonstrate
+        head-of-line blocking elimination.
+  \item vLLM \texttt{KvConnector} integration for end-to-end
+        prefill/decode over libscuffedrdma.
+  \item Port the data path from pyverbs to C++ or Rust to remove the
+        GIL bottleneck.
+\end{enumerate}
+
+New this update:
+
+\begin{enumerate}
+  \setcounter{enumi}{3}
+  \item Confirm PR \#11307 behavior on a real direct-connect RoCE ring
+        once ConnectX hardware is available, to verify the RDMACM
+        footnote in Section~\ref{sec:reddit} holds.
+  \item Decide whether PR \#11304 should be reopened; the close event
+        was simultaneous with a force-push on 2026-04-04 and looks
+        accidental, but this has not been confirmed.
+  \item Decide whether to responsibly disclose the
+        \texttt{mesh\_mpi\_pt2pt.c} vulnerability upstream to
+        \texttt{autoscriptlabs/libmesh-rdma}. The project is MIT-licensed
+        and in active development, so standard responsible-disclosure
+        norms apply.
+  \item Run the full \texttt{QueuePair} loopback RTR test on real
+        ConnectX hardware to confirm the SoftRoCE skip is a rxe quirk
+        and not a wrapper bug.
+\end{enumerate}
+
+\begin{thebibliography}{9}
+
+\bibitem{libmesh_rdma}
+autoscriptlabs, ``libmesh-rdma + libmesh-mpi: RDMA networking for
+consumer GPU clusters --- no managed switch required.'' GitHub, 2026.
+\url{https://github.com/autoscriptlabs/libmesh-rdma}
+
+\bibitem{reddit_directconnect_roce}
+Ok-Pomegranate1314, ``Custom MPI over RDMA for direct-connect RoCE ---
+no managed switch, no UCX, no UD. 55 functions, 75 KB.'' r/HPC, 2026.
+\url{https://www.reddit.com/r/HPC/comments/1ruzjw3/custom_mpi_over_rdma_for_directconnect_roce_no/}
+
+\bibitem{mlx_pr3094}
+ml-explore, ``MLX PR \#3094: JACCL distributed backend.'' GitHub, 2026.
+\url{https://github.com/ml-explore/mlx/pull/3094}
+
+\bibitem{turboquant_flashblade}
+R.~Alvarez, ``Up to 10$\times$ faster KV cache restore: TurboQuant
+meets FlashBlade.'' Pure Storage Blog, 2026.
+\url{https://blog.purestorage.com/purely-technical/up-to-10x-faster-kv-cache-restore-turboquant-meets-flashblade/}
+
+\bibitem{nvidia_hpcx}
+NVIDIA, ``HPC-X: High-Performance Computing Software Toolkit.''
+NVIDIA Networking, 2026.
+\url{https://developer.nvidia.com/networking/hpc-x}
+
+\bibitem{introl_gpu_virt}
+Introl, ``GPU virtualization: maximizing utilization in multi-tenant
+environments.'' Introl Blog, 2025.
+\url{https://introl.com/blog/gpu-virtualization-maximizing-utilization-multi-tenant-environments}
+
+\end{thebibliography}
+
+\end{document}

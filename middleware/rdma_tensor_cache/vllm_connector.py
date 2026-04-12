@@ -24,6 +24,11 @@ PRIORITY_MAP = {
     COLD: 2,  # low priority, batched transfer
 }
 
+# Upper bound for a single KV layer transfer. Larger than any realistic
+# key/value slab for thesis-sized models, small enough to prevent a
+# crafted peer from triggering a multi-GB allocation via the recv path.
+MAX_KV_LAYER_BYTES = 500 * 1024 * 1024  # 500 MB
+
 
 class TensorClassifier:
     """WFA-based tensor heat classifier for transport prioritization."""
@@ -256,12 +261,23 @@ class RDMAKVCacheConnector:
                     meta: KVCacheMetadata) -> Tuple[np.ndarray, np.ndarray]:
         header = self._transport.recv(12)
         _, k_len, v_len = struct.unpack('<III', header)
+        if k_len + v_len > MAX_KV_LAYER_BYTES or k_len == 0 or v_len == 0:
+            raise ValueError(
+                f"layer {layer} header reports k_len={k_len} v_len={v_len} "
+                f"(max {MAX_KV_LAYER_BYTES}); refusing to recv"
+            )
         k_wire = self._transport.recv(k_len)
         v_wire = self._transport.recv(v_len)
         k_data = np.frombuffer(k_wire, dtype=np.float16).astype(np.float32)
         v_data = np.frombuffer(v_wire, dtype=np.float16).astype(np.float32)
         shape = (meta.num_heads, meta.seq_len, meta.head_dim)
-        return k_data.reshape(shape), v_data.reshape(shape)
+        try:
+            return k_data.reshape(shape), v_data.reshape(shape)
+        except ValueError as exc:
+            raise ValueError(
+                f"layer {layer} wire data shape mismatch: expected {shape}, "
+                f"got k_len={k_len} v_len={v_len}"
+            ) from exc
 
     @property
     def classifier(self) -> TensorClassifier:

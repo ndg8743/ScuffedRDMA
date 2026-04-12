@@ -3,6 +3,13 @@ Soft-RoCE Transport Implementation.
 
 RDMA over Converged Ethernet using rdma-core verbs API.
 Provides kernel-bypass data transfer with RDMA semantics.
+
+The bootstrap and QP state machine are delegated to the three ported
+libmesh-rdma modules:
+
+    rdma_gid_discovery.find_ipv4_gid_index  — picks the right GID
+    rdma_bootstrap.send_handshake/accept    — fixed 64-byte TCP protocol
+    rdma_qp_state_machine.QueuePair         — retrying state machine
 """
 
 import os
@@ -10,6 +17,9 @@ import subprocess
 import time
 from typing import Optional, Dict, Any, Tuple
 
+from .rdma_bootstrap import HandshakeError, QpInfo, accept_handshake, send_handshake
+from .rdma_gid_discovery import find_ipv4_gid_index
+from .rdma_qp_state_machine import QueuePair, QueuePairError
 from .transport_base import TransportBase, TransportType
 
 
@@ -41,15 +51,15 @@ class RoCETransport(TransportBase):
         self._context = None
         self._pd = None
         self._cq = None
+        self._qp_wrapper: Optional[QueuePair] = None
         self._qp = None
         self._mr = None
         self._buffer = None
         self._buffer_size = 4096  # 4KB default buffer
 
-        # Remote connection info
-        self._remote_qpn = 0
-        self._remote_lid = 0
-        self._remote_gid = None
+        # Remote connection info (populated after handshake)
+        self._remote_info: Optional[QpInfo] = None
+        self._local_gid_index: int = 0
 
         # Try to import pyverbs
         self._try_import_verbs()
@@ -123,11 +133,16 @@ class RoCETransport(TransportBase):
         Establish RDMA connection.
 
         Args:
-            host: Remote hostname or IP (for CM connection)
-            port: Remote port (used for out-of-band QP exchange)
+            host: Remote hostname or IP (peer of the TCP handshake)
+            port: Remote port (TCP bootstrap listen port)
             **kwargs:
                 buffer_size: Size of RDMA buffer (default: 4096)
                 timeout: Connection timeout in seconds
+                preferred_ip: IPv4 address to match against the RDMA GID
+                  table, used to pick the right RoCEv2 GID index
+                is_server: If True, accept a handshake on `port` instead
+                  of connecting to `(host, port)`. Required for the
+                  listening side of a cross-node bootstrap.
 
         Returns:
             True if connected successfully
@@ -137,9 +152,10 @@ class RoCETransport(TransportBase):
 
         buffer_size = kwargs.get('buffer_size', self._buffer_size)
         timeout = kwargs.get('timeout', 10.0)
+        preferred_ip = kwargs.get('preferred_ip', None)
+        is_server = kwargs.get('is_server', False)
 
         try:
-            # Import verbs modules
             d = self._pyverbs['device']
             pd_mod = self._pyverbs['pd']
             cq_mod = self._pyverbs['cq']
@@ -147,7 +163,6 @@ class RoCETransport(TransportBase):
             mr_mod = self._pyverbs['mr']
             e = self._pyverbs['enums']
 
-            # Open device context
             devices = d.get_device_list()
             for dev in devices:
                 if dev.name.decode() == self._device:
@@ -157,23 +172,21 @@ class RoCETransport(TransportBase):
             if not self._context:
                 raise ConnectionError(f"RDMA device {self._device} not found")
 
-            # Create protection domain
             self._pd = pd_mod.PD(self._context)
-
-            # Create completion queue
             self._cq = cq_mod.CQ(self._context, 100)
 
-            # Create queue pair
-            qp_init = qp_mod.QPInitAttr(
-                qp_type=e.IBV_QPT_RC,
-                scq=self._cq,
-                rcq=self._cq,
-                cap=qp_mod.QPCap(max_send_wr=16, max_recv_wr=16,
-                                  max_send_sge=1, max_recv_sge=1)
+            self._local_gid_index = find_ipv4_gid_index(
+                self._context, port=1, preferred_ip=preferred_ip
             )
-            self._qp = qp_mod.QP(self._pd, qp_init)
 
-            # Allocate and register memory
+            cap = qp_mod.QPCap(max_send_wr=16, max_recv_wr=16,
+                               max_send_sge=1, max_recv_sge=1)
+            self._qp_wrapper = QueuePair(
+                self._pd, self._cq, cap,
+                port=1, gid_index=self._local_gid_index,
+            )
+            self._qp = self._qp_wrapper.qp
+
             self._buffer_size = buffer_size
             self._buffer = bytearray(buffer_size)
             self._mr = mr_mod.MR(
@@ -182,16 +195,18 @@ class RoCETransport(TransportBase):
                 e.IBV_ACCESS_LOCAL_WRITE | e.IBV_ACCESS_REMOTE_WRITE | e.IBV_ACCESS_REMOTE_READ
             )
 
-            # Exchange QP info with remote (via TCP out-of-band)
-            local_info = self._get_local_qp_info()
-            remote_info = self._exchange_qp_info(host, port, local_info, timeout)
+            local_qp_info = self._build_local_qp_info(preferred_ip)
 
-            if not remote_info:
-                raise ConnectionError("Failed to exchange QP info")
+            if is_server:
+                remote = accept_handshake(port, local_qp_info, timeout=timeout)
+            else:
+                remote = send_handshake(host, port, local_qp_info, timeout=timeout)
+            self._remote_info = remote
 
-            # Transition QP to RTR and RTS states
-            self._transition_qp_to_rtr(remote_info)
-            self._transition_qp_to_rts()
+            self._qp_wrapper.to_init()
+            self._qp_wrapper.to_rtr(remote)
+            self._qp_wrapper.to_rts(local_psn=local_qp_info.psn)
+            self._qp_wrapper.verify_rts()
 
             self._connected = True
             self._config.update({
@@ -200,123 +215,51 @@ class RoCETransport(TransportBase):
                 "port": port,
                 "buffer_size": buffer_size,
                 "local_qpn": self._qp.qp_num,
-                "remote_qpn": remote_info['qpn'],
+                "remote_qpn": remote.qpn,
+                "gid_index": self._local_gid_index,
             })
 
             return True
 
-        except Exception as e:
+        except (HandshakeError, QueuePairError) as exc:
             self.disconnect()
-            raise ConnectionError(f"RoCE connect failed: {e}")
+            raise ConnectionError(f"RoCE connect failed: {exc}")
+        except Exception as exc:
+            self.disconnect()
+            raise ConnectionError(f"RoCE connect failed: {exc}")
 
-    def _get_local_qp_info(self) -> Dict[str, Any]:
-        """Get local QP information for exchange."""
+    def _build_local_qp_info(self, preferred_ip: Optional[str]) -> QpInfo:
+        """Populate a QpInfo from the live context + MR for the handshake."""
         e = self._pyverbs['enums']
-
-        # Get port attributes
         port_attr = self._context.query_port(1)
 
-        # Get GID
-        gid = self._context.query_gid(1, 0)
+        gid_entry = self._context.query_gid(1, self._local_gid_index)
+        raw_gid = getattr(gid_entry, "gid", gid_entry)
+        if isinstance(raw_gid, str):
+            cleaned = raw_gid.replace(":", "")
+            raw_gid = bytes.fromhex(cleaned)
+        elif isinstance(raw_gid, (bytes, bytearray)):
+            raw_gid = bytes(raw_gid)
+        else:
+            raw_gid = bytes(str(raw_gid).encode())
 
-        return {
-            'qpn': self._qp.qp_num,
-            'lid': port_attr.lid,
-            'gid': gid.gid,
-            'rkey': self._mr.rkey,
-            'addr': self._mr.buf,
+        mtu_map = {
+            getattr(e, "IBV_MTU_256", 1): 256,
+            getattr(e, "IBV_MTU_512", 2): 512,
+            getattr(e, "IBV_MTU_1024", 3): 1024,
+            getattr(e, "IBV_MTU_2048", 4): 2048,
+            getattr(e, "IBV_MTU_4096", 5): 4096,
         }
+        mtu_bytes = mtu_map.get(getattr(port_attr, "active_mtu", 3), 1024)
 
-    def _exchange_qp_info(self, host: str, port: int,
-                          local_info: Dict, timeout: float) -> Optional[Dict]:
-        """
-        Exchange QP info with remote peer via TCP.
-
-        In production, this would use RDMA CM. This simplified version
-        uses TCP for out-of-band QP exchange.
-        """
-        import socket
-        import json
-
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            sock.connect((host, port))
-
-            # Send local info
-            local_data = json.dumps({
-                'qpn': local_info['qpn'],
-                'lid': local_info['lid'],
-                'gid': local_info['gid'].hex() if hasattr(local_info['gid'], 'hex') else str(local_info['gid']),
-                'rkey': local_info['rkey'],
-            }).encode()
-            sock.sendall(len(local_data).to_bytes(4, 'big') + local_data)
-
-            # Receive remote info
-            size_data = sock.recv(4)
-            if len(size_data) < 4:
-                return None
-            size = int.from_bytes(size_data, 'big')
-            remote_data = sock.recv(size)
-            remote_info = json.loads(remote_data.decode())
-
-            sock.close()
-
-            self._remote_qpn = remote_info['qpn']
-            self._remote_lid = remote_info['lid']
-
-            return remote_info
-
-        except (socket.error, json.JSONDecodeError) as e:
-            return None
-
-    def _transition_qp_to_rtr(self, remote_info: Dict) -> None:
-        """Transition QP from INIT to RTR state."""
-        e = self._pyverbs['enums']
-        qp_mod = self._pyverbs['qp']
-
-        # First transition to INIT
-        init_attr = qp_mod.QPAttr(
-            qp_state=e.IBV_QPS_INIT,
-            pkey_index=0,
-            port_num=1,
-            qp_access_flags=(e.IBV_ACCESS_LOCAL_WRITE |
-                            e.IBV_ACCESS_REMOTE_WRITE |
-                            e.IBV_ACCESS_REMOTE_READ)
+        return QpInfo(
+            qpn=self._qp.qp_num,
+            psn=0,
+            gid=raw_gid if len(raw_gid) == 16 else raw_gid.ljust(16, b"\x00")[:16],
+            ip=preferred_ip or "0.0.0.0",
+            gid_index=self._local_gid_index,
+            mtu=mtu_bytes,
         )
-        self._qp.to_init(init_attr)
-
-        # Then transition to RTR
-        rtr_attr = qp_mod.QPAttr(
-            qp_state=e.IBV_QPS_RTR,
-            path_mtu=e.IBV_MTU_1024,
-            dest_qp_num=remote_info['qpn'],
-            rq_psn=0,
-            max_dest_rd_atomic=1,
-            min_rnr_timer=12,
-        )
-        # Set AH attr for path
-        rtr_attr.ah_attr.dlid = remote_info['lid']
-        rtr_attr.ah_attr.sl = 0
-        rtr_attr.ah_attr.src_path_bits = 0
-        rtr_attr.ah_attr.port_num = 1
-
-        self._qp.to_rtr(rtr_attr)
-
-    def _transition_qp_to_rts(self) -> None:
-        """Transition QP from RTR to RTS state."""
-        e = self._pyverbs['enums']
-        qp_mod = self._pyverbs['qp']
-
-        rts_attr = qp_mod.QPAttr(
-            qp_state=e.IBV_QPS_RTS,
-            sq_psn=0,
-            timeout=14,
-            retry_cnt=7,
-            rnr_retry=7,
-            max_rd_atomic=1,
-        )
-        self._qp.to_rts(rts_attr)
 
     def disconnect(self) -> None:
         """Close RDMA connection and free resources."""
@@ -328,12 +271,13 @@ class RoCETransport(TransportBase):
                 pass
             self._mr = None
 
-        if self._qp:
+        if self._qp_wrapper:
             try:
-                self._qp.close()
+                self._qp_wrapper.close()
             except Exception:
                 pass
-            self._qp = None
+            self._qp_wrapper = None
+        self._qp = None
 
         if self._cq:
             try:

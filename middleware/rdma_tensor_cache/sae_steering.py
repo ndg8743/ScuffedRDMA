@@ -12,6 +12,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 
+# Upper bounds for wire-parsed sparse vectors. These are defense-in-depth
+# against crafted peers: a header claiming nnz=2^31-1 would otherwise
+# walk off the end of the data buffer in from_bytes().
+MAX_SPARSE_NNZ = 10_000_000      # 10M nonzeros — fits any realistic SAE feature
+MAX_SPARSE_DIM = 1_000_000_000   # 1B dimensions — loose upper bound
+
+
 @dataclass
 class SparseVector:
     """Sparse representation: only store nonzero indices and values."""
@@ -40,11 +47,22 @@ class SparseVector:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'SparseVector':
+        if len(data) < 8:
+            raise ValueError(f"sparse vector header truncated: {len(data)} bytes")
         header = np.frombuffer(data[:8], dtype=np.int32)
         dim, nnz = int(header[0]), int(header[1])
+        if not 0 <= nnz <= MAX_SPARSE_NNZ:
+            raise ValueError(f"sparse vector nnz out of range: {nnz}")
+        if not 0 <= dim <= MAX_SPARSE_DIM:
+            raise ValueError(f"sparse vector dim out of range: {dim}")
         idx_end = 8 + nnz * 4
+        val_end = idx_end + nnz * 4
+        if val_end > len(data):
+            raise ValueError(
+                f"sparse vector truncated: need {val_end} bytes, got {len(data)}"
+            )
         indices = np.frombuffer(data[8:idx_end], dtype=np.int32)
-        values = np.frombuffer(data[idx_end:idx_end + nnz * 4], dtype=np.float32)
+        values = np.frombuffer(data[idx_end:val_end], dtype=np.float32)
         return cls(indices=indices, values=values, dim=dim)
 
     @property
@@ -151,11 +169,17 @@ class SAEFeatureStore:
             return False
         try:
             data = self._transport.recv(65536)
-            sv = SparseVector.from_bytes(data)
-            self._features[(layer, feature_idx)] = sv
-            return True
-        except Exception:
+        except (OSError, TimeoutError):
             return False
+        try:
+            sv = SparseVector.from_bytes(data)
+        except ValueError:
+            # Malformed header or truncated payload — see MAX_SPARSE_* bounds
+            # in from_bytes(). Swallowing MemoryError or IndexError would hide
+            # real bugs, so only the deliberate ValueError path returns False.
+            return False
+        self._features[(layer, feature_idx)] = sv
+        return True
 
     @property
     def total_features(self) -> int:

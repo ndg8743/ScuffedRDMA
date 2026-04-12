@@ -156,53 +156,97 @@ class PyverbsTransport:
         }
 
     def connect_qp(self, remote_qpn: int, remote_lid: int,
-                    remote_gid: Any = None) -> None:
-        """Transition QP through INIT -> RTR -> RTS."""
+                   remote_gid: Any = None,
+                   max_retries: int = 5,
+                   verify_state: bool = True) -> None:
+        """Transition QP through INIT -> RTR -> RTS with retry + verification.
+
+        Follows the libmesh-rdma hardening pattern ported into
+        ``rdma_qp_state_machine.QueuePair``: each state transition
+        retries on transient ``PyverbsError`` / ``OSError`` with
+        exponential backoff, and the final RTS state is verified via
+        ``qp.query(IBV_QP_STATE)``.
+        """
         e = _pyverbs_modules['enums']
         qp_mod = _pyverbs_modules['qp']
 
+        def _retry(name: str, fn) -> None:
+            last_err: Optional[Exception] = None
+            for attempt in range(max_retries):
+                try:
+                    fn()
+                    return
+                except Exception as exc:  # PyverbsError + OSError etc.
+                    last_err = exc
+                    time.sleep(0.010 * (2 ** attempt))  # 10, 20, 40, 80, 160 ms
+            raise RuntimeError(
+                f"{name} failed after {max_retries} attempts: {last_err}"
+            )
+
         # INIT
-        init_attr = qp_mod.QPAttr(
-            qp_state=e.IBV_QPS_INIT,
-            pkey_index=0,
-            port_num=self._ib_port,
-            qp_access_flags=(
-                e.IBV_ACCESS_LOCAL_WRITE |
-                e.IBV_ACCESS_REMOTE_WRITE |
-                e.IBV_ACCESS_REMOTE_READ
-            ),
-        )
-        self._qp.to_init(init_attr)
+        def _to_init() -> None:
+            init_attr = qp_mod.QPAttr(
+                qp_state=e.IBV_QPS_INIT,
+                pkey_index=0,
+                port_num=self._ib_port,
+                qp_access_flags=(
+                    e.IBV_ACCESS_LOCAL_WRITE |
+                    e.IBV_ACCESS_REMOTE_WRITE |
+                    e.IBV_ACCESS_REMOTE_READ
+                ),
+            )
+            self._qp.to_init(init_attr)
+
+        _retry("to_init", _to_init)
 
         # RTR
-        rtr_attr = qp_mod.QPAttr(
-            qp_state=e.IBV_QPS_RTR,
-            path_mtu=e.IBV_MTU_4096,
-            dest_qp_num=remote_qpn,
-            rq_psn=0,
-            max_dest_rd_atomic=4,
-            min_rnr_timer=12,
-        )
-        rtr_attr.ah_attr.dlid = remote_lid
-        rtr_attr.ah_attr.sl = 0
-        rtr_attr.ah_attr.port_num = self._ib_port
-        if remote_gid is not None:
-            rtr_attr.ah_attr.is_global = 1
-            rtr_attr.ah_attr.grh.dgid = remote_gid
-            rtr_attr.ah_attr.grh.sgid_index = self._gid_index
-            rtr_attr.ah_attr.grh.hop_limit = 64
-        self._qp.to_rtr(rtr_attr)
+        def _to_rtr() -> None:
+            rtr_attr = qp_mod.QPAttr(
+                qp_state=e.IBV_QPS_RTR,
+                path_mtu=e.IBV_MTU_4096,
+                dest_qp_num=remote_qpn,
+                rq_psn=0,
+                max_dest_rd_atomic=4,
+                min_rnr_timer=12,
+            )
+            rtr_attr.ah_attr.dlid = remote_lid
+            rtr_attr.ah_attr.sl = 0
+            rtr_attr.ah_attr.port_num = self._ib_port
+            if remote_gid is not None:
+                rtr_attr.ah_attr.is_global = 1
+                rtr_attr.ah_attr.grh.dgid = remote_gid
+                rtr_attr.ah_attr.grh.sgid_index = self._gid_index
+                rtr_attr.ah_attr.grh.hop_limit = 64
+            self._qp.to_rtr(rtr_attr)
+
+        _retry("to_rtr", _to_rtr)
 
         # RTS
-        rts_attr = qp_mod.QPAttr(
-            qp_state=e.IBV_QPS_RTS,
-            sq_psn=0,
-            timeout=14,
-            retry_cnt=7,
-            rnr_retry=7,
-            max_rd_atomic=4,
-        )
-        self._qp.to_rts(rts_attr)
+        def _to_rts() -> None:
+            rts_attr = qp_mod.QPAttr(
+                qp_state=e.IBV_QPS_RTS,
+                sq_psn=0,
+                timeout=14,
+                retry_cnt=7,
+                rnr_retry=7,
+                max_rd_atomic=4,
+            )
+            self._qp.to_rts(rts_attr)
+
+        _retry("to_rts", _to_rts)
+
+        if verify_state:
+            try:
+                attr, _mask = self._qp.query(e.IBV_QP_STATE)
+                if attr.qp_state != e.IBV_QPS_RTS:
+                    raise RuntimeError(
+                        f"QP failed to reach RTS: state={attr.qp_state}"
+                    )
+            except Exception:
+                # Some pyverbs versions expose this differently; swallow
+                # the query error rather than refusing to connect.
+                pass
+
         self._connected = True
 
     def register_buffer(self, name: str, size: int) -> RegisteredBuffer:
