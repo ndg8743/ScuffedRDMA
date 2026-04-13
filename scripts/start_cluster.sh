@@ -33,7 +33,9 @@ CHIMERA_IP="${CHIMERA_IP:-192.168.1.150}"
 CERBERUS_IP="${CERBERUS_IP:-192.168.1.233}"
 VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:latest}"
 MODELS_DIR="${MODELS_DIR:-/models}"
-DEPLOY_DIR="${DEPLOY_DIR:-/home/nathan/ScuffedRDMA/deployment/multi-node}"
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+DEPLOY_DIR="${DEPLOY_DIR:-$REPO_DIR/deployment/multi-node}"
+SSH_USER="${SSH_USER:-$USER}"
 
 # Default options
 TRANSPORT="${SCUFFED_TRANSPORT:-auto}"
@@ -111,7 +113,7 @@ get_nccl_env() {
             ;;
         auto)
             # Auto-detect: check for RDMA devices
-            if ssh "infra@$CHIMERA_IP" "lsmod | grep -q rdma_rxe" 2>/dev/null; then
+            if ssh "${SSH_USER}@$CHIMERA_IP" "lsmod | grep -q rdma_rxe" 2>/dev/null; then
                 echo "NCCL_IB_HCA=rxe0 NCCL_IB_GID_INDEX=1 NCCL_NET_GDR_LEVEL=0 NCCL_DEBUG=INFO"
             else
                 echo "NCCL_IB_DISABLE=1 NCCL_NET_GDR_LEVEL=0 NCCL_DEBUG=INFO"
@@ -135,7 +137,7 @@ load_ttpoe_modules() {
 
     echo "Loading TTPoe modules on $node..."
 
-    ssh "infra@$node" "
+    ssh "${SSH_USER}@$node" "
         if ! lsmod | grep -q modttpoe; then
             cd /opt/ttpoe 2>/dev/null || cd ~/ttpoe
             sudo insmod modttpoe/modttpoe.ko dev=$interface dst=$dst_mac verbose=2
@@ -147,7 +149,7 @@ unload_ttpoe_modules() {
     local node="$1"
 
     echo "Unloading TTPoe modules on $node..."
-    ssh "infra@$node" "sudo rmmod modttpoe 2>/dev/null" || true
+    ssh "${SSH_USER}@$node" "sudo rmmod modttpoe 2>/dev/null" || true
 }
 
 # =============================================================================
@@ -158,10 +160,10 @@ stop_cluster() {
     echo "Stopping cluster..."
 
     echo "Stopping head node (Chimera)..."
-    ssh "infra@$CHIMERA_IP" "cd $DEPLOY_DIR && docker compose -f docker-compose.head.yaml down" 2>/dev/null || true
+    ssh "${SSH_USER}@$CHIMERA_IP" "cd $DEPLOY_DIR && docker compose -f docker-compose.head.yaml down" 2>/dev/null || true
 
     echo "Stopping worker node (Cerberus)..."
-    ssh "infra@$CERBERUS_IP" "cd $DEPLOY_DIR && docker compose -f docker-compose.worker.yaml down" 2>/dev/null || true
+    ssh "${SSH_USER}@$CERBERUS_IP" "cd $DEPLOY_DIR && docker compose -f docker-compose.worker.yaml down" 2>/dev/null || true
 
     if [[ "$TRANSPORT" == "ttpoe" ]]; then
         unload_ttpoe_modules "$CHIMERA_IP"
@@ -190,8 +192,8 @@ start_cluster() {
     # Load TTPoe if needed
     if [[ "$TRANSPORT" == "ttpoe" ]]; then
         # Get MAC addresses
-        CHIMERA_MAC=$(ssh "infra@$CHIMERA_IP" "cat /sys/class/net/eth0/address" 2>/dev/null || echo "unknown")
-        CERBERUS_MAC=$(ssh "infra@$CERBERUS_IP" "cat /sys/class/net/eth0/address" 2>/dev/null || echo "unknown")
+        CHIMERA_MAC=$(ssh "${SSH_USER}@$CHIMERA_IP" "cat /sys/class/net/eth0/address" 2>/dev/null || echo "unknown")
+        CERBERUS_MAC=$(ssh "${SSH_USER}@$CERBERUS_IP" "cat /sys/class/net/eth0/address" 2>/dev/null || echo "unknown")
 
         load_ttpoe_modules "$CHIMERA_IP" "eth0" "$CERBERUS_MAC"
         load_ttpoe_modules "$CERBERUS_IP" "eth0" "$CHIMERA_MAC"
@@ -203,23 +205,23 @@ start_cluster() {
 
     if $DRY_RUN; then
         echo "[DRY RUN] Would execute on worker:"
-        echo "  ssh infra@$CERBERUS_IP \"$WORKER_CMD\""
+        echo "  ssh ${SSH_USER}@$CERBERUS_IP \"$WORKER_CMD\""
         echo ""
         echo "[DRY RUN] Would execute on head:"
-        echo "  ssh infra@$CHIMERA_IP \"$HEAD_CMD\""
+        echo "  ssh ${SSH_USER}@$CHIMERA_IP \"$HEAD_CMD\""
         return
     fi
 
     # Start worker first
     echo "Starting worker (Cerberus)..."
-    ssh "infra@$CERBERUS_IP" "$WORKER_CMD"
+    ssh "${SSH_USER}@$CERBERUS_IP" "$WORKER_CMD"
 
     echo "Waiting for worker to initialize..."
     sleep 5
 
     # Start head
     echo "Starting head (Chimera)..."
-    ssh "infra@$CHIMERA_IP" "$HEAD_CMD"
+    ssh "${SSH_USER}@$CHIMERA_IP" "$HEAD_CMD"
 
     echo ""
     echo "Waiting for vLLM to load model..."
@@ -242,7 +244,7 @@ start_cluster() {
 
     echo ""
     echo "Warning: Timeout waiting for API. Check logs with:"
-    echo "  ssh infra@$CHIMERA_IP 'docker logs vllm-head'"
+    echo "  ssh ${SSH_USER}@$CHIMERA_IP 'docker logs vllm-head'"
 }
 
 # =============================================================================

@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
       precision: 'bfloat16',
       maxTokens: 4096,
       healthy: modelHealthy,
-      url: process.env.VLLM_URL || 'http://vllm-decompile.default.svc:8000',
+      url: process.env.VLLM_URL || 'http://vllm-decompile.hydra-infra.svc:8000',
       promptFormat: '# This is the assembly code:\\n{ghidra_pseudo_code}\\n# What is the source code?\\n',
     },
     uptime: process.uptime(),

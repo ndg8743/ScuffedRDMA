@@ -51,10 +51,3 @@ Most scripts write JSON into `results/`. `aggregate_results.py` reads that direc
 
 JSON output plus generated `.tex` fragments. Most recent runs are `dual_qp_remote_benchmark.json` (Apr 3), `scuffed_quant_llm.json` (Apr 3), `scuffed_quant_benchmark.json` (Apr 2). The UCX comparison output (`ucx_comparison.json`) and aggregate tables are from Mar 30. `infra_report.json` at the top level is from the same Mar 30 run.
 
-## Stale
-
-These predate the current libscuffedrdma and scuffedQuant work and have not been touched since the early March middleware prototype. Candidates for deletion once nothing in the thesis references them:
-
-- `benchmark_precision.py` - FP32 -> FP16/BF16/INT8/MXFP4 conversion microbenchmarks against the old `middleware.rdma_tensor_cache.precision` module. Last real commit Mar 11 (`a5476c7`).
-- `benchmark_rdma_cache.py` - End-to-end `RdmaTensorCache` put/get/prefetch benchmark. Same Mar 11 origin; only touched since by unrelated renames.
-- `benchmark_transports.py` - TCP vs Soft-RoCE vs TTPoe transport suite from Update 6. Superseded by the dual QP and UCX comparison scripts.

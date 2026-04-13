@@ -106,9 +106,9 @@
  Step 7: Containerize & deploy
 
  - Multi-stage Dockerfile: Node 18 builds frontend (vite build), then serves static + backend
- - K8s manifests: Deployment (nodeSelector: chimera), Service, IngressRoute
- - Build image, import to RKE2 containerd on Chimera
- - Deploy vLLM pod on Cerberus first, then web app on Chimera
+ - K8s manifests: Deployment (nodeSelector: cerberus), Service, IngressRoute
+ - Build image, import to RKE2 containerd on Cerberus
+ - Deploy vLLM pod on Cerberus first, then web app on Cerberus
 
  Step 8: Verify
 

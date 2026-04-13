@@ -29,5 +29,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`RISVLLM server running on port ${PORT}`);
-  console.log(`vLLM endpoint: ${process.env.VLLM_URL || 'http://vllm-decompile.default.svc:8000'}`);
+  console.log(`vLLM endpoint: ${process.env.VLLM_URL || 'http://vllm-decompile.hydra-infra.svc:8000'}`);
 });

@@ -41,11 +41,6 @@ to live in `roce_transport.py`:
 - `rdma_tensor_cache/` — the main libscuffedrdma code. Dual QP pools, WFA
   classifier, PMP bang-bang controller, KV cache connector. See
   [rdma_tensor_cache/README.md](rdma_tensor_cache/README.md).
-- `scuffedkernels/` — GPU kernel profiling, optimization, and validation
-  loop. See [scuffedkernels/README.md](scuffedkernels/README.md).
-- `scuffedsearch/` — autonomous RDMA research automation with a frozen
-  harness and a single mutable optimization file. See
-  [scuffedsearch/README.md](scuffedsearch/README.md).
 - `tests/` — pytest suite focused on the libmesh-rdma port. See
   [tests/README.md](tests/README.md).
 
@@ -60,8 +55,3 @@ transport.connect(host, port)
 transport.send(data)
 response = transport.recv(size)
 ```
-
-## Stale
-
-- `cuda/`, `exo_integration/`, `lockfree/`, `rust/` — empty directories.
-  Placeholders that were never populated.

@@ -1,4 +1,4 @@
-const VLLM_BASE_URL = process.env.VLLM_URL || 'http://vllm-decompile.default.svc:8000';
+const VLLM_BASE_URL = process.env.VLLM_URL || 'http://vllm-decompile.hydra-infra.svc:8000';
 
 class VLLMClient {
   constructor(baseUrl = VLLM_BASE_URL) {

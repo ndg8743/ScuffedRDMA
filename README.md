@@ -15,10 +15,8 @@ datacenter InfiniBand.
 
 ## What lives in this repo
 
-This repo holds **one thesis** plus **three adjunct projects** that came out of the
-same hardware. They are not a single codebase — each has its own scope, entry
-points, and lifecycle. If you are looking at this repo for the first time, read
-the thesis core first and treat the others as siblings.
+This repo holds the thesis core plus a sibling full-stack app (RISVLLM) that shares
+the cluster hardware. They are not a single codebase. Read the thesis core first.
 
 ### 1. Thesis core — `middleware/` + `Updates/` + `benchmarks/` + `deployment/`
 
@@ -32,21 +30,7 @@ The actual RDMA middleware. This is what the thesis defends.
 | Benchmarks | `benchmarks/` | Dual QP, UCX comparison, transport sweep, scuffedQuant (synthetic + real LLM KV + MLX). Results in `benchmarks/results/`. |
 | Deployment | `deployment/` | Docker Compose + K8s configs for the lab cluster (cerberus, chimera, multi-node, vllm, vllm-gptoss). Includes the FA3 Blackwell patch for vLLM. |
 
-### 2. `middleware/scuffedkernels/` — GPU kernel profiling & autotune
-
-A separate framework for systematic profiling and optimization of GPU kernels
-(attention, matmul, softmax). Referenced from Update 3 §ScuffedKernels. Lives
-under `middleware/` for historical reasons but does not depend on the transport
-or tensor cache. Has its own `README.md`.
-
-### 3. `middleware/scuffedsearch/` — Autonomous RDMA parameter search
-
-An agent-driven experiment loop that mutates one file (`optimize.py`) against a
-fixed benchmark harness (`prepare.py`) to search the RDMA tunable space (batch
-size, QP depth, prefetch depth, wire format). Commit-per-experiment discipline.
-See `middleware/scuffedsearch/research_plan.md` and its `README.md`.
-
-### 4. `RISVLLM-app/` — Decompilation IDE (separate full-stack app)
+### 2. `RISVLLM-app/` — Decompilation IDE (separate full-stack app)
 
 A browser-based reverse-engineering IDE (React + Monaco + xterm.js + TinyEMU
 WASM) that calls LLM4Decompile-22B running on vLLM on Cerberus. Lives in the
@@ -117,7 +101,6 @@ pdflatex update4.tex && pdflatex update4.tex
 
 ```bash
 # RDMA benchmarks (on a node with an RDMA device)
-python benchmarks/benchmark_rdma_cache.py
 python benchmarks/benchmark_dual_qp.py
 python benchmarks/benchmark_ucx_comparison.py
 
