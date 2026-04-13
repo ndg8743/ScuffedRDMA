@@ -1,32 +1,39 @@
-# ScuffedKernels
+# scuffedkernels
 
-GPU kernel profiling, optimization, and benchmarking framework for attention,
-matmul, and softmax. Part of the ScuffedRDMA repo but **not** part of the RDMA
-transport data path — it sits alongside the thesis core and shares the cluster
-hardware.
+RDMA-aware kernel optimization framework. Profiles GPU kernels, ranks
+them by Amdahl's Law, runs a tiered optimization playbook, validates
+each candidate, and keeps or reverts based on measured speedup.
 
-Referenced from `Updates/Update3-TensorCacheArchitecture/update3.tex`
-§ScuffedKernels. The framework uses Amdahl-priority ranking to decide which
-kernel to optimize next: the product of potential speedup and absolute time
-saved on the inference workload.
+## Files
 
-## Layout
+- `profiler.py` — `KernelProfiler` and `AmdahlRanking`. Collects
+  per-kernel wall time, GPU time, memory, and FLOPs, then ranks by how
+  much of total model time each kernel owns. Flags RDMA-bound kernels
+  separately since their wait time overlaps with network transfers.
+- `optimizer.py` — `KernelOptimizer` with a six-tier playbook applied
+  one tier at a time: (1) block and grid dimensions, (2) memory access
+  patterns and shared-memory use, (3) reduced precision (TF32/FP16),
+  (4) persistent and fused kernels, (5) architecture-specific tuning
+  (SM occupancy, warp specialization), (6) overlap compute with RDMA
+  transfers.
+- `benchmarker.py` — `KernelBenchmarker` with a five-stage validation
+  gate: smoke, shape, numerical stability, determinism, edge cases.
+  Also runs an RDMA-aware roofline.
+- `orchestrator.py` — state machine that drives the
+  profile to rank to optimize to validate to accept-or-revert loop.
+  Records each `KernelOptimizationRecord` so results are reproducible.
 
-```
-scuffedkernels/
-├── profiler.py      # Per-kernel timing + occupancy collection
-├── benchmarker.py   # Repeatable micro-benchmark harness
-├── optimizer.py     # Tuning loop with guardrails
-├── orchestrator.py  # Top-level driver
-└── kernels/
-    ├── attention.py
-    ├── matmul.py
-    └── softmax.py
-```
+## kernels subpackage
 
-## Relationship to the thesis core
+`kernels/` holds baseline Triton implementations for the orchestrator to
+optimize. All three fall back to NumPy when Triton is missing.
 
-ScuffedKernels does not import from `middleware/rdma_tensor_cache/` or from the
-transport layer. It produces optimized GPU kernels; the RDMA path consumes
-tensors regardless of which kernel produced them. They are independently
-runnable.
+- `attention.py` — Flash-Attention-style tiled attention.
+- `matmul.py` — tiled GEMM with NVSHMEM integration stubs for
+  RDMA-aware compute.
+- `softmax.py` — online-normalized softmax.
+
+## Stale
+
+None. All files are from a single commit (`a0d82ce`) and are wired
+together through `__init__.py`.
