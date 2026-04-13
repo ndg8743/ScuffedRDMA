@@ -1,3 +1,6 @@
 [submodule "ucx"]
 	path = ucx
 	url = https://github.com/openucx/ucx.git
+[submodule "vllm"]
+	path = vllm
+	url = https://github.com/vllm-project/vllm.git
