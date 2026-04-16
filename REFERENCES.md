@@ -37,7 +37,10 @@ Comprehensive bibliography for the ScuffedRDMA thesis project.
 - Four-tier KV memory hierarchy (G1 GPU / G2 CPU / G3 local NVMe / G4 shared network). Storage Scale unifies G3+G4 through a global namespace with locality-aware placement. BlueField-4 offloads RDMA network + storage paths from CPU; DOCA + NIXL provide the software integration.
 
 [4g] Hsu, A., Ngo, K., Zhu, Y., Stoica, R., Margalit, G., Tarasov, V., & Kieran, M. (2026). **Rethinking LLM Inference Economics: KV Cache Reuse with llm-d, LMCache, and IBM Storage Scale**. IBM Community, Feb. 6, 2026. https://community.ibm.com/community/user/blogs/anthony-hsu/2026/02/06/rethinking-llm-inference-economics
-- Reports TTFT and inference cost each reduced by >10× at high KV reuse rates, measured on a 70B model on 4× H100 with 128k context (~320 KB per KV entry) using LMCache externalisation to Storage Scale at ~8 GB/s sustained. "Every reused token is GPU compute you don't have to pay for again" — the economic framing ScuffedRDMA's transport-layer work is downstream of.
+- Reports TTFT and inference cost each reduced by >10× at high KV reuse rates, measured on a 70B model on 4× H100 with 128k context (~320 KB per KV entry) using LMCache externalisation to Storage Scale at ~8 GB/s sustained.
+
+[4h] MIT sandook team. (2026). **sandook: Aggregated NVMe Block Device with Read/Write Workload Isolation**. GitHub / NSDI 2026. https://github.com/mit-sandook/sandook
+- Aggregates multiple NVMe SSDs into a unified block device with dynamic read/write workload isolation and SSD-latency-model-driven scheduling. Candidate substrate for a GPFS-analog KV cache tier on commodity hardware: exposes standard Linux block-device semantics, so anything that consumes GPFS's NSD-over-RDMA interface can layer on top. Worth reading `blk_dev/` and `scheduler/control_plane/` for the workload-isolation mechanism that pairs with the hot/cold QP split in libscuffedrdma.
 
 [4f] Red Hat Developer (2025). **llm-d: Kubernetes-native distributed inferencing**. https://developers.redhat.com/articles/2025/05/20/llm-d-kubernetes-native-distributed-inferencing
 - Source of the scorer framework (LoadAware, SessionAffinity, NoHitLRU, ActiveRequest) that the WFA classifier's decomposition mirrors

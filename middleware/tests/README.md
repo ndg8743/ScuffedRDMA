@@ -1,8 +1,8 @@
 # tests
 
-Pytest suite for the middleware layer. Small on purpose, mostly focused
-on the libmesh-rdma port since that's where wire-format and state-machine
-bugs bite hardest.
+Pytest suite for the middleware layer. Small on purpose, focused on the
+bootstrap and QP state-machine code where wire-format and state bugs
+bite hardest.
 
 ## Files
 
@@ -23,10 +23,3 @@ bugs bite hardest.
 cd /home/nathan/ScuffedRDMA
 pytest middleware/tests/
 ```
-
-## Stale
-
-None. The test file pairs with the modules it was added beside.
-Coverage of `rdma_tensor_cache/` and the other subpackages lives
-elsewhere in the repo (outside `middleware/tests/`) or is not yet
-written.

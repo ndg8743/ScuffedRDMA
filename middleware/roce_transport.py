@@ -1,11 +1,10 @@
 """
 Soft-RoCE Transport Implementation.
 
-RDMA over Converged Ethernet using rdma-core verbs API.
+RDMA over Converged Ethernet using the rdma-core verbs API.
 Provides kernel-bypass data transfer with RDMA semantics.
 
-The bootstrap and QP state machine are delegated to the three ported
-libmesh-rdma modules:
+Bootstrap and QP state machine are delegated to three sibling modules:
 
     rdma_gid_discovery.find_ipv4_gid_index  — picks the right GID
     rdma_bootstrap.send_handshake/accept    — fixed 64-byte TCP protocol

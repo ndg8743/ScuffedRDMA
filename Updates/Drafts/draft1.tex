@@ -2468,23 +2468,23 @@ math.
 \subsection{Relation to 2025--2026 transport systems}
 \label{sec:transport-related}
 
-Three 2025--2026 systems target overlapping territory.
+Two 2025--2026 systems target overlapping territory.
 TransferEngine~\cite{chen2025transferengine} is a point-to-point
 RDMA library portable across ConnectX-7 and AWS EFA, demonstrating
 400\,Gbps peak bandwidth and sub-second RL weight updates for
 trillion-parameter models. It is the datacenter-class analog of
 libscuffedrdma's goal: a portable RDMA transport for LLM systems,
 targeting enterprise hardware where libscuffedrdma targets consumer
-10\,GbE. The libmesh-rdma project~\cite{libmesh_rdma} is the closest
-sibling on the consumer side: an MIT-licensed 75\,KB library that
-reaches 77\,GB/s and 11.6\,$\mu$s RTT on direct-connect ConnectX-7
-DGX Spark systems without a managed switch, and whose TCP-based QP
-bootstrap informed the hardened handshake in this thesis's Python
-middleware. Where TransferEngine and libmesh-rdma provide the raw
-transport, libscuffedrdma adds the tensor-aware classification
-(WFA), bandwidth allocation (PMP), and compression (scuffedQuant)
-layers above it --- features neither of the two transport libraries
-implements.
+10\,GbE. The \texttt{sandook}~\cite{sandook} storage project at MIT
+attacks a complementary bottleneck in the same inference pipeline:
+it aggregates NVMe SSDs into a unified block device with
+read/write workload isolation and latency-model-driven scheduling,
+supplying the sort of NSD-class substrate that a KV-cache
+offloading tier can sit on. Where TransferEngine and sandook
+provide the raw transport and storage layers, libscuffedrdma adds
+the tensor-aware classification (WFA), bandwidth allocation (PMP),
+and compression (scuffedQuant) layers above them --- features
+neither targets directly.
 
 The classify-then-route pattern has its own lineage. Zhou's 1987
 dissertation on dynamic load balancing~\cite{zhou1987loadindex}

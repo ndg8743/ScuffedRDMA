@@ -1,17 +1,14 @@
-# Portions adapted from autoscriptlabs/libmesh-rdma (MIT).
-# See LICENSE-THIRD-PARTY.
 """
 RDMA GID discovery utilities.
 
-Ports `mesh_rdma_find_ipv4_gid_index` and its helpers from
-libmesh-rdma's `src/mesh_rdma_core.c`. The goal is to avoid the
-hardcoded `gid_index = 0` assumption in the pyverbs wrapper:
+Avoids the hardcoded `gid_index = 0` assumption in the pyverbs
+wrapper. Needed because:
 
-- RoCEv2 exposes IPv4-mapped GIDs at higher indices.
+- RoCEv2 exposes IPv4-mapped GIDs at higher indices than RoCEv1.
 - The "right" index depends on which interface carries the
   RDMA-facing IPv4 address.
-- Direct-connect RoCE without a managed switch (the libmesh-rdma
-  use case) relies on this detection working without ARP.
+- Direct-connect RoCE without a managed switch has no ARP to fall
+  back on, so GID selection has to work on first try.
 
 All functions are read-only against the pyverbs Context; they do
 not create, modify, or destroy any RDMA resources.
@@ -97,7 +94,7 @@ def find_ipv4_gid_index(ctx, port: int = 1,
                        max_index: int = 32) -> int:
     """Scan the GID table and return the best IPv4-mapped index.
 
-    Match order, following libmesh-rdma's heuristic:
+    Match order:
 
     1. If `preferred_ip` is given, the highest-index IPv4-mapped GID
        whose IPv4 equals `preferred_ip` (RoCEv2 entries sit at higher

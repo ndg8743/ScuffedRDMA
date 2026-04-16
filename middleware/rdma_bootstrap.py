@@ -1,22 +1,20 @@
-# Portions adapted from autoscriptlabs/libmesh-rdma (MIT).
-# See LICENSE-THIRD-PARTY.
 """
 Binary TCP handshake for RDMA QP bootstrap.
 
-Ports `mesh_rdma_qp_info_t`, `mesh_rdma_send_handshake`, and
-`mesh_rdma_accept_handshake` from libmesh-rdma's `src/mesh_rdma_core.c`.
+Exchanges a fixed-size `QpInfo` struct over TCP so two peers can set up
+their RC queue pairs without a managed switch or an ARP-resolved
+address handle. Replaces the JSON handshake that used to live in
+`roce_transport.py`.
 
-Replaces the JSON-based handshake previously in `roce_transport.py`.
-Two advantages:
+Two properties worth calling out:
 
-1. Fixed-size wire format (64 bytes) — there is no length field for a
-   crafted peer to manipulate, so the unbounded-recv class of bug is
-   gone by construction.
+1. Fixed-size wire format (64 bytes). No length field means no
+   unbounded-recv attack surface for a crafted peer.
+2. Network byte order + explicit struct packing. Binary-stable across
+   architectures and easy to reimplement in C if the server side ever
+   moves out of Python.
 
-2. Network byte order + explicit struct packing — interoperates with
-   libmesh-rdma's C code if the two ever need to talk to each other.
-
-The module is pure sockets. It does not import pyverbs.
+Pure sockets. Does not import pyverbs.
 """
 
 from __future__ import annotations
@@ -29,8 +27,7 @@ import time
 from dataclasses import dataclass, field
 
 
-# Wire format (matches libmesh-rdma mesh_rdma_qp_info_t layout).
-# Network byte order throughout.
+# Wire format. Network byte order throughout.
 #
 #   !       big-endian
 #   I       qpn            (4)
@@ -123,9 +120,9 @@ def send_handshake(host: str, port: int, local: QpInfo,
 
     Connects to `(host, port)`, sends `local.pack()`, reads 64 bytes
     back, and returns the peer's unpacked QpInfo. Retries the connect
-    up to `retries` times with `delay` seconds between attempts — this
-    matches libmesh-rdma's behavior of tolerating the peer not being
-    ready yet during parallel startup.
+    up to `retries` times with `delay` seconds between attempts so the
+    handshake tolerates the peer not being ready yet during parallel
+    startup.
     """
     last_err: Exception | None = None
     for attempt in range(retries):

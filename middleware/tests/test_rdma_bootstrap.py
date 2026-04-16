@@ -1,5 +1,5 @@
 """
-Unit tests for the libmesh-rdma port.
+Unit tests for the RDMA bootstrap, GID discovery, and QP state machine.
 
 Covers:
     * QpInfo pack/unpack round-trip and wire-size invariants

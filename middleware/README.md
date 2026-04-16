@@ -1,48 +1,25 @@
 # middleware
 
-Adaptive transport layer for distributed LLM inference. Picks between TCP,
-Soft-RoCE, and Tesla TTPoe at runtime and exposes a single `send`/`recv`
-interface regardless of backend.
+Adaptive transport layer for disaggregated LLM inference. Picks between TCP, SoftRoCE, and Tesla TTPoe at runtime and exposes one `send` / `recv` interface regardless of backend.
 
 ## Layout
 
-- `transport_base.py` — abstract `TransportBase` and `TransportMetrics`
-  that every backend implements.
-- `tcp_transport.py` — Berkeley-socket baseline. Used for comparison and
-  as a fallback when RDMA is unavailable.
-- `roce_transport.py` — Soft-RoCE (rxe0) over rdma-core. Delegates the
-  bootstrap and QP state machine to the three libmesh-rdma ports below.
-- `ttpoe_transport.py` — Tesla Dojo's TTPoe via `modttpoe.ko` over a
-  character device. Sub-microsecond latency when the kernel modules load.
-- `selector.py` — `TransportSelector` factory. Picks a backend from the
-  `SCUFFED_TRANSPORT` env var, explicit arg, or availability probing.
-- `nccl_config.py` — emits the NCCL env vars (`NCCL_IB_HCA`,
-  `NCCL_SOCKET_IFNAME`, etc.) that match the selected transport.
+### Transports
+- `transport_base.py` — abstract `TransportBase` and `TransportMetrics` that every backend implements.
+- `tcp_transport.py` — Berkeley-socket baseline. Fallback when RDMA is unavailable.
+- `roce_transport.py` — SoftRoCE (`rxe0`) via rdma-core. Delegates bootstrap and QP state to the primitives below.
+- `ttpoe_transport.py` — Tesla Dojo TTPoe via `modttpoe.ko` over a char device.
+- `selector.py` — `TransportSelector` factory. Resolves backend from `SCUFFED_TRANSPORT`, explicit arg, or availability probing.
+- `nccl_config.py` — emits the NCCL env vars (`NCCL_IB_HCA`, `NCCL_SOCKET_IFNAME`, …) that match the selected transport.
 
-## libmesh-rdma port
+### RDMA primitives
+- `rdma_bootstrap.py` — fixed-size 64-byte `QpInfo` exchange over TCP. `send_handshake` / `accept_handshake` with retry. No length field, so crafted peers cannot drive unbounded allocations.
+- `rdma_gid_discovery.py` — scans the port's GID table and picks the highest-index IPv4-mapped entry. Replaces the fragile `gid_index = 0` default.
+- `rdma_qp_state_machine.py` — `QueuePair` class driving RESET → INIT → RTR → RTS with exponential-backoff retry and state-query verification. Embeds the destination GID directly in the AH attributes so the path works on direct-connect RoCE without a managed switch.
 
-Three modules port the RDMA bootstrap from `autoscriptlabs/libmesh-rdma`.
-They replace the earlier JSON handshake and the inline QP code that used
-to live in `roce_transport.py`:
-
-- `rdma_bootstrap.py` — 64-byte fixed-size TCP handshake with network
-  byte order and struct packing. No length field for a crafted peer to
-  abuse.
-- `rdma_gid_discovery.py` — finds the right IPv4-mapped GID index for
-  RoCEv2 instead of hardcoding `gid_index = 0`. Needed for direct-connect
-  setups without a managed switch.
-- `rdma_qp_state_machine.py` — RESET to INIT to RTR to RTS transitions
-  wrapped in retries with exponential backoff. Forces RESET on close to
-  avoid the `rdma_rxe` zombie state described in thesis Update 4 section
-  9.5.
-
-## Subpackages
-
-- `rdma_tensor_cache/` — the main libscuffedrdma code. Dual QP pools, WFA
-  classifier, PMP bang-bang controller, KV cache connector. See
-  [rdma_tensor_cache/README.md](rdma_tensor_cache/README.md).
-- `tests/` — pytest suite focused on the libmesh-rdma port. See
-  [tests/README.md](tests/README.md).
+### Subpackages
+- `rdma_tensor_cache/` — the core libscuffedrdma code (dual QP pool, WFA, PMP, scuffedQuant, vLLM KV connector). See [`rdma_tensor_cache/README.md`](rdma_tensor_cache/README.md).
+- `tests/` — pytest suite. See [`tests/README.md`](tests/README.md).
 
 ## Usage
 

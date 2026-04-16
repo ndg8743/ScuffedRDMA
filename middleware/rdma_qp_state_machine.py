@@ -1,29 +1,23 @@
-# Portions adapted from autoscriptlabs/libmesh-rdma (MIT).
-# See LICENSE-THIRD-PARTY.
 """
 RDMA queue-pair state machine with retry and verification.
 
-Ports `mesh_rdma_create_qp` and `mesh_rdma_connect_qp` from
-libmesh-rdma's `src/mesh_rdma_core.c`. The key differences from the
-inline QP code in `roce_transport.py`:
+Hardened replacement for the inline QP code that used to live in
+`roce_transport.py`:
 
 - RESET -> INIT -> RTR -> RTS transitions, each wrapped in a retry
   loop with exponential backoff. Transient `PyverbsError` / `OSError`
   is treated as retryable.
-
 - RTR embeds the destination GID directly via `ah_attr.grh.dgid` and
   sets `sgid_index` from the local GID index. No `ibv_create_ah`
   allocation, no ARP dependency — this is what makes the bootstrap
   work on direct-connect RoCE without a managed switch.
-
 - `verify_rts()` queries the QP state after the final transition and
   raises if the hardware did not actually reach RTS.
-
 - `close()` forces a RESET transition before teardown to avoid the
   `rdma_rxe` zombie state the thesis notes in Update 4 section 9.5.
 
-The module imports pyverbs lazily so that tests which only exercise
-the handshake code can run without rdma-core installed.
+pyverbs is imported lazily so handshake-only tests can run on CI
+nodes without rdma-core installed.
 """
 
 from __future__ import annotations
@@ -160,8 +154,8 @@ class QueuePair:
         attr.ah_attr.port_num = self._port
         attr.ah_attr.sl = 0
         attr.ah_attr.src_path_bits = 0
-        # GRH fields — the libmesh-rdma trick that bypasses the ARP/AH
-        # path entirely. RoCE requires is_global = 1.
+        # GRH fields — passing the destination GID directly bypasses the
+        # ARP/AH path entirely. RoCE requires is_global = 1.
         attr.ah_attr.is_global = 1
         attr.ah_attr.dgid = self._bytes_to_pyverbs_gid(remote.gid)
         attr.ah_attr.sgid_index = self._gid_index
