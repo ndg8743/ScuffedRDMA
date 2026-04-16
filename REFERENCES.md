@@ -16,10 +16,31 @@ Comprehensive bibliography for the ScuffedRDMA thesis project.
 
 [3] Dao, T. (2023). **FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning**. *arXiv preprint arXiv:2307.08691*. https://arxiv.org/abs/2307.08691
 
-### Distributed Inference
+### Distributed Inference & Transport
 
 [4] Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H., ... & Stoica, I. (2023). **Efficient Memory Management for Large Language Model Serving with PagedAttention**. *SOSP 2023*. https://arxiv.org/abs/2309.06180
 - vLLM's PagedAttention paper
+
+[4a] Chen, X. et al. (2025). **TransferEngine: Bridging Common NICs to Uniform Point-to-Point RDMA for LLM Systems**. *arXiv:2510.27656*. https://arxiv.org/abs/2510.27656
+- One-sided WriteImm RDMA across multiple NICs per GPU; comparison baseline for libscuffedrdma's WFA/PMP layer
+
+[4b] Mao, C., Zhou, Y., Zhang, L., Cui, Y., Chen, Y., & Xu, P. (2025). **Previewing UCCL-EP: Flexible and Efficient Expert Parallelism for Cloud and Beyond**. https://arxiv.org/abs/2501.xxxxx
+- MoE expert-parallelism communication layer; TransferEngine reports substantially higher latency than its own approach
+
+[4c] Zhou, S. (1987). **Performance Studies of Dynamic Load Balancing in Distributed Systems**. Ph.D. dissertation, UC Berkeley, Tech. Rep. UCB/CSD-87-376.
+- Origin of the load-index abstraction used by LSF/LIM, Symphony/ELIM, and the WFA classifier design here
+
+[4d] IBM Research (2025). **Accelerating AI inference with IBM Storage Scale**. https://research.ibm.com/blog/accelerating-ai-inference-with-ibm-storage-scale
+- GPFS-backed KV cache offloading for vLLM/llm-d; reports 8–12× TTFT improvement vs recomputation. Comparison point for ScuffedRDMA's cross-node KV transfer numbers.
+
+[4e] Hsu, V. (2026). **Accelerating NVIDIA Dynamo with IBM Storage Scale and BlueField-4 Inference Context Memory Storage Platform**. IBM Community, Jan. 5, 2026. https://community.ibm.com/community/user/blogs/vincent-hsu/2026/01/05/accelerating-nvidia-dynamo-with-ibm-storage-scale
+- Four-tier KV memory hierarchy (G1 GPU / G2 CPU / G3 local NVMe / G4 shared network). Storage Scale unifies G3+G4 through a global namespace with locality-aware placement. BlueField-4 offloads RDMA network + storage paths from CPU; DOCA + NIXL provide the software integration.
+
+[4g] Hsu, A., Ngo, K., Zhu, Y., Stoica, R., Margalit, G., Tarasov, V., & Kieran, M. (2026). **Rethinking LLM Inference Economics: KV Cache Reuse with llm-d, LMCache, and IBM Storage Scale**. IBM Community, Feb. 6, 2026. https://community.ibm.com/community/user/blogs/anthony-hsu/2026/02/06/rethinking-llm-inference-economics
+- Reports TTFT and inference cost each reduced by >10× at high KV reuse rates, measured on a 70B model on 4× H100 with 128k context (~320 KB per KV entry) using LMCache externalisation to Storage Scale at ~8 GB/s sustained. "Every reused token is GPU compute you don't have to pay for again" — the economic framing ScuffedRDMA's transport-layer work is downstream of.
+
+[4f] Red Hat Developer (2025). **llm-d: Kubernetes-native distributed inferencing**. https://developers.redhat.com/articles/2025/05/20/llm-d-kubernetes-native-distributed-inferencing
+- Source of the scorer framework (LoadAware, SessionAffinity, NoHitLRU, ActiveRequest) that the WFA classifier's decomposition mirrors
 
 [5] Zheng, L., Chiang, W. L., Sheng, Y., Li, Z., Kwon, W., Zhuang, S., ... & Stoica, I. (2023). **Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena**. *arXiv preprint arXiv:2306.05685*. https://arxiv.org/abs/2306.05685
 

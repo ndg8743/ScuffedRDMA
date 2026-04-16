@@ -1,0 +1,730 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{fancyhdr}
+
+\setlist[itemize]{leftmargin=*,topsep=2pt,itemsep=1pt}
+\setlist[enumerate]{leftmargin=*,topsep=2pt,itemsep=1pt}
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{ScuffedRDMA questions}
+\lhead{Nathan Gopee, SUNY New Paltz}
+\rfoot{\thepage}
+
+\title{Questions: RDMA transport for disaggregated LLM inference\\[4pt]
+       \large Discussion guide for team meeting}
+\author{Nathan Gopee\\MS Computer Science, SUNY New Paltz\\\texttt{gopeen1@newpaltz.edu}}
+\date{\today}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+\hrule
+\vspace{6pt}
+
+\section*{Notes to myself before the meeting}
+
+\textbf{What to cover in the first three minutes (before I start asking
+things).}
+
+\begin{enumerate}
+\item \textbf{Thesis in one sentence.} An adaptive RDMA middleware for
+disaggregated LLM inference over commodity 10\,GbE Ethernet, targeting
+the KV-cache-transfer term of Time-to-First-Token in vLLM
+prefill/decode serving.
+
+\item \textbf{Why the problem is real.} On a single RC queue pair, an
+8\,$\mu$s metadata message and a 16\,MB KV block share one work queue,
+so the small transfer stalls behind the big one --- head-of-line
+blocking in software. InfiniBand solves it with hardware QoS. I'm
+building a software path over SoftRoCE that splits the queue pair into
+two priority classes.
+
+\item \textbf{Four components I've built.}
+  \begin{itemize}
+  \item \textbf{Dual QP pool} --- one protection domain, two RC QPs
+  (hot: busy-poll CQ; cold: sleep-poll).
+  \item \textbf{WFA classifier} --- Work-First-Adaptive policy that
+  labels each transfer hot or cold from tensor size plus the
+  prefill-vs-decode phase signal.
+  \item \textbf{PMP controller} --- Pontryagin's Maximum Principle
+  gives a bang-bang solution for bandwidth allocation between two
+  queues. Switching function
+  $S = \alpha q_H C \mu_H - \beta q_C C \mu_C$ uses queue depth and
+  measured service rate.
+  \item \textbf{scuffedQuant} --- two-stage KV compression
+  (PolarQuant + QJL sign-sketch) at 3 bits with no calibration.
+  91\,\% top-8 attention overlap on Granite 3.3-2B KV cache.
+  \end{itemize}
+
+\item \textbf{Testbed (consumer-grade).}
+  \begin{itemize}
+  \item Chimera: 3$\times$~RTX~3090, Aquantia AQC107 10\,GbE, SoftRoCE
+  (\texttt{rxe0}).
+  \item Cerberus: 2$\times$~RTX~5090, Intel X710 10\,GbE, SoftRoCE +
+  iWARP SR-IOV.
+  \item Measured: 0.92 Gb/s SoftRoCE loopback, 12.6\,$\mu$s single-QP
+  p50, +0.6\,$\mu$s dual-QP overhead, 8\,$\mu$s cross-node decode
+  latency.
+  \end{itemize}
+
+\item \textbf{Upstream contributions.} Six pull requests to
+\texttt{openucx/ucx} (\#11304--\#11309), all reviewed in Update~5.
+SoftRoCE wireup fix (\#11307) is the highest-impact one; it removes
+UCX's hard dependency on UD for the wireup auxiliary transport.
+
+\item \textbf{What I want from this meeting.} Not validation --- a
+reality check from people with more production miles than me. Where is
+my model wrong? What am I measuring that I shouldn't trust? What
+production failure modes am I about to walk into?
+\end{enumerate}
+
+\textbf{Don't do.}
+\begin{itemize}
+\item Don't dump the full PDF stack on intro. Send Update 4 + Update 5
+at most.
+\item Don't lead with the compression numbers. Storage engineers have
+seen a thousand compressors. Lead with the classify-then-route
+transport story.
+\item Don't over-claim. Every number I quote has a JSON file behind it
+under \texttt{benchmarks/results/}. If I don't have the JSON, I say
+"that's a target, not a measurement."
+\end{itemize}
+
+\vspace{8pt}
+\hrule
+\vspace{6pt}
+
+\section{RDMA fundamentals I want to sanity-check}
+
+\begin{enumerate}
+\item My dual-QP design treats head-of-line blocking at the work-queue
+level. Am I conflating two problems --- host-side queuing and
+wire-side congestion? Where does PFC / ECN / DCQCN actually matter for
+my traffic mix (many small metadata ops + sparse large KV blocks)?
+
+\item RoCEv2 on a lossy 10\,GbE link without PFC: what symptoms should
+I expect before I see throughput collapse? Drops vs. retransmits vs.
+RNR NAKs --- which one do I watch first?
+
+\item Direct-connect (no switch) vs. switched RoCE: what does the
+failure mode look like when someone plugs a switch in later? Anything
+beyond the ARP/AH story the r/HPC thread already covered?
+
+\item SoftRoCE (\texttt{rdma\_rxe}) as a stand-in for hardware RoCE ---
+which of my measurements are load-bearing on real hardware, and which
+ones are rxe artifacts? I've hit the GRH init issue already; what
+else?
+
+\item iWARP SR-IOV on the 5090 side is theoretical for me right now.
+Is iWARP still worth the effort for LLM inference traffic patterns, or
+has everyone effectively standardized on RoCEv2?
+
+\item GID index selection: libmesh-rdma (the project I ported from)
+had to scan for the IPv4-mapped GID because hard-coding index 0 was
+fragile. Is the right answer still to scan, or is there a stable
+ioctl/sysfs path production sites use?
+
+\item MTU: I'm running the rxe default. Should I push to 4096 or 9000
+(jumbo) on consumer NICs? What breaks first when I do?
+
+\item RC vs. RD vs. UD for KV traffic: I picked RC because PagedAttention
+block transfers are point-to-point and reliable. Am I leaving
+performance on the table by not exploring UD for the hot-path control
+messages specifically?
+
+\item Queue-pair lifetime: I create QPs at connection setup and hold
+them open. At a few hundred endpoints per host is that OK, or do I
+need a QP pool with per-peer aging like Lustre's LNET peer table?
+
+\item One-sided WRITE vs. SEND/RECV for KV blocks: WRITE wins on the
+latency side but requires the sender to know the receiver's rkey and
+address. At what fan-out does the bookkeeping overhead for WRITE start
+to beat the simpler SEND/RECV path?
+\end{enumerate}
+
+\section{pyverbs / libibverbs / rdma-core}
+
+\begin{enumerate}
+\item Is pyverbs production-viable for the hot path, or am I fooling
+myself because SoftRoCE is hiding the GIL cost? At what message rate
+does Python lose to a C/Rust port?
+
+\item Memory-region registration: I register a large slab once, then
+issue WRITEs into offsets. Is that the right default, or should I be
+doing on-demand registration + MR cache per vLLM block?
+
+\item IOMMU interaction with pinned MRs on consumer motherboards: any
+gotchas with Ryzen / consumer Intel? I haven't had issues yet but I
+haven't run long-duration tests.
+
+\item Completion queue sizing: my hot pool has a CQ depth of 128
+against a send-queue depth of 64. Is that overbuilt, under-built, or
+irrelevant at my scale?
+
+\item Busy-poll vs. event-driven CQ: hot pool busy-polls (one core
+pinned). On a 3-3090 box that burns a core continuously. Is that
+acceptable on a production AI box, or is there an adaptive-poll
+pattern I should be using?
+
+\item Shared receive queues (SRQ): do they matter for my topology
+(two nodes, fan-in = 1)? Or is it only at larger fan-in that SRQ
+starts paying off?
+
+\item \texttt{ibv\_post\_send} batching: I submit one WR at a time.
+Should I be batching (posting a linked list) for the cold pool?
+
+\item \texttt{ibv\_poll\_cq} batch size: I poll up to 16 at a time.
+Is there a number I should justify rather than guess?
+
+\item Extended verbs (\texttt{ibv\_exp\_*}) vs. the ``standard'' verbs
+API --- am I missing anything important by staying on the standard
+API?
+
+\item rdma-core vs. MLNX OFED: consumer ConnectX-4 in Tower 2 is
+coming. Is upstream rdma-core enough or do I need the Mellanox OFED
+kernel modules for anything specific (GDR, GID assignment, counters)?
+\end{enumerate}
+
+\section{Block sizes, message granularity, KV transport}
+
+\begin{enumerate}
+\item vLLM's PagedAttention uses 16-token blocks. At \texttt{head\_dim}
+= 128, \texttt{n\_kv\_heads} = 32, that's $16 \cdot 2 \cdot 32 \cdot
+128 \cdot 2 = 256$\,KB per block (FP16). Is 256\,KB the natural
+unit for a single RDMA WRITE, or should I be aggregating blocks?
+
+\item Scatter/gather: one WRITE with an SGE list covering $N$ blocks,
+or $N$ WRITEs? Where's the crossover on a 10\,GbE link?
+
+\item RDMA Read vs. Write for KV fetch: decode is the puller. Is it
+better for decode to issue READs (pull model, self-paced) or for
+prefill to issue WRITEs (push model, sender-paced)?
+
+\item Message inline vs. non-inline: my hot-path control messages are
+small (tens of bytes). At what size does inline stop helping and start
+hurting?
+
+\item Unsignaled completions: I signal every completion. Is that
+wasting CQ cycles I should be reclaiming via a signaled-every-N
+strategy?
+
+\item Alignment: PagedAttention blocks aren't necessarily aligned to
+NIC PCIe burst boundaries. Does that show up as measurable overhead
+in practice, or is it noise?
+
+\item FlashInfer's MXFP4 KV cache layout: does that change the RDMA
+picture at all, or is it opaque to transport?
+
+\item scuffedQuant compresses to 3 bits, so a 256\,KB block becomes
+$\approx 32$\,KB. Does dropping into a different size class for the
+WFA classifier change anything I should know about?
+
+\item On-GPU vs. host-memory staging: I stage through host memory
+today (no GDR). How much are my latency numbers inflated by the
+PCIe round-trip per block?
+
+\item Maximum outstanding WRs per QP: what's a sensible value to set
+on the hot QP so I don't starve the RC pipeline but also don't build
+a deep queue that defeats the whole hot/cold split?
+\end{enumerate}
+
+\section{vLLM integration}
+
+\begin{enumerate}
+\item The \texttt{KvConnector} interface: how stable is it really?
+What's churning upstream that will break my integration if I pin too
+loose?
+
+\item Disaggregated prefill/decode in vLLM: is the expected production
+path through NIXL (NVIDIA Inference Xfer Library), through llm-d, or
+through a direct \texttt{KvConnector} subclass? Am I picking the right
+integration point?
+
+\item PagedAttention block table translation across nodes: prefill and
+decode have different physical block IDs. Is there a canonical way to
+exchange the mapping, or is everyone rolling their own?
+
+\item Tensor parallelism across a heterogeneous pair (3$\times$3090 vs.
+2$\times$5090): does that even work end-to-end in vLLM, or do I need
+pipeline parallelism to bridge the mismatch?
+
+\item MXFP4 on gpt-oss-120b: I have a 104.4 tok/s TCP baseline on
+Chimera. What should my RDMA target actually be before I call it a
+result?
+
+\item KV cache reuse across requests: with LMCache, cross-request
+reuse produces a very different traffic pattern (bulk read of prior
+context). Does my hot/cold split hold for that, or does it degenerate
+to all-cold?
+
+\item What's the lowest-friction way to drop libscuffedrdma in front
+of an unmodified vLLM for a first-pass measurement? A shim
+\texttt{TorchDistributed} backend? A \texttt{NIXL} plug-in?
+
+\item Which upstream vLLM PRs should I be tracking (not just
+referencing) for disaggregated prefill/decode?
+\end{enumerate}
+
+\section{I/O and RDMA testing methodology}
+
+\begin{enumerate}
+\item \texttt{ib\_write\_bw}, \texttt{ib\_write\_lat},
+\texttt{ib\_send\_bw}: which of these actually correlate with
+my application-level numbers, and which are misleading me?
+
+\item \texttt{perftest} vs. application-level microbenchmarks: where
+is each one strong, and what does each one hide?
+
+\item Multi-threaded stress tests: I don't have one yet. What should
+it look like? Concurrent WRITEs from N threads into one QP pool, or
+N QP pools?
+
+\item Long-duration stability: 24\,h of continuous inference. What
+counters should I be watching? \texttt{perfquery}? \texttt{nvidia-smi
+dmon}? Port-level error rates?
+
+\item Latency percentiles: I report p50/p95/p99. Is p99.9 the right
+tail to care about for inference dispatch, or is p99 enough?
+
+\item Microbenchmark noise floor: how do I distinguish a real +0.6
+$\mu$s dual-QP overhead from measurement noise at the sub-microsecond
+scale?
+
+\item Fault injection: should I be deliberately triggering QP errors
+(receiver posts no buffers, sender blasts anyway) and measuring
+recovery time? If so, what's the accepted way to do that?
+
+\item Cold boot vs. warm run: I pre-warm the pools before measuring.
+Is there a canonical warm-up protocol I should follow so my numbers
+are comparable with published UCX/NCCL numbers?
+
+\item CPU pinning, NUMA, IRQ affinity: I set core pinning for the
+busy-poll thread but I haven't tuned NUMA. What's the real-world
+impact?
+
+\item Profiling tools: I use \texttt{perf} + \texttt{py-spy}.
+Is there an RDMA-specific profiling toolkit I should know (MLNX
+NeoHost? UCX profiling?)?
+
+\item Regression testing: how do I prevent a future me from shipping
+a latency regression? What's the standard CI pattern for RDMA code?
+\end{enumerate}
+
+\section{Production system lessons (Lustre, GPFS, UCX at scale)}
+
+\begin{enumerate}
+\item Lustre's LNET credit accounting between small-message and
+bulk-message queues --- is that isomorphic to my PMP bang-bang
+controller, or is there something LNET does that I'm missing?
+
+\item Spectrum Scale NSD client uses RDMA. Does it run multiple QPs
+per NSD pair (priority classes), or a single QP with in-band
+prioritization?
+
+\item At what cluster size does single-QP head-of-line blocking
+become provably painful in production? 10 nodes? 100? Or is it the
+traffic mix, not the node count, that matters?
+
+\item If my dual-QP + WFA + PMP abstraction isn't novel in the
+filesystem world, where should I be looking for prior art? I'd rather
+cite it than rediscover it.
+
+\item UCX upstream: the six PRs I submitted --- are those the right
+six, or are the important issues somewhere else in the codebase I
+haven't read?
+
+\item What's the right failure model for an RDMA transport in an
+inference pipeline? An NSD client can retry for minutes; a decode step
+has a tens-of-milliseconds budget. What do production systems do at
+that gap?
+
+\item Network tuning for mixed traffic: production Lustre/GPFS
+clusters segregate metadata traffic onto its own IB partition. Is
+that the filesystem analog of my hot QP, or are the two mechanisms
+solving different problems?
+
+\item GPUDirect RDMA on consumer GPUs: I have ConnectX-4 on Tower 2
+and V100s. Is it worth the integration pain on consumer motherboards
+without BlueField, or should I stage through host RAM indefinitely?
+\end{enumerate}
+
+\section{Which open issues should I dive into the most?}
+
+The repository has 15 open issues. I have an ordering, but I'd rather
+hear where experienced engineers would start.
+
+\textbf{My ranking (highest return first):}
+
+\begin{enumerate}
+\item \textbf{\#35: TTFT reduction measurement.} The only measurement
+that matters for the thesis claim. Currently blocked by \#34.
+
+\item \textbf{\#34: vLLM disaggregated prefill/decode with RDMA.}
+The integration that makes \#35 possible. Highest implementation risk.
+
+\item \textbf{\#57: Multi-threaded concurrent workload benchmark.}
+Demonstrates dual-QP's value. Without this, Update~4's claim about
+HOL blocking is theoretical.
+
+\item \textbf{\#19: GPT-oss-120b RDMA vs. TCP benchmark.} First
+real ``RDMA beats TCP'' data point. Needs Tower~1 + Tower~2 with
+ConnectX-4 working.
+
+\item \textbf{\#37: 24-hour RoCE stability test.} Surfaces real
+failure modes a microbenchmark misses.
+
+\item \textbf{\#60: WFA trace-replay test.} Gives me a reproducible
+microbench for classifier regressions. Low implementation cost, high
+long-term payoff.
+
+\item \textbf{\#59: PMP stability sweep.} Answers ``is the bang-bang
+safe to ship?'' Must do before \#38 (ablation).
+
+\item \textbf{\#58: scuffedQuant extended validation.} Widens the
+model coverage beyond Granite 3.3-2B, strengthens the compression
+claim.
+
+\item \textbf{\#38: Full ablation study.} Thesis Chapter~5's results
+table. Blocked by \#35 + \#57.
+
+\item \textbf{Thesis chapters (\#39--\#44).} Writing cadence, no
+technical risk.
+\end{enumerate}
+
+\textbf{Questions for the team about this list:}
+
+\begin{enumerate}[resume]
+\item Am I right that \#34 and \#35 are the critical path? Or should
+I be running \#57 (multi-threaded benchmark) first, since it doesn't
+need vLLM integration and it's the cleanest demonstration of the
+dual-QP mechanism?
+
+\item Should I be doing \#37 (24-hour stability) earlier? It's cheap
+to set up and it catches bugs that block every other benchmark.
+
+\item Is there an issue missing from this list that you'd add?
+
+\item If I get stuck on \#34 (the vLLM integration), what's the
+fallback path? Can I ship a meaningful result with just \#57 +
+\#19 + \#58?
+\end{enumerate}
+
+\section{Things I don't know I don't know}
+
+\begin{enumerate}
+\item What's the single question you wish an MS student in this
+space had asked you two years earlier?
+
+\item Among the commercial/open-source KV-transport projects I should
+be tracking, which one has the closest failure mode to what I'm
+building?
+
+\item Is there a specific benchmark result (not a paper, a JSON file)
+that I should be reproducing before I trust my own numbers?
+
+\item What's the most common way a thesis like this fails at defense,
+and how do I immunize against it now rather than in nine months?
+\end{enumerate}
+
+\vspace{8pt}
+\hrule
+\vspace{6pt}
+
+\section{Bottleneck inventory (top to bottom)}
+
+Every layer in the disaggregated inference stack where something can
+stall, starve, drop, or serialize. Ordered from the user-visible
+request down to the NIC wire. Each item is where I expect to see a
+problem --- I want to know which ones actually bite in production
+and which ones are noise.
+
+\subsection*{Layer 0 --- Request arrival}
+\begin{enumerate}
+\item \textbf{Request rate variance.} Bursty arrivals collapse
+continuous batching into serial execution. What's the production
+arrival shape that breaks vLLM scheduling assumptions?
+\item \textbf{Prompt length distribution.} A 128-token prompt and a
+32k-token prompt produce KV caches that differ by 250$\times$. Does
+the WFA classifier need to see prompt length, not just the per-block
+size?
+\item \textbf{Session continuity.} Multi-turn conversations want
+prefix-cache hits; random-access RAG queries don't. How does the
+scheduler know which shape it's in?
+\end{enumerate}
+
+\subsection*{Layer 1 --- vLLM scheduler and dispatch}
+\begin{enumerate}[resume]
+\item \textbf{Scheduler tick latency.} vLLM makes placement decisions
+every step. What does that latency look like on our boxes, and does
+it bound the RDMA dispatch budget from above?
+\item \textbf{Preemption of long decodes.} When a high-priority
+request arrives mid-decode, the scheduler can preempt. Does that
+preemption flush KV state we'd otherwise want to reuse?
+\item \textbf{Batch shape re-decision.} Prefix cache hits change the
+compute shape of a batch. Does the scheduler see enough to adapt, or
+does it ride the original batch plan?
+\end{enumerate}
+
+\subsection*{Layer 2 --- Model compute on GPU}
+\begin{enumerate}[resume]
+\item \textbf{Attention compute ($O(n^2 d)$).} At 128k context, a
+single attention layer dominates the decode step. Is the transport
+layer invisible until attention is already solved by FlashAttention?
+\item \textbf{FFN matmul.} For dense models, FFN is usually compute-bound;
+for MoE it becomes expert-shuffle-bound. Which regime is each model
+in on our hardware?
+\item \textbf{Tensor-core utilization.} Ampere (3090) uses FP16/BF16
+tensor cores; Blackwell (5090) adds FP8/MXFP4. Is our transport
+budget sized against the slower GPU or the faster one?
+\item \textbf{Kernel launch overhead.} For small batches, launch
+overhead can exceed compute. Is that why my 4-layer Granite bench
+shows more variance than the 40-layer one?
+\end{enumerate}
+
+\subsection*{Layer 3 --- KV cache lifecycle}
+\begin{enumerate}[resume]
+\item \textbf{KV cache growth.} Linear in context length. At 128k
+context on a 7B model, $\approx 16$\,GB per user. Per-user, not
+aggregate.
+\item \textbf{PagedAttention block allocation.} 16 tokens per block
+at default vLLM settings; the block table fragments as requests
+enter and exit.
+\item \textbf{Block eviction / swap.} When HBM fills, blocks spill
+to CPU RAM or disk. Which blocks get evicted first under the current
+policy, and does the policy match what attention actually reads?
+\item \textbf{Prefix-cache hit rate.} Cross-request reuse of
+already-computed KV blocks. High hit rate flips the workload from
+``compute-bound'' to ``cache-transport-bound.''
+\item \textbf{Cross-node KV transfer.} The core thesis problem. A
+16\,MB block on 10\,GbE takes $\approx 13$\,ms at line rate --- an
+order of magnitude longer than the hot-path dispatch budget.
+\end{enumerate}
+
+\subsection*{Layer 4 --- Memory blocks and HBM}
+\begin{enumerate}[resume]
+\item \textbf{HBM capacity.} 24\,GB per 3090, 32\,GB per 5090.
+Model weights + activations + KV eat this fast at long context.
+\item \textbf{HBM bandwidth ($\approx$ 800 GB/s).} Setting the
+ceiling for on-GPU data movement. FlashAttention's tiling exists to
+stay inside this budget.
+\item \textbf{HBM fragmentation.} Repeated alloc/free of
+variably-sized KV blocks fragments the GPU allocator. PagedAttention
+mitigates via fixed block sizes, but the fragmentation shows up at
+the block-table level.
+\item \textbf{Host RAM pinned pages.} RDMA MRs require pinned
+memory. The \texttt{ulimit} for locked pages is a hidden ceiling
+people hit at production scale.
+\item \textbf{RDMA buffer slab fragmentation.} A slab registered
+once, sliced into blocks: how do reclamation holes behave under
+long-running load?
+\end{enumerate}
+
+\subsection*{Layer 5 --- Tensor access and gather/scatter}
+\begin{enumerate}[resume]
+\item \textbf{Coalesced vs strided reads.} A per-layer KV transfer
+touches heads $\times$ seq $\times$ head\_dim. Is that a single
+contiguous slab on GPU, or does the layout force strided access?
+\item \textbf{Scatter-gather for paged KV.} PagedAttention blocks
+are not physically contiguous. RDMA WRITE with an SGE list vs one
+WRITE per block --- where's the crossover?
+\item \textbf{GPU $\rightarrow$ host memcpy.} Without GDR we pay a
+PCIe round-trip to stage KV through host RAM. What fraction of the
+hot-path 8\,$\mu$s is actually the memcpy?
+\item \textbf{Attention gather pattern.} Sparse attention (sliding
+window, sinks, MoE expert routing) gathers an irregular subset of
+tokens. Does irregular gather compose with RDMA WRITE, or does it
+force SEND/RECV?
+\end{enumerate}
+
+\subsection*{Layer 6 --- Host CPU and PCIe}
+\begin{enumerate}[resume]
+\item \textbf{Python GIL.} pyverbs posts work under the GIL. At a
+few hundred posts per second is that measurable?
+\item \textbf{CPU core pinning.} Busy-poll CQ thread steals a core.
+On a 3090 box serving 3 decode workers, that's a 25\,\% penalty
+before any RDMA work happens.
+\item \textbf{NUMA crossing.} NIC and GPU on different sockets = PCIe
+peer-to-peer forced to go through the CPU. Consumer boards don't
+always give us control over this.
+\item \textbf{IRQ affinity.} NIC IRQs on the wrong core serialize
+completion handling with application work.
+\item \textbf{PCIe bus contention.} GPU and NIC share PCIe root
+complexes. High GPU I/O + high NIC I/O fight for lanes.
+\item \textbf{GPUDirect RDMA absence.} Without GDR (we don't have
+BlueField), every KV block stages through host RAM. Latency floor
+rises by the PCIe round-trip.
+\end{enumerate}
+
+\subsection*{Layer 7 --- RDMA memory registration}
+\begin{enumerate}[resume]
+\item \textbf{MR registration cost.} First registration is slow; MR
+cache avoids repeating it. But cache invalidation on realloc is
+expensive.
+\item \textbf{ODP (on-demand paging).} Avoids pre-registration but
+pays per-page-fault latency. Is it worth it for variable-length
+KV buffers?
+\item \textbf{rkey rotation.} A long-lived MR leaks its rkey to every
+peer. Periodic re-registration closes that hole but costs cycles.
+\end{enumerate}
+
+\subsection*{Layer 8 --- RDMA transport (the thesis layer)}
+\begin{enumerate}[resume]
+\item \textbf{Single-QP head-of-line blocking.} The problem the
+dual-QP pool targets. An 8\,$\mu$s metadata op stuck behind a 13\,ms
+KV block serialization.
+\item \textbf{Send queue depth.} Too shallow: starvation. Too deep:
+queuing delay defeats the hot/cold split.
+\item \textbf{CQ depth.} Overflow = dropped completions = undefined
+behavior. What's a safe multiple of SQ depth?
+\item \textbf{Completion polling mode.} Busy-poll burns CPU;
+event-driven adds wake-up latency. Adaptive policies exist but are
+tricky to tune.
+\item \textbf{Signaled-every-N completions.} Unsignaled completions
+reduce CQ pressure but delay error detection.
+\item \textbf{Inline vs non-inline sends.} Below the inline limit
+(64\,B typical), the payload rides the WR; above it, a DMA is
+required.
+\item \textbf{WR batching.} Posting WRs in a linked list amortizes
+doorbell writes. At what batch size does it help?
+\item \textbf{RDMA READ vs WRITE for KV fetch.} READ is receiver-paced;
+WRITE is sender-paced. Wrong choice inverts the flow control I want.
+\item \textbf{Credit-based flow control (RC).} RC QPs have an implicit
+credit window. Deep send queues against a slow receiver exhaust
+credits silently.
+\item \textbf{Ordering guarantees.} RC preserves per-QP order; the
+dual-QP pool breaks cross-QP ordering. Does any upstream consumer
+depend on it?
+\end{enumerate}
+
+\subsection*{Layer 9 --- NIC hardware and PCIe}
+\begin{enumerate}[resume]
+\item \textbf{NIC work-request rate ceiling.} There's a per-device
+WRs/sec number that hardware can sustain. For consumer NICs
+(AQC107, X710) I don't know what that is.
+\item \textbf{NIC TX/RX ring depth.} Small rings drop under bursty
+load before the CQ has a chance to notice.
+\item \textbf{MTU and segmentation.} Large KV blocks are segmented
+at MTU (1500 default, 4096 or 9000 jumbo). Every segment boundary is
+a wire-latency increment.
+\item \textbf{PCIe $\leftrightarrow$ NIC bottleneck.} A 10\,GbE NIC
+on a PCIe Gen2 x4 link is fine; on Gen4 x8 it's over-provisioned.
+Worth checking what my boards actually wire.
+\item \textbf{Port counters.} \texttt{perfquery} surfaces link-layer
+errors silently accumulating. Worth polling continuously.
+\end{enumerate}
+
+\subsection*{Layer 10 --- Wire and link layer}
+\begin{enumerate}[resume]
+\item \textbf{10\,GbE line rate ($\approx$ 1.25 GB/s).} Hard ceiling
+for cold-path throughput on our cluster. No way around it without
+hardware change.
+\item \textbf{Packet drops.} A single drop triggers a retransmit that
+dwarfs the hot-path budget. Direct-connect makes drops rare but not
+zero.
+\item \textbf{PFC / ECN / DCQCN.} Production RoCE clusters rely on
+PFC for lossless behavior. Without a switch we lose the PFC story.
+\item \textbf{Switched vs direct-connect.} Direct-connect eliminates
+switch hop latency ($\approx$ 1\,$\mu$s per hop) but introduces the
+ARP/AH wireup problem that PR~\#11307 addresses.
+\item \textbf{Cable quality / CRC errors.} Cheap 10GBASE-T cables
+silently corrupt under load. Enterprise clusters filter for this;
+mine doesn't.
+\end{enumerate}
+
+\subsection*{Layer 11 --- Wireup and connection management}
+\begin{enumerate}[resume]
+\item \textbf{TCP bootstrap handshake.} Fixed-size 64-byte QpInfo
+exchange with retry. My port of libmesh-rdma's protocol; the
+security audit hardening lives here.
+\item \textbf{GID discovery.} IPv4-mapped GID scan. Hard-coded
+index 0 is fragile; we scan the GID table on startup.
+\item \textbf{QP state transitions.} RESET $\rightarrow$ INIT
+$\rightarrow$ RTR $\rightarrow$ RTS with exponential-backoff retry.
+Transient failures show up here first.
+\item \textbf{Address resolution (ARP/AH).} The r/HPC bug: AH
+creation needs L2 resolution, which needs a shared subnet or a
+switch. RC QPs skip this by using the remote GID directly --- the
+observation that motivated PR~\#11307.
+\end{enumerate}
+
+\subsection*{Layer 12 --- Compression (scuffedQuant)}
+\begin{enumerate}[resume]
+\item \textbf{CPU Walsh-Hadamard compute.} $O(d \log d)$ per vector.
+At 40 layers $\times$ 8 heads $\times$ seq $\times$ 64 head\_dim this
+adds up fast on the critical path.
+\item \textbf{Lloyd-Max codebook lookup.} Binary search over
+$2^b$ levels. Small constant; rarely the bottleneck.
+\item \textbf{QJL sketch generation.} Random-projection $\times$
+sign-extraction. Quadratic-ish in sketch dimension.
+\item \textbf{GPU decompression.} We run this on the decode side to
+reconstruct FP32. Matmul-based Hadamard is bandwidth-bound on the
+codebook gather, not compute-bound.
+\item \textbf{Compression in the critical path.} Every 3-bit
+compression ratio we win adds CPU cycles. At what compression savings
+does the CPU cost stop being free?
+\end{enumerate}
+
+\subsection*{Layer 13 --- Classifier and control plane}
+\begin{enumerate}[resume]
+\item \textbf{WFA classifier latency.} Per-transfer classification
+adds work before every \texttt{ibv\_post\_send}. Microseconds at
+most, but measurable on the hot path.
+\item \textbf{PMP control loop frequency.} The bang-bang switching
+decision runs per transfer. A 1\,$\mu$s loop on every hot-QP post is
+an 8\,\% overhead against the 8\,$\mu$s baseline.
+\item \textbf{Metric freshness.} Queue depth and service rate feed
+PMP. If readings lag by milliseconds, PMP optimizes for yesterday's
+load.
+\item \textbf{Priority inversion.} A low-priority cold transfer
+holding an MR that a high-priority hot transfer wants. Classic
+priority-inversion bug; does the dual-QP pool actually prevent it?
+\end{enumerate}
+
+\subsection*{Layer 14 --- Observability and logging}
+\begin{enumerate}[resume]
+\item \textbf{Metric collection overhead.} Scraping
+\texttt{ibv\_query\_qp} and \texttt{nvidia-smi} at high frequency
+steals cycles from the hot path.
+\item \textbf{Structured logging I/O.} Every classified transfer logs
+a decision. Disk I/O backpressure is a silent killer of latency
+tails.
+\item \textbf{Prometheus-style scrape vs event-driven push.} Scrape
+interval defines metric staleness. At 15\,s intervals, the scheduler
+reacts to load from 15\,s ago.
+\end{enumerate}
+
+\subsection*{The three bottlenecks I expect to matter most}
+
+If I had to rank: (a) single-QP head-of-line blocking (Layer~8) ---
+the thesis thesis, (b) cross-node KV transfer time (Layer~3), and
+(c) PCIe round-trip without GPUDirect (Layer~6). Every other layer
+is either solved by someone else (attention, PagedAttention,
+FlashAttention), bounded by hardware we can't change (wire rate,
+HBM), or small enough to be noise until (a)--(c) are addressed.
+
+\textbf{Question for the team:} is my ranking right? What should
+bump up the list that I'm underestimating?
+
+\vspace{8pt}
+\hrule
+\vspace{6pt}
+
+\section*{Housekeeping}
+
+\begin{itemize}
+\item Repository: \url{https://github.com/ndg8743/ScuffedRDMA}
+\item Thesis updates are in \texttt{Updates/} --- read Update~4 and
+Update~5 before a deep-dive call.
+\item All measurements in the \textbf{Results} table in the README have
+a JSON file next to them. Anything else I quote is a target, not a
+measurement.
+\item My advisors: Dr.\ Wafi Danesh, Dr.\ Ashley Suchy, SUNY New
+Paltz.
+\end{itemize}
+
+\end{document}

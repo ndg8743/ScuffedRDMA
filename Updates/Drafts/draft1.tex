@@ -2233,6 +2233,271 @@ P16 & Thesis Writing & Consolidated report with all experimental results & Defen
 Projects P9--P11 can proceed in parallel. P12 depends on P8 (tensor database). P13--P14 can proceed independently. P15 requires P9--P13. P16 runs continuously alongside all projects.
 
 %=============================================================================
+\section{Per-Architecture Transport Extension}
+\label{sec:arch-ext}
+%=============================================================================
+
+This section extends the transport design beyond the Transformer
+KV-cache case that Updates~2--5 focused on. Three 2026 results
+change the architectural picture materially: FlashAttention-4 for
+Blackwell~\cite{zadouri2026flashattention4}, Mamba-3's reduced-state
+SSM~\cite{lahoti2026mamba3}, and SonicMoE's IO-aware MoE
+kernels~\cite{guo2026sonicmoe}. Each reshapes the per-layer state
+memory that a disaggregated transport layer has to move. The
+classify-then-route primitive in libscuffedrdma (WFA classifier plus
+PMP controller) generalises to all three; the $O(1)$ SSM case is a
+degenerate collapse, not a departure.
+
+\subsection{Architecture-specific state memory}
+\label{sec:arch-mem}
+
+Table~\ref{tab:arch-mem-budget} gives the per-token state memory
+that a disaggregated transport must carry. The comparison draws on
+the self-attention complexity table in the \emph{Dive into Deep
+Learning} textbook~\cite{zhang2023d2l}: self-attention has
+$O(n^2 d)$ compute with $O(1)$ sequential ops and $O(1)$ maximum
+path length; an RNN-shaped recurrence has $O(n d^2)$ compute,
+$O(n)$ sequential ops, and $O(1)$ state. Mamba-3 rehabilitates the
+RNN column by making the associative-scan parallelisable while
+keeping the $O(1)$ state.
+
+\begin{table}[htbp]
+\centering
+\caption{State memory, growth law, and dominant transport pattern
+per architecture family.}
+\label{tab:arch-mem-budget}
+\small
+\begin{tabular}{lllll}
+\toprule
+Family        & State/token             & Growth w/ ctx & Traffic     & Hot/cold bias \\
+\midrule
+Transformer   & $2 \cdot n_h \cdot d_h$ & $O(N)$        & bulk KV     & cold (bulk)   \\
+Mamba-3       & $d_{\text{state}} \cdot d_{\text{model}}$ & $O(1)$  & small-state & hot (latency) \\
+MoE           & $2 \cdot k \cdot d_{\text{model}}$ & $O(N)$ & all-to-all & cold + hot split \\
+Hybrid        & mix                     & mixed         & mixed       & per-layer     \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At 128k context a 7B dense Transformer holds on the order of 16\,GB
+of KV per user; a 1B Mamba-3 holds a fixed hidden state on the order
+of 13\,MB independent of context. Three orders of magnitude of
+difference invert which term of $T_{\text{KV transfer}} =
+(\text{bytes}/W_{\text{net}}) + T_{\text{queuing}}$ dominates. CoPE's
+``free-lunch'' context extension~\cite{li2026cope} --- clipping
+RoPE frequencies so a 4k-trained model serves 128k with no retraining
+--- amplifies the Transformer case specifically: it does not shrink
+the KV growth law, it just lets production workloads reach the point
+where that growth law bites.
+
+\subsection{scuffedQuant extended to SSM state and MoE activations}
+\label{sec:sq-ext}
+
+The PolarQuant + QJL pipeline~\cite{zandieh2025turboquant} is
+architecture-agnostic in the sense that its only input requirement
+is that per-coordinate post-rotation distributions are approximately
+Gaussian. That property holds for KV cache vectors, for SSM hidden
+states (selective-scan produces low-rank but full-support states),
+and for routed MoE expert activations (dense along $d_{\text{model}}$
+even when sparse along the expert axis). We extend the existing
+\texttt{ScuffedQuant} class with two wrappers,
+\texttt{compress\_ssm\_state} and \texttt{compress\_expert\_activation},
+that reshape into $(n, d)$ and delegate to the existing
+Walsh-Hadamard + Lloyd-Max + QJL path. The math is unchanged.
+
+Table~\ref{tab:sq-ext-results} reports cross-node results from the
+\texttt{benchmarks/test\_arch/} harness, run on Chimera
+(3$\times$~RTX~3090, Ampere) and Cerberus (2$\times$~RTX~5090,
+Blackwell). The \texttt{compression\_ratio} column is identical
+across nodes because the quantizer is deterministic NumPy; small
+variations in \texttt{top-8} rank overlap are floating-point
+non-associativity in the two GPUs' bfloat16 forward passes producing
+slightly different inputs to the quantizer.
+
+\begin{table}[htbp]
+\centering
+\caption{scuffedQuant extended: compression ratio and top-8 rank
+overlap at 3-bit across four architecture families.}
+\label{tab:sq-ext-results}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Architecture (model)                           & Ratio (3-bit) & Chimera (3090) & Cerberus (5090) \\
+\midrule
+Transformer (Granite 3.3-2B, 4 layers)         & 4.0$\times$   & 82.4\%         & 83.6\%          \\
+Mamba (state-spaces/mamba-130m-hf, fallback)   & 1.39$\times$  & 97.4\%         & 97.4\%          \\
+Granite 4 hybrid (h-micro)                     & 5.6$\times$   & 95.9\%         & 96.3\%          \\
+Granite 4 MoE expert activation (h-tiny)       & 7.6$\times$   & 100.0\%        & 100.0\%         \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two observations. First, the SSM row's 1.39$\times$ ratio is not a
+quality failure (top-8 stays $\geq 97\%$) but a geometry consequence:
+the per-row overhead (norms, QJL signs, residual norms) amortises
+poorly when $d_{\text{state}}$ is small (16 here). For a wider SSM
+the ratio rises. Second, the MoE activation row's 7.6$\times$ ratio
+at 100\% top-8 is the strongest case for compressing before the
+all-to-all shuffle --- the bulk path shrinks nearly an order of
+magnitude with no quality loss on the captured activation. This
+aligns with the SonicMoE direction~\cite{guo2026sonicmoe}: the
+expert-dispatch bottleneck is bandwidth-dominated, so any per-token
+byte reduction composes with their IO/tile-aware kernel gains.
+Mamba-3 is cited as the Mamba direction the Mamba v1 fallback
+stands in for when \texttt{state-spaces/mamba-3-1b} becomes
+public~\cite{lahoti2026mamba3}; the transport implication
+(state size $\downarrow$, hot-QP dominance) is independent of
+which Mamba version actually ships. Mamba-2 established the
+structured state-space duality that both versions build on~\cite{dao2024mamba2}.
+
+\subsection{GPU decompression and autotune experiment}
+\label{sec:gpu-decompress}
+
+The decode side of the pipeline must reconstruct FP32 tensors from
+the compressed bundle before attention reads them. We ported the
+inverse Walsh-Hadamard + codebook gather + sign multiply into a
+single matmul using a precomputed Hadamard matrix
+($H\,H^\top = I$), yielding bit-identical output to the CPU
+reference and enabling \texttt{torch.compile} autotune.
+Table~\ref{tab:gpu-decompress-ratio} shows the cross-GPU result
+on a synthetic workload (128-dim vectors, 3-bit quantization). The
+Blackwell/Ampere speedup is 1.6$\times$ at 131k rows and widens to
+roughly 2$\times$ at 4k rows where launch and shared-memory
+throughput dominate over memory bandwidth.
+
+\begin{table}[htbp]
+\centering
+\caption{scuffedQuant GPU decompression latency: Ampere vs.\
+Blackwell.}
+\label{tab:gpu-decompress-ratio}
+\small
+\begin{tabular}{rrrrr}
+\toprule
+Rows    & Bits & 3090 ($\mu$s) & 5090 ($\mu$s) & 5090 / 3090 \\
+\midrule
+4\,096   & 3 & 994   & 511   & 1.95$\times$ \\
+32\,768  & 3 & 4\,475  & 2\,500  & 1.79$\times$ \\
+131\,072 & 3 & 34\,759 & 21\,788 & 1.60$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A natural follow-up --- in the spirit of the ScuffedKernels
+sub-project from Update~3 --- is to let \texttt{torch.compile}
+autotune the fused kernel. The result is negative and informative:
+on both GPUs the eager path wins by 3--6\%, because the decomposition
+is memory-bound on the \texttt{codebook[indices]} gather rather than
+compute-bound on the Hadamard matmul. PyTorch's eager dispatcher
+already calls cuBLAS for the matmul and fuses the elementwise tail,
+so Inductor's autotuned Triton variant finds essentially the same
+kernel. Any further improvement over eager would need a hand-written
+Triton kernel that fuses gather$\to$matmul$\to$rescale in one pass
+and avoids materialising the $(n, d_{\text{pad}})$ intermediate;
+that is the real ScuffedKernels extension, not a compile flag.
+FlashAttention-4's asymmetric pipelining~\cite{zadouri2026flashattention4}
+is evidence that the gains on Blackwell come from hand-written kernel
+design, not from recompilation of existing torch ops.
+
+\subsection{Relative position as a transport signal}
+\label{sec:pos-as-signal}
+
+Self-attention has no intrinsic notion of token order; order is
+injected through positional encoding. The canonical sinusoidal
+encoding~\cite{zhang2023d2l}
+\[
+  p_{i,2j} = \sin(i/10000^{2j/d}), \qquad
+  p_{i,2j+1} = \cos(i/10000^{2j/d})
+\]
+encodes coarse position at low frequencies, fine position at high
+frequencies, and relative offsets as linear transforms in that
+space. Modern LLMs use RoPE rather than raw sinusoidal PE; CoPE's
+frequency-clipping~\cite{li2026cope} sharpens the near-vs-far
+contrast at the band the classifier actually samples. This same
+signal is a \emph{transport} signal, not just a modelling signal.
+
+Three regimes:
+\begin{itemize}
+\item \textbf{Fresh tokens} (sequence tail): read on every decode
+step. Route to the hot QP, minimal compression.
+\item \textbf{Mid-sequence tokens}: read with decaying probability.
+Route to the cold QP with aggressive (3-bit) compression; if the
+decode step does not read them, the link saved a trip.
+\item \textbf{Attention-sink tokens} (first 0--3 positions): read on
+every step regardless of absolute position, per the streaming-attention
+literature. Route to the hot QP alongside fresh tokens. The
+correct classifier input is \emph{predicted read frequency}, not raw
+position --- sinks are the teaching case.
+\end{itemize}
+
+The WFA classifier extends with a relative-position feature
+$\rho_t = (N-t)/N$ for token $t$ in context length $N$. The
+hot-routing decision becomes
+\[
+  \mathrm{hot}(t) \;=\; \big[\alpha \rho_t + \beta \mathbb{1}_{t \in \text{sinks}} + \gamma s_t > \tau\big],
+\]
+where $s_t$ is the size-class term the classifier already uses. PMP
+is unchanged: the switching function consumes the classifier's
+output, it just gets a richer input. For Mamba-3 the feature
+degenerates (no per-token state to place) and the classifier
+collapses to ``always hot,'' which is the correct behaviour for an
+$O(1)$-state model. For MoE the same feature applies, scored per
+expert rather than per token: popular experts are the ``fresh'' row,
+rare experts are the ``sink'' row. The MoE case is ground truth
+rather than prior: the gating network tells the transport layer
+directly which experts will read which tokens, whereas the
+Transformer case requires inference.
+
+\subsection{The classify-allocate primitive}
+\label{sec:eml-primitive}
+
+The four regimes above are parameter choices on a single primitive
+pair: \emph{classify} (WFA on typed features) and \emph{allocate}
+(PMP bang-bang over queue depth and service rate). Odrzyw{\'o}{\l}ek's
+recent universal-operator construction~\cite{odrzywolek2026eml},
+showing that exponentials and logarithms both reduce to the single
+$\mathrm{eml}(x,y) = \exp(x) - \ln(y)$ operator, offers a useful
+analogy: one compositional primitive; all the variety comes from
+what you feed it. In the transport layer the analogous primitive is
+$(\text{classify}, \text{allocate})$; Transformer KV, Mamba state,
+and MoE activation are parameter choices, not separate
+architectures. The implementation cost is correspondingly small:
+two helper methods on the existing \texttt{ScuffedQuant} class
+cover all three architecture families with no change to the core
+math.
+
+\subsection{Relation to 2025--2026 transport systems}
+\label{sec:transport-related}
+
+Three 2025--2026 systems target overlapping territory.
+TransferEngine~\cite{chen2025transferengine} is a point-to-point
+RDMA library portable across ConnectX-7 and AWS EFA, demonstrating
+400\,Gbps peak bandwidth and sub-second RL weight updates for
+trillion-parameter models. It is the datacenter-class analog of
+libscuffedrdma's goal: a portable RDMA transport for LLM systems,
+targeting enterprise hardware where libscuffedrdma targets consumer
+10\,GbE. The libmesh-rdma project~\cite{libmesh_rdma} is the closest
+sibling on the consumer side: an MIT-licensed 75\,KB library that
+reaches 77\,GB/s and 11.6\,$\mu$s RTT on direct-connect ConnectX-7
+DGX Spark systems without a managed switch, and whose TCP-based QP
+bootstrap informed the hardened handshake in this thesis's Python
+middleware. Where TransferEngine and libmesh-rdma provide the raw
+transport, libscuffedrdma adds the tensor-aware classification
+(WFA), bandwidth allocation (PMP), and compression (scuffedQuant)
+layers above it --- features neither of the two transport libraries
+implements.
+
+The classify-then-route pattern has its own lineage. Zhou's 1987
+dissertation on dynamic load balancing~\cite{zhou1987loadindex}
+introduced the load-index abstraction as a typed per-host metric
+consumed by a scheduler; that abstraction is the ancestor of every
+``metric-driven router'' since, including LSF's LIM, IBM Spectrum
+Symphony's ELIM, and the WFA classifier here. The novelty in
+libscuffedrdma is not the classify-route pattern but the
+granularity: the classifier sits below the service scheduler, in
+the RDMA transport itself, where the dispatch budget is measured in
+microseconds rather than milliseconds.
+
+%=============================================================================
 \section{Future Work and Conclusions}
 \label{sec:conclusions}
 %=============================================================================
@@ -2242,10 +2507,6 @@ Projects P9--P11 can proceed in parallel. P12 depends on P8 (tensor database). P
 The middleware's transport abstraction maps directly to UCX transport layers. A recent RFC for vLLM~\cite{vllm-ucc-rfc} proposes replacing NCCL with UCC for environments where NCCL's CUDA dependency is a limitation. For our cluster, UCX transport negotiation would handle the heterogeneous path (TCP for Tower~1, RoCE for Tower~2) automatically via \texttt{UCX\_TLS=rc,tcp}.
 
 UEC~1.0~\cite{uec2025} defines native multipath with packet spraying, ordered delivery without HOL blocking, built-in congestion control for incast, and selective retransmission---all designed for AI/HPC workloads. The middleware's transport abstraction is designed to accommodate UEC as an additional backend when available.
-
-\subsection{RISC-V Assembly Generation}
-
-A secondary research direction involves fine-tuning an LLM to generate RISC-V assembly code, leveraging the distributed infrastructure and adaptive RDMA middleware developed in this thesis for gradient synchronization during training.
 
 \subsection{Conclusions}
 
