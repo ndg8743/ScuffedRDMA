@@ -1,0 +1,37 @@
+{
+  "model": "ibm-granite/granite-3.3-2b-instruct",
+  "architecture": "transformer",
+  "hostname": "cerberus",
+  "gpu": "5090",
+  "seq_len": 36,
+  "state_shape": [
+    4,
+    8,
+    36,
+    64
+  ],
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 2.4615384615384617,
+      "rank_overlap_topk": 1.0,
+      "decompress_us": 326.85708720237017,
+      "compress_us": 3371.161059476435
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 3.5555555555555554,
+      "rank_overlap_topk": 0.92578125,
+      "decompress_us": 340.66790249198675,
+      "compress_us": 3032.5764091685414
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 4.0,
+      "rank_overlap_topk": 0.8359375,
+      "decompress_us": 352.5633364915848,
+      "compress_us": 2921.796985901892
+    }
+  ],
+  "notes": "KV cache from outputs.past_key_values; per-layer K flattened to (heads*seq, head_dim)."
+}

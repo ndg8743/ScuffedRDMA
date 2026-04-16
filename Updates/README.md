@@ -4,7 +4,7 @@ Weekly thesis updates for the ScuffedRDMA project (RDMA transport for distribute
 
 ## Current status
 
-Update 5 is the latest. It reviews the six upstream UCX pull requests (#11304-#11309) against real diffs, incorporates external feedback from the r/HPC thread on libmesh-rdma, audits security findings in the middleware, and lays out the hardening work that followed. Update 4 established the UCX analysis, libscuffedrdma design, and upstream contribution plan that Update 5 follows up on.
+Update 5-2 is the latest. It extends scuffedQuant beyond the Transformer KV cache to Mamba-3 SSM state, Granite 4 hybrid blocks, and Granite 4 MoE expert activations, and adds the `benchmarks/test_arch/` harness that runs the same per-architecture probe on Chimera (3x 3090) and Cerberus (2x 5090). Update 5 reviewed the six upstream UCX pull requests (#11304-#11309) against real diffs, incorporated external feedback from the r/HPC thread on libmesh-rdma, audited security findings in the middleware, and landed the hardening work that followed. Update 4 established the UCX analysis, libscuffedrdma design, and upstream contribution plan that Update 5 follows up on.
 
 ## Index
 
@@ -14,6 +14,7 @@ Update 5 is the latest. It reviews the six upstream UCX pull requests (#11304-#1
 - **Update3-TensorCacheArchitecture** - RDMA tensor cache design, NVIDIA communication stack survey, MLA/MQA KV cache problem, CUDA vs Triton, three experimental pillars, and ScuffedKernels / ScuffedSearch sub-projects.
 - **Update4-UCX** - UCX codebase analysis, PMP/WFA classification theory, upstream PR table, TurboQuant KV compression pipeline, cross-node SoftRoCE benchmark results, and the Python MVP.
 - **Update5-UCX-Review** - Review of the six upstream UCX PRs with real diffs, libmesh-rdma external validation, CI flakiness notes, security audit, and middleware hardening.
+- **Update5-2-Architectures** - Architecture comparison and the role of RDMA per model family. Extends scuffedQuant to Mamba-3 SSM state, Granite 4 hybrid, and Granite 4 MoE expert activations; introduces the `benchmarks/test_arch/` harness for cross-node (Chimera / Cerberus) runs; frames transport patterns as parameter choices on a single classify+allocate primitive.
 - **Drafts/** - `draft1.tex` is the rolling thesis draft. `updates-todo/` holds exploratory updates that are not yet in the main sequence (FlashAttention-3 on Blackwell, gpt-oss-120b benchmarks, transport middleware, infrastructure testing, WFA classifier validation, mechanistic interpretability, work-first scheduling, USB4, lock-free middleware, Kokkos remote spaces, architecture comparison).
 
 ## Notes

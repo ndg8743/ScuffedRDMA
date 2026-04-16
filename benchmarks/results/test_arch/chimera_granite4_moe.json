@@ -1,0 +1,35 @@
+{
+  "model": "ibm-granite/granite-4.0-h-tiny",
+  "architecture": "granite4_moe",
+  "hostname": "chimera",
+  "gpu": "3090",
+  "seq_len": 18,
+  "state_shape": [
+    18,
+    1536
+  ],
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 2.942528735632184,
+      "rank_overlap_topk": 1.0,
+      "decompress_us": 8022.197987884283,
+      "compress_us": 18246.954074129462
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 5.774436090225564,
+      "rank_overlap_topk": 1.0,
+      "decompress_us": 7837.925106287003,
+      "compress_us": 16732.471995055676
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 7.603960396039604,
+      "rank_overlap_topk": 1.0,
+      "decompress_us": 7901.395903900266,
+      "compress_us": 16551.49692669511
+    }
+  ],
+  "notes": "captured expert-output activation pre-all-to-all."
+}

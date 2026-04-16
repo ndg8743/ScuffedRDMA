@@ -25,6 +25,10 @@ Most scripts write JSON into `results/`. `aggregate_results.py` reads that direc
   python benchmark_ucx_comparison.py --output results/ucx_comparison.json
   ```
 
+## Per-architecture (test_arch/)
+
+- `test_arch/` - per-architecture scuffedQuant benchmarks for Update 5-2 (Transformer, Mamba-3, Granite 4 hybrid, Granite 4 MoE). See [`test_arch/README.md`](test_arch/README.md) for cross-node usage. `aggregate_results.py --results-dir results/test_arch` emits `test_arch_comparison.tex`.
+
 ## scuffedQuant
 
 - `benchmark_scuffed_quant.py` - Synthetic KV vectors, measures inner-product preservation and throughput at various bit widths.

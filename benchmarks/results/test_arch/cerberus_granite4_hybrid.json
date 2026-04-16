@@ -1,0 +1,36 @@
+{
+  "model": "ibm-granite/granite-4.0-h-micro",
+  "architecture": "granite4_hybrid",
+  "hostname": "cerberus",
+  "gpu": "5090",
+  "seq_len": 19,
+  "state_shape": [
+    4,
+    36,
+    64
+  ],
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 2.989010989010989,
+      "rank_overlap_topk": 0.990625,
+      "decompress_us": 6066.052720416337,
+      "compress_us": 81381.21786760166
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 4.786324786324786,
+      "rank_overlap_topk": 0.96875,
+      "decompress_us": 6159.988325089216,
+      "compress_us": 72376.02018285543
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 5.636363636363637,
+      "rank_overlap_topk": 0.9625,
+      "decompress_us": 6350.598449353129,
+      "compress_us": 70847.20084676519
+    }
+  ],
+  "notes": "attention + SSM blocks compressed together; per-bits row aggregates both."
+}

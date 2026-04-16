@@ -125,6 +125,7 @@ Future
 |---|---|---|
 | Jan-Feb 2026 | Hardware bring-up, Updates 1-3, implementation plan | done |
 | Mar-Apr 2026 | Python MVP, UCX analysis, scuffedQuant, 6 upstream UCX PRs | done |
+| Apr 2026 | Architecture comparison, scuffedQuant extended to SSM/MoE, `test_arch/` harness | done |
 | May-Jul 2026 | vLLM KvConnector integration, concurrent benchmark, TTFT measurement | in progress |
 | Aug-Oct 2026 | Rust or C++ port, full thesis draft | planned |
 | Nov-Dec 2026 | Defense prep | planned |

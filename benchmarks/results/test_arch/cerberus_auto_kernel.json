@@ -1,0 +1,108 @@
+{
+  "hostname": "cerberus",
+  "gpu": "5090",
+  "gpu_name": "NVIDIA GeForce RTX 5090",
+  "torch_version": "2.7.0",
+  "cuda_version": "12.8",
+  "records": [
+    {
+      "rows": 4096,
+      "dim": 128,
+      "bits": 3,
+      "eager_us": 415.97810573875904,
+      "compiled_reduce_overhead_us": 441.290820017457,
+      "compiled_max_autotune_us": 440.6838770955801,
+      "max_autotune_compile_s": 1.8271785979159176,
+      "speedup_ro_over_eager": 0.9426393817172616,
+      "speedup_mx_over_eager": 0.9439376554466897
+    },
+    {
+      "rows": 4096,
+      "dim": 128,
+      "bits": 4,
+      "eager_us": 410.62183678150177,
+      "compiled_reduce_overhead_us": 435.1878259330988,
+      "compiled_max_autotune_us": 416.6398849338293,
+      "max_autotune_compile_s": 0.6054333229549229,
+      "speedup_ro_over_eager": 0.943550835552616,
+      "speedup_mx_over_eager": 0.9855557560138936
+    },
+    {
+      "rows": 4096,
+      "dim": 128,
+      "bits": 8,
+      "eager_us": 407.4901156127453,
+      "compiled_reduce_overhead_us": 435.8131531625986,
+      "compiled_max_autotune_us": 432.2598036378622,
+      "max_autotune_compile_s": 0.42230371199548244,
+      "speedup_ro_over_eager": 0.9350110538327736,
+      "speedup_mx_over_eager": 0.9426972209382938
+    },
+    {
+      "rows": 32768,
+      "dim": 128,
+      "bits": 3,
+      "eager_us": 2450.144561007619,
+      "compiled_reduce_overhead_us": 2425.292143598199,
+      "compiled_max_autotune_us": 2456.486104056239,
+      "max_autotune_compile_s": 1.7260872339829803,
+      "speedup_ro_over_eager": 1.0102471850556316,
+      "speedup_mx_over_eager": 0.9974184494517804
+    },
+    {
+      "rows": 32768,
+      "dim": 128,
+      "bits": 4,
+      "eager_us": 5162.624679505825,
+      "compiled_reduce_overhead_us": 5253.276554867625,
+      "compiled_max_autotune_us": 5268.66071857512,
+      "max_autotune_compile_s": 0.0067678396590054035,
+      "speedup_ro_over_eager": 0.9827437458479502,
+      "speedup_mx_over_eager": 0.9798741948413084
+    },
+    {
+      "rows": 32768,
+      "dim": 128,
+      "bits": 8,
+      "eager_us": 2535.110078752041,
+      "compiled_reduce_overhead_us": 2444.95814666152,
+      "compiled_max_autotune_us": 2439.3226578831673,
+      "max_autotune_compile_s": 0.003598107025027275,
+      "speedup_ro_over_eager": 1.036872587047602,
+      "speedup_mx_over_eager": 1.039268040478088
+    },
+    {
+      "rows": 131072,
+      "dim": 128,
+      "bits": 3,
+      "eager_us": 19067.58082099259,
+      "compiled_reduce_overhead_us": 19218.175560235977,
+      "compiled_max_autotune_us": 19106.760816648602,
+      "max_autotune_compile_s": 0.021412167698144913,
+      "speedup_ro_over_eager": 0.9921639419532111,
+      "speedup_mx_over_eager": 0.997949417170603
+    },
+    {
+      "rows": 131072,
+      "dim": 128,
+      "bits": 4,
+      "eager_us": 19011.746356263757,
+      "compiled_reduce_overhead_us": 19268.311643972993,
+      "compiled_max_autotune_us": 19212.858956307173,
+      "max_autotune_compile_s": 0.020171329844743013,
+      "speedup_ro_over_eager": 0.9866845994371547,
+      "speedup_mx_over_eager": 0.9895323959593533
+    },
+    {
+      "rows": 131072,
+      "dim": 128,
+      "bits": 8,
+      "eager_us": 19221.57728113234,
+      "compiled_reduce_overhead_us": 19234.08151604235,
+      "compiled_max_autotune_us": 19113.95183764398,
+      "max_autotune_compile_s": 0.020048484671860933,
+      "speedup_ro_over_eager": 0.999349891758565,
+      "speedup_mx_over_eager": 1.0056307269371891
+    }
+  ]
+}
