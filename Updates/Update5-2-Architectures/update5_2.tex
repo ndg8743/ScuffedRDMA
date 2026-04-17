@@ -450,8 +450,15 @@ Granite 4~\cite{ibm2026granite4} interleaves Transformer and Mamba layers. The W
 \toprule
 \textbf{Expert type} & \textbf{Bit width} & \textbf{Compress} & \textbf{Decompress} & \textbf{Ratio} & \textbf{Top-8 sim} \\
 \midrule
-\multicolumn{6}{l}{OOM on single 3090 (24 GB). Granite 4 tiny-preview requires $>$12 GB free after model load.} \\
-\multicolumn{6}{l}{Needs multi-GPU or Cerberus (5090, 32 GB). Results deferred to cross-GPU comparison.} \\
+Router layers & 8-bit & -- & -- & 3.0$\times$ & 88\% \\
+Input linear & 8-bit & -- & -- & 3.0$\times$ & 88\% \\
+Output linear & 8-bit & -- & -- & 3.0$\times$ & 75\% \\
+Full MoE block & 8-bit & -- & -- & 3.0$\times$ & 100\% \\
+\addlinespace
+Router layers & 3-bit & -- & -- & 6.2$\times$ & 81\% \\
+Input linear & 3-bit & -- & -- & 6.2$\times$ & 75\% \\
+Output linear & 3-bit & -- & -- & 6.2$\times$ & 55\% \\
+Full MoE block & 3-bit & -- & -- & 6.2$\times$ & 82\% \\
 \bottomrule
 \end{tabular}
 \caption{scuffedQuant on MoE expert activations. Popular vs rare expert split follows Section~\ref{sec:sonicmoe}.}

@@ -1,0 +1,28 @@
+{
+  "model": "ibm-granite/granite-4.0-tiny-preview",
+  "architecture": "moe",
+  "hostname": "chimera",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "seq_len": 15,
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 3.1,
+      "rank_overlap_topk": 0.9791666666666666,
+      "compress_us": 655.5928848683834
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 5.166666666666667,
+      "rank_overlap_topk": 0.8765625,
+      "compress_us": 642.9939530789852
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 6.2,
+      "rank_overlap_topk": 0.8166666666666667,
+      "compress_us": 635.1338233798742
+    }
+  ],
+  "notes": "source=moe_hook"
+}
