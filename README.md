@@ -127,6 +127,7 @@ Four components:
 | `scripts/` | SoftRoCE setup, cluster bring-up, benchmark sweep |
 | `ucx/` | Submodule: [openucx/ucx](https://github.com/openucx/ucx) (upstream PR target) |
 | `vllm/` | Submodule: [vllm-project/vllm](https://github.com/vllm-project/vllm) (reference) |
+| `uccl/` | Submodule: [uccl-project/uccl](https://github.com/uccl-project/uccl) (P2P RDMA collective comparison) |
 | `REFERENCES.md` | Full annotated bibliography |
 
 ## Hardware
@@ -153,16 +154,6 @@ Four components:
 | scuffedQuant 3-bit top-8 (Granite 3.3-2B, MLX 4-bit) | 100.0% / 40 layers | `results/scuffed_quant_mlx.json` |
 | FA3 Blackwell patch, RTX 5090 | +15.5% throughput | `deployment/patches/` |
 | gpt-oss-120b TCP baseline (3× 3090, MXFP4) | 104.4 tok/s | `deployment/benchmarks/` |
-
-## Storage-tier notes
-
-The thesis transport sits between GPU HBM and the NIC. On nodes with a parallel filesystem, the same classify-then-route idea extends downward into the storage tier: compressed KV blocks that libscuffedrdma writes over RDMA can land on a filesystem capable of distinguishing small hot metadata from bulk cold KV at the block layer.
-
-- **GPFS (IBM Storage Scale)** exposes RDMA-over-Ethernet NSD clients with tunable block sizes. Large KV transfers amortise better against block sizes of **1–16 MiB**; small control-plane writes want **64–256 KiB** so they do not straddle block boundaries. Anthony Hsu et al. (IBM Community, 2026-02-06) report TTFT and inference cost each >10× improved at high KV reuse on 70B / 4× H100 / 128k context, with ~320 KB per KV entry and ~8 GB/s sustained from the storage tier.
-- **Vincent Hsu (IBM Community, 2026-01-05)** describes the four-tier KV memory hierarchy (GPU HBM → CPU DRAM → local NVMe → network storage) that pairs Dynamo's KV block manager with Storage Scale's global namespace over BlueField-4. The libscuffedrdma transport layer is the dashed line between tiers 2 and 3/4 when the cluster has no BlueField.
-- **sandook** ([mit-sandook/sandook](https://github.com/mit-sandook/sandook), NSDI 2026) aggregates NVMe SSDs into a unified block device with dynamic read/write workload isolation — a candidate GPFS-analog for clusters that cannot afford Storage Scale licensing. Its `blk_dev/` and `scheduler/control_plane/` directories document the workload-isolation mechanism that mirrors the hot/cold QP split in libscuffedrdma at the storage layer. See [REFERENCES.md](REFERENCES.md) entries [4d], [4e], [4g], [4h].
-
-The KV-block-size interaction: vLLM's PagedAttention uses 16-token blocks (≈256 KiB at FP16 with 32 KV heads, head_dim=128); compressing to 3-bit via scuffedQuant shrinks each block to ≈32 KiB. A storage tier optimised for 1 MiB+ bulk writes sees aggregated block batches better than per-block writes, so the cold QP should coalesce 32–64 compressed blocks before flushing to persistent tier.
 
 ## Upstream Contributions
 

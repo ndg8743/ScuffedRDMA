@@ -4,3 +4,6 @@
 [submodule "vllm"]
 	path = vllm
 	url = https://github.com/vllm-project/vllm.git
+[submodule "uccl"]
+	path = uccl
+	url = https://github.com/uccl-project/uccl.git
