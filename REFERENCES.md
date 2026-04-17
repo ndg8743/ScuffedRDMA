@@ -567,3 +567,13 @@ cat: /Users/nathan/Library/Application Support/Claude/local-agent-mode-sessions/
 - File: `NCCL_RDMA_SHARP_Plugins_HPC-X.md`
 - https://docs.nvidia.com/networking/display/hpcxv2200/nccl-rdma-sharp+plugins
 
+
+## Multi-Node Multi-GPU Communication
+
+[MG1] Kraus, J. (2022). **Multi-GPU Programming for Earth Scientists**. NVIDIA DevTech Compute, CISL/UCAR presentation (82 slides). https://www.cisl.ucar.edu/sites/default/files/2022-07/Multi%20Node%20Multi%20GPU%20Programming.pdf
+- Covers NCCL, NVSHMEM, CUDA-aware MPI, GPUDirect (P2P + RDMA), UCX architecture
+- Key comparison: GPUDirect RDMA 4.27us latency vs CUDA-aware MPI 24.56us vs regular MPI 25.64us (JUWELS Booster, A100)
+- NVSHMEM GPU-initiated communication eliminates offload latencies vs CPU-initiated (slides 6-7)
+- UCX NUMA-aware NIC binding with GPU affinity (slide 27, relevant to our PR #10669)
+- Performance: GPUDirect RDMA ~24 GB/s at 4MB vs ~15 GB/s without GDR (slides 38-39)
+- File: `References/Multi_Node_Multi_GPU_Programming_Kraus_2022.pdf`
