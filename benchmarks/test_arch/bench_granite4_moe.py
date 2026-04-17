@@ -85,26 +85,28 @@ def main():
         tensors = [(f"layer_{i}", h[0].float().cpu().numpy()) for i, h in enumerate(hs)]
         source = "hidden_states"
 
-    dim = tensors[0][1].shape[-1]
-    print(f"Benchmarking {len(tensors)} layers, dim={dim}, source={source}")
+    print(f"Benchmarking {len(tensors)} layers, source={source}")
 
     per_bits_results = []
     for bits in args.bits:
-        sq = ScuffedQuant(dim=dim, bits=bits)
         overlaps = []
         for name, mat in tensors:
             if mat.shape[0] < 2: continue
+            d = mat.shape[-1]
+            sq = ScuffedQuant(dim=d, bits=bits)
             query, comp = mat[-1:], sq.compress(mat)
             exact = (query @ mat.T).squeeze()
             approx = sq.attention_scores(query, comp).squeeze()
             ov = top_k_overlap(exact, approx, k=8)
             overlaps.append(ov)
             print(f"  [{bits}b] {name}  top-8 overlap {ov:.0%}")
+        ref_mat = tensors[0][1]
+        ref_sq = ScuffedQuant(dim=ref_mat.shape[-1], bits=bits)
         t0 = time.perf_counter()
-        sq.compress(tensors[0][1])
+        ref_sq.compress(ref_mat)
         compress_us = (time.perf_counter() - t0) * 1e6
         mean_ov = float(np.mean(overlaps)) if overlaps else 0.0
-        ratio = sq.compression_ratio(tensors[0][1].shape[0])
+        ratio = ref_sq.compression_ratio(ref_mat.shape[0])
         print(f"  {bits}b => overlap={mean_ov:.1%}  ratio={ratio:.1f}x")
         per_bits_results.append(PerBits(bits=bits, compression_ratio=ratio,
                                         rank_overlap_topk=mean_ov, compress_us=compress_us))

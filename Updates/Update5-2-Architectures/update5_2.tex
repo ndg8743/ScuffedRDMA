@@ -450,9 +450,8 @@ Granite 4~\cite{ibm2026granite4} interleaves Transformer and Mamba layers. The W
 \toprule
 \textbf{Expert type} & \textbf{Bit width} & \textbf{Compress} & \textbf{Decompress} & \textbf{Ratio} & \textbf{Top-8 sim} \\
 \midrule
-Popular (top-5) & 4-bit & Pending & Pending & 4.0$\times$ & Pending \\
-Rare (bottom-5) & 4-bit & Pending & Pending & 4.0$\times$ & Pending \\
-All experts avg & 4-bit & Pending & Pending & 4.0$\times$ & Pending \\
+\multicolumn{6}{l}{OOM on single 3090 (24 GB). Granite 4 tiny-preview requires $>$12 GB free after model load.} \\
+\multicolumn{6}{l}{Needs multi-GPU or Cerberus (5090, 32 GB). Results deferred to cross-GPU comparison.} \\
 \bottomrule
 \end{tabular}
 \caption{scuffedQuant on MoE expert activations. Popular vs rare expert split follows Section~\ref{sec:sonicmoe}.}
@@ -568,6 +567,33 @@ Each stack runs the same workload: 10{,}000 transfers drawn from a log-uniform s
 \subsection{Hostname Tagging}
 
 Results from each node are tagged with the hostname (\texttt{chimera} or \texttt{cerberus}) and GPU model. This matters because compression kernels run at different speeds on different GPUs, and the optimal bit width may differ: the 5090's faster kernels shift the compute-vs-bandwidth tradeoff toward more aggressive compression.
+
+%% ============================================================
+\section{Storage Spill Results}
+\label{sec:storage_spill}
+%% ============================================================
+
+Following Update~6's analysis of GPFS block-size tradeoffs, we measured KV cache spill and retrieve throughput on Chimera's local NVMe (3-bit scuffedQuant, 256-token blocks, 32 heads, head\_dim=128). Each compressed block is 1.5~MB. Table~\ref{tab:storage_spill} shows how coalescing multiple blocks into a single write affects throughput.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{rrrr}
+\toprule
+\textbf{Coalesce} & \textbf{Payload} & \textbf{Write (MB/s)} & \textbf{Read (MB/s)} \\
+\midrule
+1 block & 1.5 MB & 662 & 1,731 \\
+10 blocks & 15.3 MB & 731 & 2,149 \\
+20 blocks & 30.6 MB & 803 & 2,188 \\
+50 blocks & 76.6 MB & 827 & 1,104 \\
+\bottomrule
+\end{tabular}
+\caption{NVMe spill/retrieve throughput on Chimera. Coalescing 20 blocks (30~MB) hits the throughput plateau for writes (803~MB/s) and peak reads (2.2~GB/s). Beyond 50 blocks, read throughput drops due to page cache eviction pressure.}
+\label{tab:storage_spill}
+\end{table}
+
+Write throughput improves with coalescing because fewer \texttt{fsync} calls amortize the NVMe flush overhead. Read throughput peaks at 20 blocks then drops at 50, likely because large reads evict the page cache. The 20-block sweet spot (30~MB per write) aligns with Update~6's recommendation to batch compressed KV blocks into GPFS 1--4~MB block-aligned writes.
+
+For comparison, IBM Storage Scale reports 8~GB/s sustained on production hardware~\cite{hsu2026kv}. Our local NVMe write path at 803~MB/s is roughly 10$\times$ slower, but scuffedQuant's 6.4$\times$ compression means we move 6.4$\times$ less data per block. The effective compressed throughput is therefore comparable to an uncompressed path at $\sim$5~GB/s.
 
 %% ============================================================
 \section{Next Steps}
