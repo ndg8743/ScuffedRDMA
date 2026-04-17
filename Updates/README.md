@@ -4,7 +4,7 @@ Weekly thesis updates for the ScuffedRDMA project (RDMA transport for distribute
 
 ## Current status
 
-Update 5 is the latest. It reviews the six upstream UCX pull requests (#11304-#11309) against real diffs, audits security findings in the middleware, and lays out the hardening work that followed. Update 4 established the UCX analysis, libscuffedrdma design, and upstream contribution plan that Update 5 follows up on.
+Update 6 is the latest. It covers storage-tier integration (GPFS, sandook, WEKA) for KV cache offloading, block size tradeoffs, and how the dual QP pool extends to cover storage traffic. Update 5 reviewed the six upstream UCX PRs and hardened the middleware. Update 4 established the UCX analysis, libscuffedrdma design, and upstream contribution plan.
 
 ## Index
 
@@ -14,6 +14,7 @@ Update 5 is the latest. It reviews the six upstream UCX pull requests (#11304-#1
 - **Update3-TensorCacheArchitecture** - RDMA tensor cache design, NVIDIA communication stack survey, MLA/MQA KV cache problem, CUDA vs Triton, three experimental pillars, and ScuffedKernels / ScuffedSearch sub-projects.
 - **Update4-UCX** - UCX codebase analysis, PMP/WFA classification theory, upstream PR table, TurboQuant KV compression pipeline, cross-node SoftRoCE benchmark results, and the Python MVP.
 - **Update5-UCX-Review** - Review of the six upstream UCX PRs with real diffs, CI flakiness notes, security audit, and middleware hardening.
+- **Update6-StorageTier** - Storage-tier integration: GPFS block size tradeoffs, sandook NVMe aggregation, WEKA AMG, four-tier KV memory hierarchy, dual QP extension to storage spill/retrieve.
 - **Drafts/** - `draft1.tex` is the rolling thesis draft. `updates-todo/` holds exploratory updates that are not yet in the main sequence (FlashAttention-3 on Blackwell, gpt-oss-120b benchmarks, transport middleware, infrastructure testing, WFA classifier validation, mechanistic interpretability, work-first scheduling, USB4, lock-free middleware, Kokkos remote spaces, architecture comparison).
 
 ## Notes
