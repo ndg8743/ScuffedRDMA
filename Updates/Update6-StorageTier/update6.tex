@@ -172,33 +172,95 @@ On our cluster (no BlueField, no ConnectX with GDS), this path is not available.
 
 For clusters with BlueField-4, the architecture simplifies: the DPU handles coalescing internally, and the WFA classifier only needs to decide ``network'' vs ``storage'' without worrying about block alignment. The dual QP split still matters for head-of-line blocking, but the storage path becomes a hardware concern rather than a software one.
 
-\section{Benchmarks (Planned)}
+\section{Measured NVMe Spill Throughput}
 
-\subsection{What We Can Measure Now}
+Before discussing GPFS and sandook deployment, we measured our local NVMe as a baseline. Compressed KV blocks (3-bit scuffedQuant, 256 tokens, 32 heads, head\_dim=128) land at 1.5~MB per block. We wrote and read them at different coalescing depths on Chimera's NVMe (\texttt{benchmarks/test\_arch/bench\_storage\_spill.py}).
 
-On the existing Chimera/Cerberus cluster with SoftRoCE and local NVMe:
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{rrrr}
+\toprule
+\textbf{Coalesce} & \textbf{Payload} & \textbf{Write} & \textbf{Read} \\
+\midrule
+1 block & 1.5 MB & 662 MB/s & 1,731 MB/s \\
+10 blocks & 15.3 MB & 731 MB/s & 2,149 MB/s \\
+20 blocks & 30.6 MB & 803 MB/s & 2,188 MB/s \\
+50 blocks & 76.6 MB & 827 MB/s & 1,104 MB/s \\
+\bottomrule
+\end{tabular}
+\caption{NVMe spill/retrieve throughput on Chimera. Coalescing 20 blocks hits the throughput plateau for writes and peak reads. 50 blocks drops read throughput due to page cache pressure.}
+\label{tab:nvme_measured}
+\end{table}
+
+The 20-block sweet spot (30~MB per write) aligns with GPFS default 1~MB data blocks: 30 compressed blocks fit in 30 GPFS blocks, each below the subblock boundary. Our local NVMe at 803~MB/s write is about 10$\times$ slower than IBM Storage Scale's cited 8~GB/s. scuffedQuant's 6.4$\times$ compression narrows the effective gap: a compressed 803~MB/s path moves the same KV content as an uncompressed 5~GB/s path.
+
+\section{Deployment Paths}
+
+Two concrete paths for the storage tier are now accessible. Both have been confirmed to work on commodity hardware.
+
+\subsection{IBM Storage Scale via Ansible}
+
+IBM publishes an Ansible role collection for Storage Scale at \texttt{IBM/ibm-spectrum-scale-install-infra}~\cite{gpfs_ansible}. Relevant details:
 
 \begin{itemize}
-\item \textbf{KV spill throughput}: Write compressed KV blocks (scuffedQuant 3-bit) to local NVMe via \texttt{aio\_write} and measure sustained bandwidth at different batch sizes (1, 10, 20, 50, 100 blocks per write).
-\item \textbf{Retrieval latency}: Read back individual KV blocks from NVMe and measure p50/p99 latency. This is the ``cache hit'' path.
-\item \textbf{Network vs storage contention}: Run simultaneous RDMA transfers (dual QP benchmark) and NVMe writes to measure whether the two paths interfere on CPU or PCIe bus.
+\item Supports Ubuntu 22 on x86\_64 (matches our Chimera/Cerberus setup).
+\item Installs core GPFS packages, compiles the kernel extension (\texttt{mmbuildgpl}), creates the cluster, adds NSDs, and provisions a file system with a single Ansible run.
+\item Deploys the management GUI, a Callhome service for support uploads, and the CES (Cluster Export Services) protocol nodes for SMB/NFS.
+\item Includes prerequisite hardening: disables SELinux/firewall when asked, generates SSH keys, installs kernel-devel.
 \end{itemize}
 
-\subsection{What Requires Additional Infrastructure}
+\paragraph{How we would use it.} A two-node GPFS cluster on Chimera/Cerberus using the Ansible role:
+
+\begin{enumerate}
+\item Each node exposes one NVMe partition as an NSD (Network Shared Disk).
+\item Default block size 1~MB, metadata block 256~KB. Do not touch this without IBM support.
+\item Create a single file system mounted at \texttt{/gpfs/scuffedrdma} on both nodes.
+\item libscuffedrdma's cold QP spills coalesced 1~MB compressed KV batches to the file system.
+\item The hot QP bypasses storage entirely: attention-critical traffic stays in-memory.
+\end{enumerate}
+
+This exercises the Update~4 dual-QP architecture against a real parallel file system rather than the idealized numbers from Hsu et al. The comparison that matters: our coalesced-write throughput versus GPFS's claim of sub-millisecond metadata and 8~GB/s data path. If we match within an order of magnitude on consumer hardware, the paper tells a stronger story about software-RDMA + compression as an alternative to enterprise storage.
+
+\subsection{sandook for Commodity NVMe}
+
+sandook~\cite{sandook2026} is the MIT NSDI 2026 artifact for aggregated NVMe with workload isolation. The GitHub repository provides a working prototype with a two-node QuickStart~\cite{sandook_quickstart}. The architecture is:
 
 \begin{itemize}
-\item \textbf{GPFS benchmarks}: Require an IBM Storage Scale deployment (not available on our cluster). The numbers cited from Hsu et al. ($\sim$8 GB/s sustained, 8--12$\times$ TTFT reduction) are the reference targets.
-\item \textbf{WEKA benchmarks}: Require a WEKA NeuralMesh cluster. Their published numbers (41$\times$ TTFT reduction, 7.5M read IOPS) are the comparison point.
-\item \textbf{GDS benchmarks}: Require a BlueField DPU or ConnectX with GDS support. Not available on RTX 5090/3090 consumer GPUs.
+\item \textbf{Controller} (central process): schedules reads/writes across SSDs using offline SSD performance profiles.
+\item \textbf{Disk server} (per-SSD process): exposes the NVMe via SPDK or POSIX backend, reports IOPS/latency to the controller.
+\item \textbf{Block device agent} (client side): uses \texttt{ublksrv} (userspace block device driver) to expose \texttt{/dev/ublkb0} to the host. Any file system can mount on top.
+\item \textbf{Networking}: Caladan userspace TCP, runs on a dedicated NIC PCI address.
+\item \textbf{Read/write isolation}: the controller dynamically partitions SSDs into read-heavy and write-heavy groups based on measured latency.
+\end{itemize}
+
+\paragraph{How we would use it.} A two-node sandook deployment on our cluster:
+
+\begin{enumerate}
+\item Cerberus runs the controller and a disk server over its local NVMe.
+\item Chimera runs the block device agent, mounts \texttt{/dev/ublkb0} as ext4 at \texttt{/mnt/sandook}.
+\item libscuffedrdma spills compressed KV blocks through \texttt{/mnt/sandook} rather than local NVMe. The sandook layer transparently aggregates both nodes' NVMe.
+\item Run the same spill benchmark (Table~\ref{tab:nvme_measured}) with the sandook mount as the target. Expected effect: aggregated throughput from two NVMe drives, minus the Caladan+TCP overhead.
+\end{enumerate}
+
+\paragraph{Why sandook matches our design.} The sandook scheduler split (control plane at slow timescales for isolation decisions, data plane at fast timescales for per-request routing) mirrors the WFA + PMP split in libscuffedrdma. Both systems solve the same problem at different layers: WFA + PMP pick the right QP, sandook picks the right SSD. A combined deployment means the full stack from GPU HBM to persistent storage applies the same classify-then-route principle at every hop.
+
+\paragraph{Dependencies.} sandook requires the \texttt{ublk} kernel driver (Linux 6.0+, Chimera/Cerberus run 6.8) and a Caladan-compatible NIC (most standard 10~GbE NICs work; the PCI address is configured explicitly). Neither is a blocker.
+
+\subsection{GDS, WEKA, BlueField-4}
+
+\begin{itemize}
+\item \textbf{GPUDirect Storage (GDS)} requires \texttt{nvidia-peermem} which does not work with SoftRoCE (no NIC driver callbacks). Available only on Tower~2 with ConnectX-4.
+\item \textbf{WEKA NeuralMesh} requires a licensed WEKA cluster. Their published numbers (41$\times$ TTFT reduction, 7.5M read IOPS) serve as the high-end comparison target.
+\item \textbf{BlueField-4 DPU} handles coalescing and storage control-plane offload in hardware. Not on our testbed.
 \end{itemize}
 
 \section{Next Steps}
 
 \begin{enumerate}
-\item Implement KV spill/retrieve in \texttt{middleware/rdma\_tensor\_cache/} using \texttt{aio\_write}/\texttt{aio\_read} to local NVMe, gated by the WFA classifier.
-\item Run the coalescing benchmark: measure throughput at different batch sizes to find the optimal coalescing depth for our NVMe drives.
-\item Extend the PMP controller to include a ``storage pressure'' term based on GPU memory utilization.
-\item Investigate sandook deployment on the cluster for aggregated NVMe with workload isolation.
+\item Deploy the IBM Ansible role against Chimera/Cerberus: create a two-node GPFS cluster, mount at \texttt{/gpfs/scuffedrdma}, run the spill benchmark, compare against the 803~MB/s local NVMe baseline.
+\item Build sandook on both nodes following the QuickStart: controller on Cerberus, block agent on Chimera. Benchmark the aggregated NVMe throughput and sub-millisecond tail latency claim from the paper.
+\item Implement KV spill/retrieve inside \texttt{middleware/rdma\_tensor\_cache/} with \texttt{aio\_write}/\texttt{aio\_read}, gated by the WFA classifier. Route a configurable fraction of cold-pool traffic to storage instead of the network.
+\item Extend the PMP controller with a storage-pressure term based on GPU memory headroom.
 \end{enumerate}
 
 \begin{thebibliography}{99}
@@ -213,7 +275,13 @@ V.~Hsu, ``Accelerating NVIDIA Dynamo with IBM Storage Scale and BlueField-4 Infe
 W.~Kwon et al., ``Efficient Memory Management for Large Language Model Serving with PagedAttention,'' \emph{Proc.\ SOSP}, 2023. arXiv:2309.06180.
 
 \bibitem{sandook2026}
-MIT sandook team, ``sandook: Aggregated NVMe Block Device with Read/Write Workload Isolation,'' \emph{Proc.\ NSDI}, 2026. \url{https://github.com/mit-sandook/sandook}
+G.~I.~Chaudhry, A.~Bhardwaj, Z.~Ruan, and A.~Belay, ``Unleashing The Potential of Datacenter SSDs by Taming Performance Variability,'' \emph{Proc.\ NSDI}, 2026. \url{https://github.com/mit-sandook/sandook}
+
+\bibitem{sandook_quickstart}
+MIT sandook team, ``Sandook NSDI 2026 Artifact QuickStart,'' 2026. \url{https://github.com/mit-sandook/sandook/blob/main/nsdi-26-ae/QuickStart.md}
+
+\bibitem{gpfs_ansible}
+IBM, ``IBM Storage Scale (GPFS) Deployment using Ansible Roles,'' 2026. \url{https://github.com/IBM/ibm-spectrum-scale-install-infra}
 
 \bibitem{weka2025amg}
 WEKA, ``Augmented Memory Grid: Breaking the AI Memory Barrier,'' 2025. \url{https://www.weka.io}
