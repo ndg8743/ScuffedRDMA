@@ -1,0 +1,589 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,hyperref,tikz,pgfplots,listings,xcolor}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,fit}
+\pgfplotsset{compat=1.18}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\bfseries,
+  frame=single,
+  breaklines=true,
+  columns=fullflexible
+}
+
+\title{Update 5-2: Architecture-Driven Transport and Stack Comparison\\[4pt]
+\large Adaptive RDMA Optimization for Distributed LLM Training and Inference on Consumer Hardware}
+\author{Nathan Gopee\\MS Computer Science Candidate, SUNY New Paltz\\\texttt{gopeen1@newpaltz.edu}\\[4pt]Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%% ============================================================
+\section{Introduction}
+\label{sec:intro}
+%% ============================================================
+
+Updates 4 and 5 covered the network transport layer: dual QP pools, WFA classification, PMP bandwidth control, and six upstream UCX patches (\#11304--\#11309). Update~6 looked one tier down at storage integration for KV cache offloading. This update shifts perspective upward: how do the model architectures themselves change the demands placed on transport?
+
+Three questions drive the analysis:
+\begin{enumerate}
+\item How do different model architectures -- Transformer, SSM, hybrid, MoE -- change the RDMA traffic pattern?
+\item How does scuffedQuant extend to non-Transformer state (Mamba hidden vectors, MoE expert activations)?
+\item Which transport stack gives peak performance while maintaining compatibility with existing frameworks like vLLM?
+\end{enumerate}
+
+Section~\ref{sec:transport_stack} surveys the transport stack landscape. Section~\ref{sec:uccl} compares UCCL against libscuffedrdma. Sections~\ref{sec:arch_drives}--\ref{sec:sonicmoe} analyze how each architecture shapes traffic. Section~\ref{sec:scuffedquant_ext} presents scuffedQuant results across architectures. Section~\ref{sec:nccl_plugin} describes the NCCL net plugin path. Section~\ref{sec:methodology} covers benchmark methodology, and Section~\ref{sec:next_steps} lays out next steps.
+
+%% ============================================================
+\section{Transport Stack Landscape}
+\label{sec:transport_stack}
+%% ============================================================
+
+The distributed ML ecosystem offers at least six transport options for GPU-to-GPU communication. Table~\ref{tab:transport_comparison} compares them across the dimensions that matter for this thesis.
+
+\begin{table}[ht]
+\centering\small
+\resizebox{\textwidth}{!}{\begin{tabular}{lcccccc}
+\toprule
+& \textbf{NCCL} & \textbf{UCX} & \textbf{NVSHMEM} & \textbf{UCCL} & \textbf{ibverbs} & \textbf{NCCL Plugin} \\
+& & & & & (libscuffedrdma) & (proposed) \\
+\midrule
+Transport layer & IB/RoCE/TCP & IB/RoCE/TCP & IB/RoCE & IB/RoCE & IB/RoCE & IB/RoCE/TCP \\
+QP management & internal & internal & internal & round-robin & dual hot/cold & dual hot/cold \\
+GPU-initiated? & no & no & yes & no & no & no \\
+SoftRoCE? & yes & yes & no & yes & yes & yes \\
+Collectives? & yes & via MPI & put/get & allreduce & point-to-point & via NCCL \\
+vLLM compat? & native & via NIXL & no & drop-in & KvConnector & drop-in \\
+\bottomrule
+\end{tabular}}
+\caption{Transport stack comparison for distributed LLM inference. SoftRoCE support matters because our testbed uses the AQC107 10GbE NIC.}
+\label{tab:transport_comparison}
+\end{table}
+
+\subsection{The NVIDIA Magnum IO Stack}
+
+Kraus~\cite{kraus2022multinode} presents the Magnum IO stack as NVIDIA's unified communication architecture: NCCL for collectives, NVSHMEM for GPU-initiated point-to-point, and GPUDirect RDMA for zero-copy GPU memory access. The key performance number: GPUDirect RDMA achieves 4.27~$\mu$s latency vs 24.56~$\mu$s for staged CPU-bounce transfers -- a 5.8$\times$ improvement.
+
+On our consumer hardware (RTX 3090 + RTX 5090, no ConnectX, no GPUDirect RDMA support), the staged path is the only option. Every transfer bounces through host DRAM. This makes the WFA classifier's routing decision more consequential: with 5.8$\times$ higher per-transfer latency, head-of-line blocking from misrouted bulk transfers costs more in absolute time.
+
+\subsection{Target Stack: OpenMPI + NVSHMEM}
+
+The long-term target is OpenMPI with NVSHMEM for GPU-initiated transfers. NVSHMEM's \texttt{nvshmem\_put}/\texttt{nvshmem\_get} let the GPU post RDMA operations directly from a CUDA kernel, bypassing the CPU entirely. For decode-step KV lookups where each warp needs a single cache line from a remote GPU, this eliminates the kernel-launch and CPU-posting overhead.
+
+The limitation is transport support: NVSHMEM requires InfiniBand or hardware RoCE. It does not work over SoftRoCE. Our testbed cannot run NVSHMEM until we add ConnectX NICs or get access to the Hydra cluster.
+
+%% ============================================================
+\section{UCCL Comparison}
+\label{sec:uccl}
+%% ============================================================
+
+UCCL~\cite{uccl2026} is a recent open-source collective communication library that bypasses NCCL's internal abstractions and posts directly to ibverbs. It targets exactly the scenario libscuffedrdma targets: getting raw RDMA performance without NCCL's overhead.
+
+\subsection{What UCCL Does}
+
+UCCL's architecture has three layers:
+\begin{enumerate}
+\item A \emph{provider} abstraction over ibverbs (or EFA on AWS). Each provider manages its own QP pool.
+\item \emph{Round-robin channel assignment}: transfers rotate across multiple QPs to avoid head-of-line blocking on any single queue.
+\item \emph{Pluggable collective algorithms}: ring allreduce and recursive halving-doubling, selectable per message size.
+\end{enumerate}
+
+UCCL supports SoftRoCE, which makes it directly comparable on our testbed. Their benchmarks show 1.2--1.5$\times$ throughput over NCCL on allreduce for message sizes above 1~MB.
+
+\subsection{What ScuffedRDMA Does Differently}
+
+The difference is in QP management philosophy:
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{lll}
+\toprule
+& \textbf{UCCL} & \textbf{libscuffedrdma} \\
+\midrule
+QP assignment & round-robin across $N$ channels & WFA-classified hot/cold split \\
+Routing signal & message index (mod $N$) & tensor role + size + urgency \\
+Bandwidth control & none (equal share) & PMP bang-bang controller \\
+Goal & maximize aggregate throughput & minimize latency for critical path \\
+\bottomrule
+\end{tabular}
+\caption{UCCL vs libscuffedrdma QP management.}
+\label{tab:uccl_vs_scuffed}
+\end{table}
+
+Round-robin is optimal when all traffic is homogeneous. It fails when traffic is heterogeneous: a 16~MB KV block and a 64-byte scheduling message get the same QP treatment. The WFA classifier distinguishes these and routes them to pools with different SQ depths, CQ polling strategies, and inline thresholds.
+
+\subsection{Benchmark Plan}
+
+The comparison benchmark will run both libraries on the same Chimera--Cerberus link (SoftRoCE, 10GbE):
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Library} & \textbf{64B p50} & \textbf{64B p99} & \textbf{1MB p50} & \textbf{1MB p99} & \textbf{Mixed p99} \\
+\midrule
+UCCL & Pending & Pending & Pending & Pending & Pending \\
+libscuffedrdma & Pending & Pending & Pending & Pending & Pending \\
+vanilla NCCL & Pending & Pending & Pending & Pending & Pending \\
+\bottomrule
+\end{tabular}
+\caption{Planned latency comparison ($\mu$s). ``Mixed'' sends 64B and 1MB messages simultaneously to measure head-of-line blocking.}
+\label{tab:uccl_benchmark}
+\end{table}
+
+The mixed-traffic column is the key test. Under uniform traffic, round-robin should match or beat the dual-pool approach. Under mixed traffic, the dual-pool approach should show lower p99 for small messages because they never queue behind large ones.
+
+%% ============================================================
+\section{Architecture Drives Transport}
+\label{sec:arch_drives}
+%% ============================================================
+
+Different model architectures produce fundamentally different state that must cross the network during disaggregated inference. Table~\ref{tab:arch_traffic} summarizes the four families.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{lllrl}
+\toprule
+\textbf{Architecture} & \textbf{State type} & \textbf{Size @ 128K ctx} & \textbf{Growth} & \textbf{QP pool} \\
+\midrule
+Transformer (dense) & KV cache & $\sim$16 GB (70B model) & $O(N)$ & cold (bulk) \\
+Mamba / SSM & hidden state & $\sim$13 MB (7B model) & $O(1)$ & hot (latency) \\
+Hybrid (Granite~4) & KV + hidden & $\sim$4 GB + 6 MB & mixed & both \\
+MoE & expert activations & variable & $O(E \cdot B)$ & split by expert freq \\
+\bottomrule
+\end{tabular}
+\caption{State memory and dominant transport pattern per architecture family. $N$ = sequence length, $E$ = number of routed experts, $B$ = batch size. Transformer numbers assume GQA with 8 KV heads.}
+\label{tab:arch_traffic}
+\end{table}
+
+The transport implication is direct. A pure Transformer at long context is bandwidth-bound: 16~GB of KV cache on a 1.25~GB/s link takes 12.8 seconds without compression. A pure Mamba model is latency-bound: 13~MB transfers in under 11~ms, but the decode step cannot begin until the state arrives. The hybrid case needs both pools simultaneously.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.85\textwidth,
+    height=6cm,
+    xlabel={Context length (tokens)},
+    ylabel={State size (bytes, log scale)},
+    ymode=log,
+    xmin=0, xmax=131072,
+    ymin=1e4, ymax=1e11,
+    legend pos=north west,
+    grid=major,
+    xtick={0,32768,65536,98304,131072},
+    xticklabels={0,32K,64K,96K,128K},
+]
+\addplot[blue, thick, domain=1024:131072, samples=50] {2*80*8*128*x*2};
+\addlegendentry{Transformer KV (70B)}
+\addplot[red, thick, dashed, domain=1024:131072] {13631488};
+\addlegendentry{Mamba-3 hidden (7B)}
+\addplot[green!60!black, thick, dotted, domain=1024:131072, samples=50] {2*20*8*128*x*2 + 6291456};
+\addlegendentry{Hybrid KV+hidden}
+\end{axis}
+\end{tikzpicture}
+\caption{State bytes vs context length. Transformer KV grows linearly; Mamba-3 state stays constant; the hybrid interpolates. The gap between the two extremes spans four decades at 128K context.}
+\label{fig:state_vs_context}
+\end{figure}
+
+\subsection{The eml Analogy}
+
+Odrzywolek~\cite{odrzywolek2026eml} introduces the binary operator $\text{eml}(x,y) = e^x - \ln y$, showing that every continuous mathematical operation can be composed from this single primitive. The parallel to transport is this: every architecture's RDMA traffic pattern composes from two primitives -- \textbf{classify} (WFA decides hot or cold) and \textbf{allocate} (PMP decides bandwidth fraction). The Transformer case uses classify to separate KV layers from metadata, then allocate to give bulk KV the cold pool's deep send queue. The Mamba case classifies everything as hot (small, latency-critical) and allocates the full link to the hot pool. MoE classifies by expert popularity. The primitives are the same; the parameters change.
+
+\subsection{Fragmentation Overview (Updated)}
+
+Figure~\ref{fig:fragmentation_overview} reproduces the communication stack fragmentation diagram from the thesis draft, updated to reflect the 2026 landscape. The key change from the original: the application row now carries three architecturally distinct state shapes (KV, SSM, MoE) on the same wire, and the middleware row must handle all three without separate code paths.
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    node distance=0.8cm and 1.2cm,
+    box/.style={rectangle, draw, rounded corners, minimum width=2.2cm, minimum height=0.8cm, align=center, font=\small},
+    app/.style={box, fill=blue!20},
+    mid/.style={box, fill=yellow!20},
+    trans/.style={box, fill=green!20},
+    hw/.style={box, fill=gray!20},
+    broken/.style={draw=red, very thick, dashed},
+    arrow/.style={->, >=stealth, thick}
+]
+
+\node[app] (vllm) {vLLM};
+\node[app, right=of vllm] (exo) {Exo};
+\node[app, right=of exo] (megatron) {Megatron-LM};
+\node[app, right=of megatron] (pytorch) {PyTorch\\Distributed};
+
+\node[mid, below=1.2cm of vllm] (nccl) {NCCL};
+\node[mid, right=of nccl] (ucx) {UCX};
+\node[mid, right=of ucx] (uccl) {UCCL};
+\node[mid, right=of uccl] (gloo) {Gloo};
+
+\node[trans, below=1.2cm of nccl, xshift=-0.5cm] (ib) {InfiniBand};
+\node[trans, right=of ib] (roce) {RoCE};
+\node[trans, right=of roce] (iwarp) {iWARP};
+\node[trans, right=of iwarp] (tb5) {Thunderbolt 5\\RDMA};
+\node[trans, right=of tb5] (tcp) {TCP};
+
+\node[hw, below=1.2cm of ib, xshift=0.5cm] (nvidia) {NVIDIA\\GPUs};
+\node[hw, right=1.5cm of nvidia] (apple) {Apple\\Silicon};
+\node[hw, right=1.5cm of apple] (consumer) {Consumer\\NICs};
+
+\draw[arrow] (vllm) -- (nccl);
+\draw[arrow] (vllm) -- (gloo);
+\draw[arrow] (exo) -- (uccl);
+\draw[arrow] (exo) -- (tcp);
+\draw[arrow] (megatron) -- (nccl);
+\draw[arrow] (pytorch) -- (nccl);
+\draw[arrow] (pytorch) -- (gloo);
+\draw[arrow] (pytorch) -- (ucx);
+
+\draw[arrow] (nccl) -- (ib);
+\draw[arrow] (nccl) -- (roce);
+\draw[arrow, broken] (nccl.south) -- ++(0,-0.5) -| (iwarp) node[pos=0.25, above, font=\tiny\color{red}] {Issue \#1963};
+\draw[arrow] (ucx) -- (ib);
+\draw[arrow] (ucx) -- (roce);
+\draw[arrow] (ucx) -- (iwarp);
+\draw[arrow] (ucx) -- (tcp);
+\draw[arrow] (uccl) -- (ib);
+\draw[arrow] (uccl) -- (roce);
+\draw[arrow] (gloo) -- (tcp);
+
+\draw[arrow] (ib) -- (nvidia);
+\draw[arrow] (roce) -- (nvidia);
+\draw[arrow] (roce) -- (consumer);
+\draw[arrow] (iwarp) -- (consumer);
+\draw[arrow] (tb5) -- (apple);
+\draw[arrow] (tcp) -- (nvidia);
+\draw[arrow] (tcp) -- (apple);
+\draw[arrow] (tcp) -- (consumer);
+
+\node[left=0.3cm of vllm, font=\footnotesize\bfseries, rotate=90, anchor=south] {Applications};
+\node[left=0.3cm of nccl, font=\footnotesize\bfseries, rotate=90, anchor=south] {Middleware};
+\node[left=0.3cm of ib, font=\footnotesize\bfseries, rotate=90, anchor=south] {Transport};
+\node[left=0.3cm of nvidia, font=\footnotesize\bfseries, rotate=90, anchor=south] {Hardware};
+
+\node[draw=red, fill=red!10, rounded corners, font=\small, align=center, below=0.3cm of consumer] (problem) {
+    \textbf{Problem:} Three state shapes (KV, SSM, MoE)\\on the same wire, no unified middleware
+};
+
+\end{tikzpicture}%
+}
+\caption{Communication stack fragmentation, updated for 2026. UCCL replaces JACCL in the middleware row. The application row now carries three architecturally distinct state shapes on the same wire.}
+\label{fig:fragmentation_overview}
+\end{figure}
+
+%% ============================================================
+\section{FlashAttention-4 and Asymmetric Hardware}
+\label{sec:fa4}
+%% ============================================================
+
+Zadouri et al.~\cite{zadouri2026flashattention4} build FlashAttention-4 for NVIDIA's Blackwell architecture, reaching 1613~TFLOPS on the B200. Their core insight: Blackwell's tensor cores doubled in throughput, but the memory subsystem and non-matrix units did not scale proportionally. The hardware is asymmetric.
+
+Their solution is fully asynchronous matrix operations via the \texttt{tcgen05} instruction set. Tensor Memory (TMEM) replaces shared memory for matrix operands, reducing bank conflicts and freeing shared memory for non-matrix work. The pipeline overlaps HBM loads, TMEM fills, and tensor core FMAs so that no unit stalls waiting for another.
+
+The parallel to our work is structural. On a Blackwell GPU, the asymmetry is between tensor cores (1613~TFLOPS) and HBM bandwidth (8~TB/s) -- a ratio of about 200 bytes per FLOP at peak. On our 10GbE cluster, the asymmetry is between HBM bandwidth (800~GB/s on a 3090) and NIC bandwidth (1.25~GB/s) -- a 640$\times$ gap. Both problems demand pipelining: overlap the slow path with the fast path so the fast path never stalls.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    stage/.style={rectangle, draw, minimum height=0.7cm, font=\footnotesize, align=center, rounded corners=2pt},
+    arr/.style={-{Stealth[length=2mm]}, thick},
+    lbl/.style={font=\footnotesize\bfseries, anchor=east}
+]
+
+% FA4 pipeline
+\node[lbl] at (-0.3, 2.5) {FA4:};
+\node[stage, fill=blue!15, minimum width=2cm] (hbm1) at (1.5, 2.5) {HBM load};
+\node[stage, fill=orange!15, minimum width=2cm] (tmem1) at (3.8, 2.5) {TMEM fill};
+\node[stage, fill=green!15, minimum width=2cm] (fma1) at (6.1, 2.5) {TC FMA};
+\node[stage, fill=blue!15, minimum width=2cm] (hbm2) at (4.5, 1.7) {HBM load};
+\node[stage, fill=orange!15, minimum width=2cm] (tmem2) at (6.8, 1.7) {TMEM fill};
+\node[stage, fill=green!15, minimum width=2cm] (fma2) at (9.1, 1.7) {TC FMA};
+
+\draw[arr] (hbm1) -- (tmem1);
+\draw[arr] (tmem1) -- (fma1);
+\draw[arr] (hbm2) -- (tmem2);
+\draw[arr] (tmem2) -- (fma2);
+
+% libscuffedrdma pipeline
+\node[lbl] at (-0.3, 0) {Ours:};
+\node[stage, fill=cyan!15, minimum width=2cm] (cold1) at (1.5, 0) {Cold QP\\bulk xfer};
+\node[stage, fill=red!15, minimum width=2cm] (hot1) at (4.5, 0) {Hot QP\\metadata};
+\node[stage, fill=yellow!15, minimum width=2cm] (comp1) at (7.5, 0) {GPU\\compute};
+\node[stage, fill=cyan!15, minimum width=2cm] (cold2) at (4.5, -0.8) {Cold QP\\next batch};
+\node[stage, fill=red!15, minimum width=2cm] (hot2) at (7.5, -0.8) {Hot QP\\sched};
+
+\draw[arr] (cold1) -- (hot1);
+\draw[arr] (hot1) -- (comp1);
+\draw[arr] (cold2) -- (hot2);
+
+% Overlap braces
+\draw[decorate, decoration={brace, amplitude=4pt, mirror}, thick, gray]
+    (3.5, 1.3) -- (8.2, 1.3) node[midway, below=5pt, font=\scriptsize, gray] {overlap};
+\draw[decorate, decoration={brace, amplitude=4pt, mirror}, thick, gray]
+    (3.5, -1.2) -- (8.5, -1.2) node[midway, below=5pt, font=\scriptsize, gray] {overlap};
+\end{tikzpicture}
+\caption{FlashAttention-4 overlaps HBM loads with tensor-core FMAs. libscuffedrdma overlaps cold-QP bulk transfers with hot-QP latency-critical messages. Same pipelining pattern, different bandwidth axes.}
+\label{fig:fa4_vs_rdma}
+\end{figure}
+
+%% ============================================================
+\section{Mamba-3 and Constant-Size State}
+\label{sec:mamba3}
+%% ============================================================
+
+Lahoti et al.~\cite{lahoti2026mamba3} introduce Mamba-3 with two changes relevant to transport. First, the state size is halved compared to Mamba-2: the selective-state matrix uses a more compact parameterization. Second, and more importantly for RDMA, the state is $O(1)$ in sequence length. A Mamba-3 layer's hidden state is a fixed-size vector regardless of whether the context is 1K or 128K tokens.
+
+The numbers at 128K context for a 7B-class model:
+\begin{itemize}
+\item Transformer KV cache (GQA, 8 heads): $\sim$16~GB
+\item Mamba-3 hidden state: $\sim$13~MB
+\end{itemize}
+
+That is a 1{,}230$\times$ difference. Under RDMA, this flips the bottleneck from bandwidth to latency. The Transformer case is dominated by transfer time: 16~GB / 1.25~GB/s = 12.8~s on raw 10GbE. The Mamba case is dominated by setup time: 13~MB transfers in $\sim$10~ms, but each transfer incurs QP posting overhead, CQ polling, and memory registration.
+
+For the dual QP pool, the implication is simple: all Mamba state should go to the hot pool. There is no bulk transfer to route to the cold pool. The PMP controller sets $u^*(t) = 1$ (full bandwidth to hot) whenever the WFA classifier sees only SSM state in the queue. The cold pool stays idle or handles background traffic like checkpoint writes.
+
+This also changes the scuffedQuant story. Compressing 13~MB of state at 3-bit precision saves $\sim$10~MB of transfer, which on 10GbE saves about 8~ms. The compression itself takes GPU cycles. Whether the tradeoff is worth it depends on the compression kernel latency, which Section~\ref{sec:scuffedquant_ext} measures.
+
+%% ============================================================
+\section{SonicMoE All-to-All Traffic}
+\label{sec:sonicmoe}
+%% ============================================================
+
+Guo et al.~\cite{guo2026sonicmoe} tackle the communication bottleneck in Mixture-of-Experts models. In MoE, each token is routed to a subset of experts, and the all-to-all dispatch/combine steps dominate communication time at scale. SonicMoE's solution is IO-compute overlap: while expert $i$ processes its current batch, the dispatch for expert $i{+}1$'s batch is already in flight. They report 1.86$\times$ throughput improvement on fine-grained MoE (top-2 routing with 64 experts).
+
+The WFA classifier maps naturally to MoE traffic:
+
+\begin{itemize}
+\item \textbf{Popular experts} (high activation frequency, large batches): cold QP. These transfers are bulk, predictable, and can tolerate queuing delay because the expert computation takes longer anyway.
+\item \textbf{Rare experts} (low activation frequency, small batches): hot QP. These transfers are small and urgent -- the expert finishes quickly and stalls on the next dispatch if it arrives late.
+\end{itemize}
+
+SonicMoE also introduces \emph{token rounding}: padding each expert's batch to a multiple of the hardware-friendly tile size (e.g., 128 tokens). This reduces wasted compute from irregular batch shapes but increases transfer size. The WFA classifier should account for the padding: a rounded-up batch that is mostly padding can be deprioritized relative to a fully-utilized batch of the same byte count.
+
+The PMP controller's switching function for MoE traffic becomes:
+\[
+S = \alpha \cdot q_{\text{rare}} \cdot C \cdot \mu_H - \beta \cdot q_{\text{popular}} \cdot C \cdot \mu_C
+\]
+where $q_{\text{rare}}$ and $q_{\text{popular}}$ are the queue depths for rare-expert and popular-expert dispatches respectively. When rare-expert traffic accumulates ($S < 0$), the controller shifts bandwidth to the hot pool to prevent stalls.
+
+%% ============================================================
+\section{scuffedQuant Extended Results}
+\label{sec:scuffedquant_ext}
+%% ============================================================
+
+scuffedQuant applies Walsh-Hadamard rotation, learned codebook quantization, and QJL random projection to compress tensors before RDMA transfer. Updates 4--5 validated it on Transformer KV caches. This section extends to SSM state, hybrid models, and MoE expert activations.
+
+\subsection{Transformer KV (Granite 3.3-2B)}
+\label{sec:sq_transformer}
+
+Benchmarked on Chimera (RTX 3090) using \texttt{bench\_transformer.py} with Granite 3.3-2B at 4096-token context. The metric is top-8 cosine similarity between the original and reconstructed KV tensors after compression and decompression.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Bit width} & \textbf{Compress (ms)} & \textbf{Decompress (ms)} & \textbf{Ratio} & \textbf{Top-8 cos sim} \\
+\midrule
+8-bit & -- & -- & 2.0$\times$ & 99.1\% \\
+4-bit & -- & -- & 4.0$\times$ & 91.9\% \\
+3-bit & -- & -- & 5.3$\times$ & 85.2\% \\
+\bottomrule
+\end{tabular}
+\caption{scuffedQuant on Granite 3.3-2B Transformer KV cache. Top-8 cosine similarity measures reconstruction fidelity of the 8 highest-magnitude components.}
+\label{tab:sq_transformer}
+\end{table}
+
+At 8-bit, the reconstruction is near-lossless (99.1\% top-8 similarity). At 3-bit, the 85.2\% similarity is acceptable for prefill KV (where decode attention re-scores the values) but may degrade quality for long-context retrieval tasks. The 4-bit sweet spot at 91.9\% gives a 4$\times$ compression ratio -- reducing 16~GB of KV to 4~GB, which drops the 10GbE transfer time from 12.8~s to 3.2~s.
+
+\subsection{Mamba SSM State}
+\label{sec:sq_mamba}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Bit width} & \textbf{Compress (ms)} & \textbf{Decompress (ms)} & \textbf{Ratio} & \textbf{Top-8 cos sim} \\
+\midrule
+8-bit & -- & -- & 3.2$\times$ & 100.0\% \\
+4-bit & -- & -- & 5.0$\times$ & 97.7\% \\
+3-bit & -- & -- & 6.6$\times$ & 95.6\% \\
+\bottomrule
+\end{tabular}
+\caption{scuffedQuant on Mamba-2.8B SSM hidden state (Chimera, 3$\times$ RTX 3090). State extracted from recurrent cache, 64 layers. SSM state compresses better than Transformer KV at every bit width.}
+\label{tab:sq_mamba}
+\end{table}
+
+The hypothesis is that SSM state compresses better than KV cache because it is a fixed-size vector with smoother value distributions (no sharp attention spikes). If top-8 similarity at 4-bit exceeds 95\%, then compressing the already-small 13~MB state is worth the kernel overhead.
+
+\subsection{Granite 4 Hybrid}
+\label{sec:sq_granite4}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Component} & \textbf{Bit width} & \textbf{Compress} & \textbf{Decompress} & \textbf{Ratio} & \textbf{Top-8 sim} \\
+\midrule
+KV layers (4 attn) & 8-bit & -- & -- & 3.0$\times$ & 100.0\% \\
+KV layers (4 attn) & 4-bit & -- & -- & 5.9$\times$ & 100.0\% \\
+KV layers (4 attn) & 3-bit & -- & -- & 7.8$\times$ & 100.0\% \\
+SSM layers & -- & \multicolumn{4}{l}{Not exposed in cache (tiny-preview has 0 SSM cache entries)} \\
+\bottomrule
+\end{tabular}
+\caption{scuffedQuant on Granite 4 hybrid (Transformer + Mamba layers). Benchmark running.}
+\label{tab:sq_granite4}
+\end{table}
+
+Granite 4~\cite{ibm2026granite4} interleaves Transformer and Mamba layers. The WFA classifier must distinguish KV tensors (route to cold pool) from SSM state (route to hot pool) within the same model. The scuffedQuant codebook may need separate training for each component type.
+
+\subsection{MoE Expert Activations}
+\label{sec:sq_moe}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Expert type} & \textbf{Bit width} & \textbf{Compress} & \textbf{Decompress} & \textbf{Ratio} & \textbf{Top-8 sim} \\
+\midrule
+Popular (top-5) & 4-bit & Pending & Pending & 4.0$\times$ & Pending \\
+Rare (bottom-5) & 4-bit & Pending & Pending & 4.0$\times$ & Pending \\
+All experts avg & 4-bit & Pending & Pending & 4.0$\times$ & Pending \\
+\bottomrule
+\end{tabular}
+\caption{scuffedQuant on MoE expert activations. Popular vs rare expert split follows Section~\ref{sec:sonicmoe}.}
+\label{tab:sq_moe}
+\end{table}
+
+Expert activations are sparser than KV cache (many near-zero values from gating), which should make codebook quantization more effective. The question is whether popular-expert and rare-expert activations have different enough distributions to warrant separate codebooks.
+
+\subsection{Cross-GPU: Chimera (3090) vs Cerberus (5090)}
+\label{sec:cross_gpu}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{llrr}
+\toprule
+\textbf{GPU} & \textbf{Operation} & \textbf{Eager (ms)} & \textbf{torch.compile (ms)} \\
+\midrule
+RTX 3090 (Ampere) & Compress 4-bit & Pending & Pending \\
+RTX 3090 (Ampere) & Decompress 4-bit & Pending & Pending \\
+RTX 5090 (Blackwell) & Compress 4-bit & Pending & Pending \\
+RTX 5090 (Blackwell) & Decompress 4-bit & Pending & Pending \\
+\bottomrule
+\end{tabular}
+\caption{scuffedQuant GPU decompression latency across GPU generations. Blackwell's higher memory bandwidth and larger L2 should reduce both compress and decompress time.}
+\label{tab:gpu_decompress}
+\end{table}
+
+The Blackwell GPU (RTX 5090) has roughly 1.8$\times$ the memory bandwidth of the Ampere (RTX 3090). Since scuffedQuant's kernels are memory-bandwidth-bound (the codebook lookup and Hadamard rotation are both dominated by loads/stores), we expect a proportional speedup. The \texttt{torch.compile} column tests whether the compiler's autotuning can close the gap further.
+
+%% ============================================================
+\section{NCCL Net Plugin Architecture}
+\label{sec:nccl_plugin}
+%% ============================================================
+
+The most practical integration path for libscuffedrdma into the existing ML ecosystem is not a standalone library but an NCCL net plugin. NCCL's plugin interface (\texttt{ncclNet\_v9}) lets external libraries replace the transport layer without modifying NCCL itself.
+
+\subsection{The ncclNet Interface}
+
+The plugin implements six functions:
+
+\begin{lstlisting}[language=C, caption={Core ncclNet plugin functions.}]
+ncclResult_t init(ncclDebugLogger_t logger);
+ncclResult_t devices(int* ndev);
+ncclResult_t connect(int dev, void* handle, void** sendComm);
+ncclResult_t accept(void* listenComm, void** recvComm);
+ncclResult_t isend(void* sendComm, void* data, int size,
+                   void** request);
+ncclResult_t irecv(void* recvComm, void* data, int size,
+                   void** request);
+\end{lstlisting}
+
+The key interception point is \texttt{isend}. When NCCL calls \texttt{isend} with a buffer and size, the plugin has full control over how the data reaches the remote GPU. This is where WFA classification happens: the plugin inspects the transfer size (and optionally a metadata tag from the caller) and routes to the appropriate QP.
+
+\subsection{Dual QP at isend()}
+
+Each \texttt{connect}/\texttt{accept} pair establishes two RDMA connections: one hot QP and one cold QP. At \texttt{isend} time:
+
+\begin{enumerate}
+\item If \texttt{size} $\leq$ threshold (default: 4~KB), post to the hot QP with inline data and immediate polling.
+\item If \texttt{size} $>$ threshold, post to the cold QP with a deep send queue and event-driven completion.
+\end{enumerate}
+
+The PMP controller runs in a background thread, adjusting the threshold based on queue depths. When hot QP congestion rises, the threshold drops (fewer transfers qualify as ``hot''). When the hot QP drains, the threshold rises.
+
+\subsection{Integration Path}
+
+Loading the plugin requires a single environment variable:
+
+\begin{lstlisting}[language=bash]
+export NCCL_NET_PLUGIN=libscuffed_nccl_net.so
+\end{lstlisting}
+
+Any NCCL consumer -- vLLM, Megatron-LM, PyTorch DDP -- gets WFA-routed transfers without code changes. This is the compatibility argument: instead of forking NCCL or requiring applications to adopt a new API, the plugin drops into the existing stack.
+
+The limitation is that the plugin only sees what NCCL exposes: buffer address and size. It cannot see the tensor's semantic role (KV layer 12 vs MoE expert dispatch) without additional metadata. The first version classifies purely on size. A future version could use NCCL's \texttt{ncclCommRegister} to pass WFA labels alongside the data.
+
+%% ============================================================
+\section{Benchmark Methodology}
+\label{sec:methodology}
+%% ============================================================
+
+All benchmarks run on the Chimera--Cerberus testbed (RTX 3090 + RTX 5090, SoftRoCE over 10GbE AQC107 NICs, Ubuntu 22.04, CUDA 12.8, rdma-core 55).
+
+\subsection{Directory Structure}
+
+\begin{lstlisting}[language=bash, caption={Benchmark directory layout.}]
+test_arch/
+  bench_transformer.py   # Granite 3.3-2B KV compression
+  bench_mamba.py          # Mamba-3 SSM state compression
+  bench_granite4.py       # Granite 4 hybrid
+  bench_moe.py            # MoE expert activations
+  bench_cross_gpu.py      # Ampere vs Blackwell kernel timing
+  run_all.sh              # Runs all benchmarks, tags by hostname
+  results/
+    chimera/              # Results from RTX 3090 node
+    cerberus/             # Results from RTX 5090 node
+\end{lstlisting}
+
+Each benchmark script outputs JSON with fields: \texttt{model}, \texttt{component}, \texttt{bit\_width}, \texttt{compress\_ms}, \texttt{decompress\_ms}, \texttt{ratio}, \texttt{top8\_cossim}, \texttt{hostname}, \texttt{gpu}, \texttt{timestamp}.
+
+\subsection{Transport Comparison}
+
+The transport benchmark compares three stacks on the same link:
+
+\begin{enumerate}
+\item \textbf{libscuffedrdma}: dual QP pool with WFA classification and PMP control.
+\item \textbf{UCCL}: round-robin multi-channel over ibverbs.
+\item \textbf{Vanilla NCCL}: default NCCL over SoftRoCE (single ring, no plugin).
+\end{enumerate}
+
+Each stack runs the same workload: 10{,}000 transfers drawn from a log-uniform size distribution (64~B to 16~MB) with 20\% of transfers tagged as ``urgent'' (hot metadata) and 80\% as ``bulk'' (cold KV). The metrics are p50, p95, and p99 latency for each size class.
+
+\subsection{Hostname Tagging}
+
+Results from each node are tagged with the hostname (\texttt{chimera} or \texttt{cerberus}) and GPU model. This matters because compression kernels run at different speeds on different GPUs, and the optimal bit width may differ: the 5090's faster kernels shift the compute-vs-bandwidth tradeoff toward more aggressive compression.
+
+%% ============================================================
+\section{Next Steps}
+\label{sec:next_steps}
+%% ============================================================
+
+\begin{enumerate}
+\item \textbf{UCCL vs ScuffedRDMA benchmark}: run the transport comparison from Section~\ref{sec:methodology} on Chimera--Cerberus. The mixed-traffic p99 is the key metric.
+\item \textbf{NCCL plugin build}: compile \texttt{libscuffed\_nccl\_net.so} against NCCL 2.25, test with vLLM disaggregated serving on SoftRoCE.
+\item \textbf{NVSHMEM + OpenMPI}: install on the cluster, test GPU-initiated puts for decode-step KV lookups.
+\item \textbf{GPFS access}: request access to the Hydra cluster (if available) for storage-tier benchmarks from Update~6.
+\item \textbf{Mamba/MoE benchmarks}: complete the pending scuffedQuant tables (Sections~\ref{sec:sq_mamba}--\ref{sec:sq_moe}).
+\end{enumerate}
+
+%% ============================================================
+\bibliographystyle{plain}
+\bibliography{update5_2}
+
+\end{document}

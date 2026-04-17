@@ -1,0 +1,28 @@
+{
+  "model": "ibm-granite/granite-3.3-2b-instruct",
+  "architecture": "transformer",
+  "hostname": "chimera",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "seq_len": 37,
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 3.2,
+      "rank_overlap_topk": 0.991015625,
+      "compress_us": 690.0348234921694
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 5.333333333333333,
+      "rank_overlap_topk": 0.919140625,
+      "compress_us": 624.1230294108391
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 6.4,
+      "rank_overlap_topk": 0.8515625,
+      "compress_us": 596.8830082565546
+    }
+  ],
+  "notes": ""
+}
