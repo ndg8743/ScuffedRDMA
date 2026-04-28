@@ -155,18 +155,9 @@ Four components:
 | FA3 Blackwell patch, RTX 5090 | +15.5% throughput | `deployment/patches/` |
 | gpt-oss-120b TCP baseline (3× 3090, MXFP4) | 104.4 tok/s | `deployment/benchmarks/` |
 
-## Upstream Contributions
+## Possible Upstream Contributions
 
 Six PRs against [openucx/ucx](https://github.com/openucx/ucx), reviewed in Update 5.
-
-| PR | Fix | Issue |
-|----|-----|-------|
-| #11304 | Calculated rndv threshold for `ucp_tag_send_nbr` | #4430 |
-| #11305 | Adaptive TX CQ moderation | #1307 |
-| #11306 | Eager inline sends with CUDA MDs present | #4275 |
-| #11307 | TCP fallback wireup for RC/DC (SoftRoCE fix) | #4794 |
-| #11308 | Bandwidth query on `ucp_ep_query` | #6254 |
-| #11309 | Symmetric traffic class propagation | #10325 |
 
 ---
 
