@@ -4,7 +4,7 @@ Weekly thesis updates for the ScuffedRDMA project (RDMA transport for distribute
 
 ## Current status
 
-Update 6 is the latest. It covers storage-tier integration (GPFS, sandook, WEKA) for KV cache offloading, block size tradeoffs, and how the dual QP pool extends to cover storage traffic. Update 5 reviewed the six upstream UCX PRs and hardened the middleware. Update 4 established the UCX analysis, libscuffedrdma design, and upstream contribution plan.
+Update 7 is the latest. It reads three recent developments (Ray Direct Transport, AMD's ROCm eRNIC, and the near speed-of-light GPU collectives paper) against libscuffedrdma, places the middleware among the libfabric / UCX / DOCA transport stacks, and collects GPFS's published RDMA defect record. Update 6 covered storage-tier integration (GPFS, sandook, WEKA) for KV cache offloading, block size tradeoffs, and how the dual QP pool extends to cover storage traffic. Update 5 reviewed the six upstream UCX PRs and hardened the middleware.
 
 ## Index
 
@@ -15,6 +15,7 @@ Update 6 is the latest. It covers storage-tier integration (GPFS, sandook, WEKA)
 - **Update4-UCX** - UCX codebase analysis, PMP/WFA classification theory, upstream PR table, TurboQuant KV compression pipeline, cross-node SoftRoCE benchmark results, and the Python MVP.
 - **Update5-UCX-Review** - Review of the six upstream UCX PRs with real diffs, CI flakiness notes, security audit, and middleware hardening.
 - **Update6-StorageTier** - Storage-tier integration: GPFS block size tradeoffs, sandook NVMe aggregation, WEKA AMG, four-tier KV memory hierarchy, dual QP extension to storage spill/retrieve.
+- **Update7-TransportLandscape** - Ray Direct Transport, ROCm eRNIC, and near-SoL collectives read against the middleware; where libscuffedrdma sits among libfabric / UCX / DOCA; GPFS RDMA defect record.
 - **Drafts/** - `draft1.tex` is the rolling thesis draft. `updates-todo/` holds exploratory updates that are not yet in the main sequence (FlashAttention-3 on Blackwell, gpt-oss-120b benchmarks, transport middleware, infrastructure testing, WFA classifier validation, mechanistic interpretability, work-first scheduling, USB4, lock-free middleware, Kokkos remote spaces, architecture comparison).
 
 ## Notes

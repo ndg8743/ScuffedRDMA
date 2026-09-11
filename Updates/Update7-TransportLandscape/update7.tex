@@ -1,0 +1,299 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx,amsmath,amssymb,booktabs,hyperref,microtype,xurl}
+\usepackage{enumitem}
+\setlist{nosep}
+\hypersetup{colorlinks=true,linkcolor=black,citecolor=blue,urlcolor=blue}
+\setcounter{tocdepth}{2}
+
+\title{Update 7: Ray Direct Transport, ROCm eRNIC, Near-SoL Collectives,\\[2pt] and Where libscuffedrdma Sits in the libfabric / UCX / DOCA Landscape}
+\author{Nathan Gopee\\MS Computer Science Candidate, SUNY New Paltz\\\texttt{gopeen1@newpaltz.edu}\\[4pt]Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\date{September 2026}
+
+\begin{document}
+\maketitle
+
+\tableofcontents
+
+\section{Summary}
+
+Three recent developments sit close to the thesis: Anyscale's Ray Direct Transport (RDT)~\cite{anyscale_rdt2,anyscale_rdt1}, AMD's open-source ROCm eRNIC~\cite{rocm_ernic}, and the ``Every $\mu$s Matters'' paper on near speed-of-light GPU collectives~\cite{sol2026}. This update reads each against libscuffedrdma, then places the middleware among the three transport stacks the industry builds on (libfabric, UCX, DOCA), prompted by internship work on GPFS, which uses libfabric underneath. A final section collects GPFS's published RDMA defect record, which is the strongest available evidence that the reliability problems on this testbed are not artifacts of consumer hardware.
+
+Two conclusions up front:
+
+\begin{enumerate}
+\item All three developments independently validate core design decisions already in the middleware: amortized memory registration, explicit routing instead of library heuristics, coalescing small transfers to the fabric's efficient message size, and (in the SoL paper) treating decode-side small messages as the latency-critical class.
+\item None of them classes traffic or schedules a contended link. Weight sync is homogeneous bulk; the SoL collectives are homogeneous small messages on NVLink; eRNIC is a device substrate. The mixed hot/cold problem on one commodity-Ethernet link is where this thesis sits.
+\end{enumerate}
+
+\paragraph{Where the work stands.} libscuffedrdma is a transport middleware built on libibverbs, under vLLM, for disaggregated prefill/decode over one 10GbE link (SoftRoCE today, RoCEv2 on ConnectX when available) between Cerberus and Chimera. In place: a dual QP pool with split polling, a size-plus-phase router, a PMP switching controller for bandwidth, the scuffedQuant 3-bit WHT+Lloyd-Max compressor for cold KV blocks, a pre-registered tensor-cache arena addressed by rkey offsets, and upstream UCX patches from the Update 4--5 work. The proposal's broader agenda (joint training/inference scheduling, the full WFA classifier, KV migration, security) shaped this and can be picked back up if time allows; the main focus is the transport and its evaluation.
+
+\section{Ray Direct Transport}
+
+\subsection{What RDT is}
+
+RDT lets a Ray actor return \texttt{torch.Tensor}s that bypass Ray's CPU-based plasma object store entirely. A producer method decorated with \texttt{@ray.method(tensor\_transport="nixl")} keeps the tensor in GPU memory and stores only a reference; when the resulting \texttt{ObjectRef} is passed to a consumer actor, Ray triggers a direct GPU-to-GPU transfer through a third-party backend~\cite{ray_rdt_docs}. The work grew out of the GPU object store RFC~\cite{ray_gpu_rfc}.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{lllll}
+\toprule
+\textbf{Backend} & \textbf{Devices} & \textbf{Topology} & \textbf{Collective group?} & \textbf{Underneath} \\
+\midrule
+NIXL & CPU + GPU & point-to-point & no & UCX / GDS plugins \\
+NCCL & NVIDIA GPU & collective & yes & ring/tree collectives \\
+Gloo & CPU & collective & yes & TCP \\
+\bottomrule
+\end{tabular}
+\caption{RDT transport backends~\cite{ray_rdt_docs}. NIXL is the flagship: point-to-point, no group setup, both CPU and GPU memory.}
+\label{tab:rdt_backends}
+\end{table}
+
+The detail most relevant to this thesis: NIXL's network backend is UCX~\cite{nixl_docs}. The entire RDT $\to$ NIXL $\to$ UCX stack ultimately posts to the same \texttt{ucp\_put}/\texttt{ucp\_get} paths that Updates 4 and 5 patched. Every UCX pathology documented in Update 5 (shared UDP source port on RoCE, spinlock contention on shared \texttt{ucp\_context}, the eager$\to$RNDV latency cliff) sits underneath RDT too. RDT simply never encounters some of them because its benchmark fabrics (NVLink, InfiniBand) do not exercise the RoCE paths.
+
+\subsection{Semantics}
+
+Unlike plasma objects, RDT objects are \emph{mutable references}: Ray does not copy the tensor until a transfer is requested, so in-place writes by the producer between \texttt{put} and transfer can leak partial updates to the consumer~\cite{ray_rdt_docs}. This is a deliberate trade: zero-copy on the producer side in exchange for weaker consistency. libscuffedrdma makes the same trade inside the tensor cache (KV blocks are registered in place, not staged), but the vLLM connector's phase barrier, prefill completing before decode-side reads begin, closes the mutability window structurally. RDT pushes that responsibility onto application code.
+
+\subsection{The four optimizations, mapped}
+
+The RDT performance work~\cite{anyscale_rdt2} is a sequence of four optimizations over naive NIXL usage, benchmarked on 2 GB200 nodes with Multi-Node NVLink (900\,GB/s point-to-point), transferring a 2\,GB model as 1{,}000 tensor views to simulate tensor-parallel resharding.
+
+\begin{enumerate}
+\item \textbf{Register once, send views as offsets.} Naive NIXL registers each subtensor separately; RDT registers the base tensor once and describes each view as an offset into the registered region. Registration is the dominant per-transfer cost, so the speedup grows with view count. \emph{Thesis mapping:} this is the tensor-cache design from Update 3, KV blocks inside a pre-registered arena, transfers as (offset, length) pairs against the arena's rkey. Independent convergence from a production system, worth citing.
+\item \textbf{Ahead-of-time registration.} \texttt{register\_nixl\_memory(param)} pre-registers memory before the first transfer, valuable when the same tensors ship every training step. \emph{Thesis mapping:} equivalent to \texttt{RegisteredBuffer} in the dual QP pool, MRs registered once at pool creation and reused. Same amortization argument; a useful confirmation that per-transfer \texttt{ibv\_reg\_mr} is unacceptable in any serious deployment.
+\item \textbf{Targeted receive (no staging buffer).} \texttt{set\_target\_for\_ref(ref, views)} directs incoming data into the consumer's existing tensors instead of a staging buffer; for a 20\,GB weight sync this halves peak GPU memory (40\,GB $\to$ 20\,GB)~\cite{anyscale_rdt2}. \emph{Thesis mapping:} libscuffedrdma writes KV blocks directly into the decode node's paged KV arena via RDMA WRITE; there is no staging tier by construction. RDT needed an explicit API to recover what a purpose-built design gets for free.
+\item \textbf{Memory pooling for small tensors.} \texttt{register\_nixl\_memory\_pool(size, device)} pre-allocates a contiguous registered region and buckets small tensors into it, raising achieved bandwidth to 859 of the 900\,GB/s hardware maximum~\cite{anyscale_rdt2}. \emph{Thesis mapping:} the cold-QP coalescing strategy from Update 6, one layer up. RDT coalesces to fill NVLink packets; Update 6 coalesces compressed 50\,KB KV blocks into 1\,MB aligned writes. Same principle, different fabric.
+\end{enumerate}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{llll}
+\toprule
+\textbf{Result} & \textbf{Workload} & \textbf{Hardware} & \textbf{Baseline} \\
+\midrule
+7.5$\times$ end-to-end & 2 GB / 1000 views & 2$\times$ GB200 MNNVL & naive NIXL \\
+18$\times$, 3.5 s sync (SkyRL) & Qwen3-235B-A22B & 4$\times$ 8$\times$H100 & NCCL broadcast \\
+2.2$\times$ / 1.14$\times$, 2.3 s (Miles) & GLM-4.5-Air & 4$\times$ 8$\times$H100 & NCCL / Mooncake \\
+up to 1000$\times$ transfer & large tensors & 2$\times$ H100, 1 node & plasma object store \\
+\bottomrule
+\end{tabular}
+\caption{RDT reported results~\cite{anyscale_rdt2,anyscale_rdt1}. Every fabric is NVLink or InfiniBand-class; there are no commodity-Ethernet numbers.}
+\label{tab:rdt_results}
+\end{table}
+
+Remaining overheads they report after all four optimizations: Python serialization of metadata objects over 100\,KB, and $O(N)$ tensor-metadata bookkeeping for $N$ views, milliseconds that survive even on a 900\,GB/s fabric. On a 10GbE link those same milliseconds are noise. The binding constraint depends entirely on the fabric: RDT optimizes CPU-side software overhead because their network is effectively free; this thesis schedules the network because it is the scarce resource.
+
+\subsection{Why RDT has no dual QP pool, and why this work needs one}
+
+Weight synchronization is a barrier workload: training pauses, weights ship, inference resumes. During the sync there is no competing latency-critical traffic; the entire link belongs to bulk transfer, and the only game is maximizing throughput and minimizing software overhead. RDT plays that game well.
+
+Disaggregated prefill/decode is the opposite regime. Decode steps emit small, deadline-bound messages (block tables, sampling metadata, scheduler decisions) continuously, while prefill completions dump multi-megabyte KV slabs onto the same NIC. A single queue serializes them; that is the head-of-line blocking measured in Update 4. RDT on this workload would put everything through one NIXL path and inherit exactly the problem the dual QP pool solves. \textbf{RDT optimizes the transfer; libscuffedrdma schedules the link.}
+
+The reverse list, for honesty: RDT ships in Ray, has a clean decorator API, handles arbitrary \texttt{torch.Tensor} resharding patterns, and is validated on frontier-scale hardware against Mooncake and NCCL. libscuffedrdma's API surface (bootstrap + connector) is narrower and its benchmarks are two consumer nodes. RDT's view-offset registration is also more general than the tensor cache's fixed-arena scheme: it handles dynamically shaped views over any registered base tensor, where the arena assumes PagedAttention's fixed block geometry. Ray lists a pluggable tensor-transport API as future work~\cite{ray_rdt_custom}; libscuffedrdma as a custom RDT backend, bringing traffic classing and dual QPs to Ray on commodity Ethernet, is a plausible post-thesis artifact.
+
+\section{ROCm eRNIC}
+
+\subsection{What it is}
+
+\texttt{ROCm/rocm-ernic}~\cite{rocm_ernic} is a userspace \emph{emulated} PCIe RDMA NIC for virtual machines: libvfio-user transport, device logic adapted from QEMU's PVRDMA, a guest kernel driver plus rdma-core provider exposing standard verbs (RC QPs; SEND, RDMA WRITE, RDMA READ; a DC-style DCT/DCI extension), and host-side backends of loopback, a TCP/IP mesh between eRNIC servers, or a real HCA via libibverbs. AMD positions it as a Soft-RoCE alternative for guests without RDMA hardware. MIT-licensed, actively committed, labeled an early-access preview.
+
+\subsection{What it measures}
+
+The repository's own perf reports~\cite{rocm_ernic_perf,rocm_ernic_gpu} are the useful part. On the TCP mesh between two VMs on one EPYC host: RC RDMA WRITE at 4\,KB averages $\sim$181\,$\mu$s; all verbs converge near 1.8--1.9\,GB/s from 512\,KB up; a bidirectional deadlock at high TX depth was fixed with per-direction processing flags, in-flight flow control of 4 WQEs, and WQE batching of 16. A GPU-initiated direct-verbs path on an MI210 lands at $\sim$1\,ms per write, \emph{flat from 64\,B to 16\,KB}; the report attributes this entirely to the doorbell and completion path, not data movement.
+
+\subsection{Relevance}
+
+eRNIC is not a substrate for this thesis (VM-only, ROCm GPU path, TCP-backed latency far above a hardware RoCE NIC). It matters in three narrower ways: a vendor-published software-RDMA latency floor to set beside my SoftRoCE measurements; an independent rediscovery of the split-per-direction, bounded-in-flight, batched-WQE discipline the dual QP pool uses; and a template for observability, since its Prometheus exporter reports per-instance RDMA-vs-TCP ratios and libscuffedrdma's telemetry should expose the equivalent per-QP-class counters.
+
+\section{Every $\mu$s Matters (Near-SoL GPU Collectives)}
+
+\subsection{What the paper shows}
+
+Shen et al.~\cite{sol2026} (NVIDIA and ETH Z\"urich; authors include Jeaugey, Hammond, and Hoefler) argue that GPU collectives are tuned for bandwidth while long-context, small-batch decode is latency-bound. They define a speed-of-light bound for a small AllReduce as the minimal data movement the hardware allows, $L_{\text{SoL}} = 2L_{\text{L2\,RTT}} + L_{\text{remote\,store}}$, measured at 1.404\,$\mu$s on two GB200 (0.306\,$\mu$s L2 round trip, 0.792\,$\mu$s remote store). Against that, NCCL ring on four GB200 sits at 11.0\,$\mu$s for small messages. A single global memory barrier costs over 1\,$\mu$s; with two barriers in a $\sim$5\,$\mu$s AllReduce, barriers alone are about 40\% of the latency.
+
+The design principles: barrier elimination; \emph{data-as-signal} synchronization (LL-style flags embedded in the data, or sentinel-initialized buffers the receiver polls until real data overwrites them); double buffering with credits instead of barriers; direct use of symmetric memory and NVLink multicast. They ship these as an experimental low-latency API on NCCL's device side (\texttt{ncclLLBuffer}: \texttt{send}, \texttt{recv}, \texttt{recvReduce}, \texttt{bcast}) plus a new two-shot LL128 atomic AllReduce. Results: small and medium messages within 7\% of the SoL bound; 2.37\,$\mu$s vs.\ 11.0\,$\mu$s on four GB200 for the Llama-3.1-70B decode setting, an 8.7\% inter-token-latency reduction; 7--13\% ITL reduction across vLLM configurations; and their cost model puts each microsecond removed from AllReduce at about 0.9\% of cost per million output tokens. The paper is explicit that its scope is a single scale-up (NVLink) domain; NCCL's device API does reach inter-node over InfiniBand and RoCE through GPU-initiated networking, but multi-node versions of these collectives were not supported at the time of writing. They also note that most of the principles (LL, sentinel synchronization, double buffering) are not NVIDIA-specific.
+
+\subsection{Relevance}
+
+The thesis is inter-node commodity Ethernet, where the SoL bound is microseconds of wire plus NIC and the software stack adds far more. Two things transfer. First, ``decode is latency-bound and small messages sit on every token's critical path'' is the premise of the hot traffic class, and this paper, with a measured ITL and cost-per-token argument, is a stronger citation for it than the NIM benchmarking numbers the proposal used. Second, their finding that explicit synchronization dominates small-message latency motivates one bounded experiment on the hot QPs: RDMA WRITE with the flag in the last bytes of the payload (LL style) or into a sentinel-initialized buffer, with the consumer polling, against CQ completion. The key difference in what is tested: they remove \emph{synchronization} latency inside a collective on a fabric where the link is not the bottleneck; the thesis removes \emph{queueing} latency from bulk traffic sharing a link that is.
+
+\section{The Transport Landscape: libfabric, UCX, DOCA}
+
+Internship work on GPFS, which uses libfabric underneath, Brian Smith's MUG'23 comparison of libfabric and UCX~\cite{smith_mug23}, and the two UCX papers~\cite{shamis2015,papadopoulou2017} clarified something the thesis has so far left implicit: which transport stack libscuffedrdma belongs to, and why.
+
+\begin{table}[ht]
+\centering\small
+\resizebox{\textwidth}{!}{\begin{tabular}{@{}llll@{}}
+\toprule
+ & \textbf{libfabric (OFI)} & \textbf{UCX} & \textbf{DOCA} \\
+\midrule
+Steward & OpenFabrics Alliance & UCF (NVIDIA-led) & NVIDIA \\
+Design center & application-centric services & HPC primitives for MPI/SHMEM & BlueField DPU / ConnectX \\
+Endpoint types & UD, RC, RDM, scalable EPs & UCP endpoints over UCT & DOCA RDMA, Verbs, GPUNetIO \\
+Completion & CQs, counters, poll sets & callbacks & CQs, GPU-side polling \\
+Protocol switch & per provider (eager/multi-pkt/RNDV) & eager / RNDV thresholds & driver / firmware \\
+Portability & sockets provider runs anywhere & IB and RoCE primarily & NVIDIA hardware only \\
+Typical users & MPI, GPFS, OPX/Omni-Path, EFA & MPI, NIXL, RDT, vLLM & DPU offload, GPUDirect \\
+\bottomrule
+\end{tabular}}
+\caption{The three stacks, from~\cite{smith_mug23}, the UCX FAQ~\cite{ucx_faq}, and the DOCA documentation~\cite{doca}. Smith's summary: UCX is efficient for building HPC primitives and uses callbacks; libfabric is application-centric, offers more endpoint options, and is thread-safe by default; ``both provide very similar performance benefits.''}
+\label{tab:stacks}
+\end{table}
+
+\subsection{What the UCX papers add}
+
+The original UCX paper~\cite{shamis2015} lays out the three layers (UCS, UCT, UCP) and states that UCT ``relies on low-level drivers provided by vendors such as InfiniBand Verbs, Cray's uGNI, libfabrics,'' so libfabric and UCX are not strictly alternatives: libfabric can sit under UCT. UCT defines short, bcopy, and zcopy operations; UCP adds transport selection, fragmentation, and multi-rail on top. Their prototype reached 0.89\,$\mu$s latency and 14\,M messages/s, close to the driver. Papadopoulou, Oden, and Balaji~\cite{papadopoulou2017} then measured what UCP costs over UCT and verbs on InfiniBand and traced it to specific mechanisms: \texttt{RESOLVE\_RKEY\_RMA} re-resolving the remote key on every \texttt{ucp\_put}; function-pointer dispatch from UCP into UCT that compilers cannot inline; the progress engine polling the receive CQ even for RMA-only traffic; and progress being called on the (x)UD wireup interface long after the RC connection is up. Skipping the unnecessary TX poll cut \texttt{ucp\_ep\_flush} instructions by 12\%, skipping UD progress by 29.8\%, and the latter improved small-message bandwidth and message rate by about 14\%.
+
+Three of those findings are the dual QP pool's design, stated eight years earlier for a different reason: resolve keys once (the arena's fixed rkey offsets), do not progress interfaces the operation does not use (split polling, so hot-QP polling never touches the cold CQ), and keep the software path between the application and the doorbell short. Their instruction-count methodology is also the right way to report the middleware's own overhead in the evaluation chapter.
+
+\subsection{What UCX says about itself}
+
+The UCX FAQ~\cite{ucx_faq} is clear that UCX ``is not a user-level driver'': it relies on the RDMA, CUDA, and ROCm drivers underneath and adds software protocols where hardware lacks them. By default it ``tries to use all available transports, and select best ones according to their performance capabilities and scale'' (RC at small scale, DC or UD at large scale; the two best NICs for multi-rail), and it picks eager-short, eager-bcopy, or rendezvous per message by size. Restricting that with \texttt{UCX\_TLS} ``can lead to unexpected and undefined behavior.'' The only traffic-separation knobs it exposes are fabric-level: \texttt{UCX\_IB\_SL} and \texttt{UCX\_IB\_TRAFFIC\_CLASS} set a service level or DSCP value for a context, which the NIC and switch must honor and which does not let an application route one message to one class and the next to another. That is the gap libscuffedrdma fills: it holds the QPs itself so the router, not the transport's size heuristic, decides which queue a message enters.
+
+\subsection{Where libscuffedrdma sits}
+
+The middleware is built on libibverbs and keeps UCX out of its data path; the UCX pathologies from Updates 4 and 5, including the mmap interception leak observed in production vLLM deployments, are why the QPs are held directly. The upstream UCX patches stand on their own because NIXL, RDT, and vLLM's existing connectors all route through UCX and inherit those fixes. Three observations follow from Smith's deck.
+
+\begin{enumerate}
+\item \textbf{The eager/rendezvous cliff is not a UCX quirk.} OPX also selects eager, multi-packet eager, or rendezvous at runtime per message; libfabric providers do the same. In every stack the threshold is a provider decision the application does not see, which is the argument for routing traffic classes explicitly rather than tuning thresholds.
+\item \textbf{libfabric's endpoint model matches hot/cold directly.} libfabric exposes reliable-connected, reliable-unconnected (RDM), and unreliable datagram endpoints, capability bits (\texttt{FI\_RMA}, \texttt{FI\_TAGGED}, \texttt{FI\_FENCE}), and lightweight counters as a completion mechanism. A hot class on an RDM endpoint with counters and a cold class on a connected endpoint with a CQ is a natural expression of the dual QP pool, and GPFS's use of libfabric means the cold path's 1\,MB aligned writes could go through the same stack the file system already uses. A comparison worth running, not a rewrite: build the pool once on libfabric's verbs provider over SoftRoCE and measure it against the libibverbs pool.
+\item \textbf{DOCA is what most of the industry ships on, and it is out of reach here.} NVIDIA's DOCA SDK~\cite{doca} (DOCA RDMA, DOCA Verbs, GPUNetIO for GPU-initiated networking, Comch for DPU--GPU communication) is the production path on BlueField and ConnectX, and GPUDirect on this lab's hardware already depends on the DOCA/MOFED host stack the proposal listed. What DOCA and its hardware provide, and what the thesis has to do in software, is traffic separation: DPU-side queues, hardware QoS, GPU-initiated doorbells. libscuffedrdma is a software stand-in for that hardware on a 10GbE NIC that has none of it, which is a clean way to state the contribution and its limit.
+\end{enumerate}
+
+\section{RDMA Reliability Is an Industry Problem Too: GPFS}
+
+The internship also surfaced how often production RDMA breaks, in a file system that has shipped RDMA for well over a decade. IBM Spectrum Scale (GPFS) publishes its RDMA defects as APARs and flash alerts, and they read like a checklist of what the middleware has to defend against.
+
+\begin{itemize}
+\item \textbf{Data integrity.} APAR IJ44629~\cite{ibm_ij44629}: a race between the Spectrum Scale RDMA layer and Mellanox adapters let clients read incorrect file data (5.1.3, fixed in 5.1.6.1; workaround was to disable RDMA). The cluster-wide alert behind APARs IJ44524/IJ44525~\cite{ibm_rdma_alert}: RDMA WRITEs were not fully flushed from the HCA into client memory when PCIe atomics were unavailable, affecting 5.1.0.0--5.1.6.0 on Nvidia/Mellanox HCAs; IBM retired the \texttt{yes}/\texttt{no} values of \texttt{verbsRdmaWriteFlush} and made \texttt{rdma-read} (an RDMA READ as the flush) the default. A third alert~\cite{ibm_nsd_adapter}: an RDMA adapter failure on a non-ESS NSD server could turn file I/O into silent corruption instead of an I/O error.
+\item \textbf{Hangs and cluster loss.} A configuration where \texttt{verbsRdmasPerNode} was lower than \texttt{nsdMaxWorkerThreads} let the NSD server count an RDMA as complete before the data landed, producing crashes, hangs, and undetected corruption~\cite{ibm_gpfs_rdma_alert}. APAR IJ25511~\cite{ibm_ij25511}: with RDMA carrying all GPFS RPCs, a network error at the cluster manager left the newly elected manager blocked on a 10-second timeout and expelled every quorum node.
+\item \textbf{Fabric instability and silent fallback.} APAR IV61625~\cite{ibm_iv61625}: when a QP went to error state on the server, clients could not reconnect, the server kept the dead connection, and I/O fell back to TCP with the corresponding performance drop. On RoCE with \texttt{verbsRdmaCm}, non-link-local IPv6 addresses on the adapters caused hangs and long waiters~\cite{ibm_510x}.
+\end{itemize}
+
+\paragraph{Where GPFS is going.} IBM Storage Scale 6.0.1 (June 2026) adds S3 over RDMA~\cite{ibm_s3_rdma}, built with NVIDIA's cuObject libraries and tested on InfiniBand: ``authentication, metadata, and control flows remain on HTTP, while bulk object payloads move over RDMA,'' reaching about 90\% of native POSIX throughput and roughly 300\,GB/s GET / 155\,GB/s PUT with GPU acceleration. That is a hot/cold split at the protocol level, small control traffic kept off the RDMA path entirely and bulk data on it, the same separation libscuffedrdma makes inside one link, one layer down. GPFS gets the separation by choosing different protocols per class on an InfiniBand fabric; the thesis has to make it inside verbs on 10GbE. GPFS's own architecture already carries the parallel: the \texttt{verbsRdma}/\texttt{verbsRdmaSend} dual tier maps onto the hot/cold QP design, and its single-large-MR page pool mirrors the PagedAttention-style arena registration.
+
+\paragraph{Relevance.} Three of the defects map directly onto libscuffedrdma. The write-flush alert is the same completion-visibility question the data-as-signal experiment raises: an RDMA WRITE completion at the sender does not by itself guarantee the receiver's memory is coherent, and GPFS's answer (a trailing RDMA READ) is one of the options to measure against flag-in-payload polling on the hot QPs. The QP-error reconnection bug and the TCP fallback are exactly what the dual QP pool must handle when SoftRoCE or a ConnectX port flaps: a hot QP in error state has to be recreated without stalling the cold class, and a fallback must be visible in telemetry rather than silent. The \texttt{verbsRdmasPerNode} mismatch is a bounded-in-flight accounting bug, the same discipline eRNIC fixed with in-flight flow control and that the pool enforces per class. The point for the thesis: reliability and support on consumer hardware face the same failure modes the industry does on enterprise fabric, so the evaluation should report failure and recovery behavior next to latency.
+
+\section{Consolidated Positioning}
+
+\begin{table}[ht]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{\begin{tabular}{@{}lllll@{}}
+\toprule
+ & \textbf{RDT} & \textbf{ROCm eRNIC} & \textbf{Near-SoL collectives} & \textbf{libscuffedrdma} \\
+\midrule
+Layer & orchestration & emulated NIC & collective kernel & transport middleware \\
+Stack & NIXL / UCX & verbs (emulated) & NCCL device API & libibverbs \\
+Workload & RL weight sync & generic verbs & intra-node collectives & disagg.\ P/D KV \\
+Traffic mix & homogeneous bulk & n/a & small, uniform & mixed hot + cold \\
+Fabric & NVLink, IB & TCP / loopback / HCA & NVLink & 10GbE SoftRoCE/RoCEv2 \\
+Registration & once + offsets & standard MR & symmetric memory & pre-registered arena \\
+Sync model & CQ (via UCX) & CQ ring, doorbell & data-as-signal & CQ, split polling \\
+Traffic classing & fabric-level & none & none & hot/cold dual QP pool \\
+Bandwidth control & fabric-level & none & none & PMP switching controller \\
+Compression & none & none & none & scuffedQuant \\
+\bottomrule
+\end{tabular}}
+\caption{The three systems against the thesis. Each shares mechanics with libscuffedrdma; classing and scheduling a contended link is left to the fabric in the others.}
+\label{tab:positioning}
+\end{table}
+
+\subsection{Implications for the thesis}
+
+\begin{enumerate}
+\item \textbf{Related work.} The chapter gets a two-axis taxonomy, layer (collective kernel / transport / orchestration / device) $\times$ traffic (homogeneous / mixed), annotated by stack (libfabric / UCX / DOCA). RDT, Mooncake, NIXL, and LMCache are homogeneous-bulk at the transport or orchestration layer on UCX; the SoL work is homogeneous-small at the kernel layer; eRNIC is a device-layer substrate; GPFS is a libfabric consumer with its own scheduling above the transport. SwiftRDMA remains the closest related work to the dual QP pool itself, with TransferEngine and Celeris the closest system-level comparisons. The mixed-traffic, commodity-Ethernet cell is where the thesis sits.
+\item \textbf{Citable validation.} Registration amortization, explicit routing over library heuristics, and coalescing-to-fabric-size now have production precedent (RDT's 7.5$\times$); the decode-is-latency-bound premise now has a measured ITL and cost-per-token citation~\cite{sol2026}; the completion-visibility and QP-recovery requirements have a shipping file system's defect record behind them.
+\item \textbf{A benchmark worth running.} RDT + NIXL + UCX will run over SoftRoCE. The RDT weight-sync microbenchmark on the Cerberus/Chimera 10GbE link, where the 900\,GB/s assumptions collapse, would show whether orchestration-layer RDMA degrades gracefully on commodity fabric.
+\end{enumerate}
+
+\section{Next Steps}
+
+\begin{enumerate}
+\item Add RDT, eRNIC, the SoL paper, and the libfabric/UCX/DOCA framing to the related-work chapter; cite~\cite{sol2026} for the decode-is-latency-bound premise.
+\item Attempt \texttt{pip install nixl} + Ray on the cluster; verify NIXL selects the UCX backend over SoftRoCE. Then run RDT's view-count sweep (1 to 10{,}000 views, fixed payload) on the 10GbE link, and repeat with a synthetic hot-traffic generator competing, to check whether a single-path transport shows the Update-4 HOL blocking.
+\item Microbenchmark completion signaling on the hot QPs: CQ completion vs.\ flag-in-payload (LL style) vs.\ sentinel buffer vs.\ a trailing RDMA READ (the GPFS flush). Adopt only what moves p99. Report middleware overhead as instructions per operation, following~\cite{papadopoulou2017}.
+\item Build the dual QP pool on libfabric's verbs provider and compare against the libibverbs pool on identical payloads.
+\item Add per-QP-class Prometheus counters, including QP error/reconnect and any TCP-fallback events, so telemetry is comparable to eRNIC's exporter.
+\end{enumerate}
+
+\begin{thebibliography}{99}\small
+
+\bibitem{anyscale_rdt2}
+Anyscale, ``RDT: Ray Direct Transport --- Fast, Easy Weight Syncing for RL,'' Anyscale Blog, 2026. \url{https://www.anyscale.com/blog/rdt-ray-direct-transport-fast-easy-weight-syncing-for-rl-reinforcement-learning}
+
+\bibitem{anyscale_rdt1}
+Anyscale, ``Ray Direct Transport: RDMA Support in Ray Core (Part 1),'' Anyscale Blog, 2025. \url{https://www.anyscale.com/blog/ray-direct-transport-rdma-support-in-ray-core}
+
+\bibitem{ray_rdt_docs}
+Ray Team, ``Ray Direct Transport (RDT),'' Ray Documentation. \url{https://docs.ray.io/en/master/ray-core/direct-transport.html}
+
+\bibitem{ray_rdt_custom}
+Ray Team, ``Implementing a Custom Tensor Transport (Advanced),'' Ray Documentation. \url{https://docs.ray.io/en/latest/ray-core/direct-transport/custom-tensor-transport.html}
+
+\bibitem{ray_gpu_rfc}
+S.~Wang et al., ``[RFC] GPU Object Store Support in Ray Core,'' ray-project/ray \#51173, 2025. \url{https://github.com/ray-project/ray/issues/51173}
+
+\bibitem{nixl_docs}
+NVIDIA, ``NIXL: NVIDIA Inference Xfer Library,'' ai-dynamo/nixl documentation. \url{https://github.com/ai-dynamo/nixl/blob/main/docs/nixl.md}
+
+\bibitem{rocm_ernic}
+AMD, ``rocm-ernic: Userspace emulated RDMA NIC for virtual machines,'' GitHub, 2026. \url{https://github.com/ROCm/rocm-ernic}
+
+\bibitem{rocm_ernic_perf}
+AMD, ``ROCm eRNIC Performance Report,'' \texttt{docs/perf-report-2026-03-29.md} and \texttt{docs/performance.rst} in~\cite{rocm_ernic}.
+
+\bibitem{rocm_ernic_gpu}
+AMD, ``GPU Direct RDMA Test Report,'' \texttt{docs/gpu-rdma-test-report-2026-03-31.md} in~\cite{rocm_ernic}.
+
+\bibitem{sol2026}
+S.~Shen, A.~Korzh, A.~Goel, T.~Chen, J.~Bachan, L.~Schneider, P.~Kousha, Z.~He, S.~Jeaugey, K.~Iskra, N.~Chandawala, J.~R.~Hammond, and T.~Hoefler, ``Every $\mu$s Matters: Achieving Near Speed-of-Light Latency in GPU Collectives,'' arXiv:2607.16100v1, July 2026. \url{https://arxiv.org/abs/2607.16100}
+
+\bibitem{shamis2015}
+P.~Shamis, M.~G.~Venkata, M.~G.~Lopez, M.~B.~Baker, O.~Hernandez, Y.~Itigin, M.~Dubman, G.~Shainer, R.~L.~Graham, L.~Liss, Y.~Shahar, S.~Potluri, D.~Rossetti, D.~Becker, D.~Poole, C.~Lamb, S.~Kumar, C.~Stunkel, G.~Bosilca, and A.~Bouteiller, ``UCX: An Open Source Framework for HPC Network APIs and Beyond,'' \emph{IEEE Hot Interconnects}, 2015.
+
+\bibitem{papadopoulou2017}
+N.~Papadopoulou, L.~Oden, and P.~Balaji, ``A Performance Study of UCX over InfiniBand,'' \emph{Proc.\ IEEE/ACM CCGrid}, 2017.
+
+\bibitem{ucx_faq}
+OpenUCX, ``UCX Frequently Asked Questions,'' \texttt{docs/source/faq.md}, openucx/ucx. \url{https://github.com/openucx/ucx/blob/master/docs/source/faq.md}
+
+\bibitem{smith_mug23}
+B.~Smith, ``Omni-Path and the Open Fabrics Interfaces,'' Cornelis Networks, MVAPICH User Group (MUG) 2023.
+
+\bibitem{doca}
+NVIDIA, ``NVIDIA DOCA SDK Documentation.'' \url{https://docs.nvidia.com/doca/sdk/}
+
+\bibitem{ibm_ij44629}
+IBM, ``APAR IJ44629: RDMA Scale client reads incorrect data from files,'' IBM Support. \url{https://www.ibm.com/support/pages/apar/IJ44629}
+
+\bibitem{ibm_rdma_alert}
+IBM, ``IBM Spectrum Scale Alert: Potential undetected data integrity issues for all clusters using RDMA (APARs IJ44524, IJ44525),'' IBM Support. \url{https://www.ibm.com/support/pages/ibm-spectrum-scale-alert-potential-undetected-data-integrity-issues-all-clusters-using-rdma-0}
+
+\bibitem{ibm_nsd_adapter}
+IBM, ``IBM Spectrum Scale (GPFS): RDMA-enabled network adapter failure on the NSD server may result in file I/O error,'' IBM Support. \url{https://www.ibm.com/support/pages/ibm-spectrum-scale-gpfs-rdma-enabled-network-adapter-failure-nsd-server-may-result-file-io-error}
+
+\bibitem{ibm_gpfs_rdma_alert}
+IBM, ``GPFS clusters enabled for RDMA use may experience server crashes, RDMA failures, hangs, or undetected data corruption,'' IBM Support. \url{https://www.ibm.com/support/pages/gpfs-clusters-enabled-rdma-use-may-experience-server-crashes-rdma-failures-hangs-or-undetected-data-corruption}
+
+\bibitem{ibm_ij25511}
+IBM, ``APAR IJ25511: All quorum nodes could be expelled,'' IBM Support, 2020. \url{https://www.ibm.com/support/pages/apar/IJ25511}
+
+\bibitem{ibm_iv61625}
+IBM, ``APAR IV61625: RDMA reconnection problem,'' IBM Support. \url{https://www.ibm.com/support/pages/apar/IV61625}
+
+\bibitem{ibm_510x}
+IBM, ``IBM Spectrum Scale 5.1.0.x resolved APARs.'' \url{https://public.dhe.ibm.com/storage/spectrumscale/spectrum_scale_apars_510x.html}
+
+\bibitem{ibm_s3_rdma}
+T.~Hoover, ``IBM Storage Scale announces support for S3 over RDMA,'' IBM Community Blog, June 16, 2026. \url{https://community.ibm.com/community/user/blogs/ted-hoover/2026/06/16/ibm-storage-scale-announces-support-for-s3-over-rd}
+
+\bibitem{mooncake2024}
+R.~Qin et al., ``Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving,'' arXiv:2407.00079, 2024.
+
+\bibitem{vllm_paged}
+W.~Kwon et al., ``Efficient Memory Management for Large Language Model Serving with PagedAttention,'' \emph{Proc.\ SOSP}, 2023.
+
+\end{thebibliography}
+
+\end{document}
