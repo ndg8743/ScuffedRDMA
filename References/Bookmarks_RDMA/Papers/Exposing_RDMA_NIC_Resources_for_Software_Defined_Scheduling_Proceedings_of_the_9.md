@@ -1,0 +1,9 @@
+# Exposing RDMA NIC Resources for Software-Defined Scheduling | Proceedings of the 9th Asia-Pacific Workshop on Networking
+
+- **Source:** https://dl.acm.org/doi/full/10.1145/3735358.3735359
+- **Bookmarked:** 2026-07-26 (Chrome, Bookmarks bar > RDMA > Papers)
+- **Retrieved:** 2026-10-22
+- **Capture:** automated fetch failed (HTTP 403). Open the source link; save the PDF/page here manually.
+
+---
+

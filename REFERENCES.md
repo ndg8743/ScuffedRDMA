@@ -148,7 +148,6 @@ Comprehensive bibliography for the ScuffedRDMA thesis project.
   year={2023}
 }
 ```
-cat: /Users/nathan/Library/Application Support/Claude/local-agent-mode-sessions/fbcb8dd1-969b-401e-997b-314ef04669fc/effca977-6e52-43f1-9212-4083464144d3/local_dc70203d-8f65-40c1-a712-401c97773bf2/NEW_REFERENCES_APPENDIX.md: No such file or directory
 
 ---
 

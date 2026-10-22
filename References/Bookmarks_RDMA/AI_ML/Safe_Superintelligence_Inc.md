@@ -1,0 +1,38 @@
+# Safe Superintelligence Inc.
+
+- **Source:** https://ssi.inc/
+- **Bookmarked:** 2026-07-26 (Chrome, Bookmarks bar > RDMA > AI & ML)
+- **Retrieved:** 2026-10-22
+
+
+---
+
+## Safe Superintelligence Inc.
+
+**Superintelligence is within reach.**
+
+Building safe superintelligence (SSI) is the most important technical problem of our time.
+
+We have started the world’s first straight-shot SSI lab, with one goal and one product: a safe superintelligence.
+
+It’s called Safe Superintelligence Inc.
+
+SSI is our mission, our name, and our entire product roadmap, because it is our sole focus. Our team, investors, and business model are all aligned to achieve SSI.
+
+We approach safety and capabilities in tandem, as technical problems to be solved through revolutionary engineering and scientific breakthroughs. We plan to advance capabilities as fast as possible while making sure our safety always remains ahead.
+
+This way, we can scale in peace.
+
+Our singular focus means no distraction by management overhead or product cycles, and our business model means safety, security, and progress are all insulated from short-term commercial pressures.
+
+We are an American company with offices in Palo Alto and Tel Aviv, where we have deep roots and the ability to recruit top technical talent.
+
+We are assembling a lean, cracked team of the world’s best engineers and researchers dedicated to focusing on SSI and nothing else.
+
+If that’s you, we offer an opportunity to do your life’s work and help solve the most important technical challenge of our age.
+
+Now is the time. Join us.
+            
+
+
+Safe Superintelligence Inc. © 2024 - 2026
