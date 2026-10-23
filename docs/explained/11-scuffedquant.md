@@ -4,6 +4,8 @@
 
 ![scuffedQuant](../media/11_scuffedquant.gif)
 
+![How scuffedQuant differs from FP8, KIVI and token eviction](../media/11_compare.gif)
+
 scuffedQuant compresses each K or V vector for the cold path. This page goes through every step with a proof of the property it relies on:
 
 - the rotation preserves length and inner products, and makes coordinates behave alike;
@@ -11,7 +13,7 @@ scuffedQuant compresses each K or V vector for the cold path. This page goes thr
 - the sign sketch gives an unbiased correction to inner products, and its error shrinks with more bits;
 - the wire format is exactly 64 bytes per vector at head_dim 64.
 
-It also says where the code departs from the textbook version (random ±1 projections instead of Gaussian ones) and what that costs.
+It also says where the code departs from the textbook version (random ±1 projections instead of Gaussian ones) and what that costs, and how it differs from FP8, KIVI and token eviction (§6), including a limitation: on the vLLM connector path the sketch is carried but not used.
 
 Code: `middleware/rdma_tensor_cache/scuffed_quant.py`. Tests: `tests/test_scuffed_quant.py`. Notebook 05.
 
@@ -165,12 +167,38 @@ The code uses $`S`$ with independent random $`\pm 1`$ entries, not Gaussian ones
 
 Per vector with $`d = 64`$, $`b = 3`$, $`m = 256`$: $`4 + 4 + 64\cdot3/8 + 256/8 = 4 + 4 + 24 + 32 = 64`$ bytes, plus a 20-byte header shared by the whole batch. FP16 is $`64 \times 2 = 128`$ bytes, so the ratio is $`2\times`$. FP32 is 256 bytes, so $`4\times`$ against FP32. The earlier "4× vs FP16" compared against FP32 by mistake.
 
-## 6. What the measurements say
+## 6. How it differs from FP8, KIVI and token eviction
+
+Four ways to make the KV cache smaller, per K or V vector of $`d`$ numbers:
+
+| | what is stored | bytes, $`d = 64`$ | bytes, $`d = 128`$ | where it applies |
+|---|---|---|---|---|
+| bf16 (no compression) | 16 bits per number | 128 | 256 | |
+| FP8 cast (vLLM `--kv-cache-dtype fp8`) | 8-bit float per number, plus a scale per tensor | 64 | 128 | GPU cache, every token, every decode step |
+| KIVI 2-bit | 2 bits per number, plus a scale and zero point per group; the newest tokens stay full precision | 24 (amortized, see below) | 48 | GPU cache, every token, every decode step |
+| Token eviction (H2O, StreamingLLM) | a subset of tokens, exactly | full size for kept tokens, 0 for dropped ones | same | GPU cache; dropped tokens can never be attended to again |
+| scuffedQuant | random rotation, 3-bit index per number, two norms, 256-bit residual sketch | 64 | 88 | per transfer: on the wire and on NVMe; the GPU cache stays bf16 |
+
+The KIVI figure assumes a 16-bit scale and a 16-bit zero point per group of 32 numbers: $`2 + 32/32 = 3`$ bits per number on average, so $`64 \cdot 3 / 8 = 24`$ bytes, plus the full-precision window. The scuffedQuant figure is $`4 + 4 + 3d/8 + 256/8`$ from §5: at $`d = 64`$ it ties FP8, at $`d = 128`$ it is $`88/128 \approx 0.69`$ of FP8.
+
+**Difference 1: where it runs.** FP8, KIVI and eviction change what attention reads on the GPU. They save GPU memory and memory bandwidth on every decode step, and they need attention kernels that understand the format. scuffedQuant changes nothing on the GPU. It is applied to the bytes of one transfer after they leave the GPU, and the receiver rebuilds bf16 before the blocks go into its paged cache. It saves wire time and NVMe space only. That is a narrower goal, and it is the part of the path this thesis studies.
+
+**Difference 2: how outliers are handled.** Keys in particular have a few channels with much larger magnitude than the rest (KIVI's own observation). KIVI handles that with grouping: keys are quantized per channel, so an outlier channel gets its own scale and zero point; values are quantized per token. scuffedQuant instead rotates first. By Lemma 2.2 every rotated coordinate has mean 0 and variance $`1/d`$ whatever the input looked like, so one fixed Lloyd–Max codebook fits every coordinate of every vector, and the only per-vector metadata is the two norms. In the animation, one channel at 2.9 becomes eight coordinates between −1.52 and 1.17 after the rotation.
+
+**Difference 3: when it is used.** FP8 and KIVI are fixed when the server starts. The default policy has a rule, `compress-bulk-when-link-busy` (priority 60), that sets `compress` when link utilization is at least 0.8, the route is cold or spill, and the transfer is at least 256 KiB, so compression would be paid only when the link is the bottleneck. In the vLLM connector today it is still a config switch (`compress: "scuffedquant"`) that applies to every layer blob; feeding the policy decision into the connector is open.
+
+**Difference 4 (a limitation): the sketch is unused on the vLLM path.** The sketch corrects inner products only when attention reads the compressed form, through `attention_scores()` (§4). On the connector path the receiver calls `decompress()`, which uses the 3-bit reconstruction alone, and vLLM's own attention kernel then computes $`\langle q, \hat k\rangle`$ with no correction. So on that path the 32 sketch bytes and the residual norm travel but are not used: dropping them would make a vector $`4 + 3d/8`$ bytes, 28 at $`d = 64`$. The measured error without the sketch is larger (§7), so the quality of the connector path has to be measured on its own.
+
+**What is not claimed.** The rotate–quantize–sketch math is TurboQuant's and QJL's (refs 1, 2). Quality against FP8 and KIVI on the same KV has not been measured. The comparison above is bytes and placement, not accuracy.
+
+## 7. What the measurements say
 
 - Granite 3.3-2B, 40 layers, FP32 KV: top-8 attention overlap (do the 8 highest-scoring keys under the estimate match the exact top 8?) is **91.1% ± 3.3%**, minimum 82.8% (`benchmarks/results/scuffed_quant_llm.json`).
+- Same file, mean absolute error of $`\langle q, k\rangle`$ against the exact value: **25.1 with the sketch, 58.2 with the 3-bit reconstruction alone**, so the sketch cuts the error by about 2.3×. The top-8 overlap above was computed with the sketch; the reconstruction-only path that the vLLM connector uses (§6) has no overlap number yet.
+- In that benchmark the query is the last token's key (`benchmark_scuffed_quant_llm.py`), not a real query vector. Real queries come from $`W_Q`$ and can behave differently; notebook 08 is where to repeat it with real queries.
 - This is a ranking metric. It does not by itself say how generation quality changes; that needs an end-to-end run with the scuffedQuant codec in the connector (notebook 08 has the switch).
 
-## 7. Status
+## 8. Status
 
 | Claim | Status |
 |---|---|
@@ -181,6 +209,9 @@ Per vector with $`d = 64`$, $`b = 3`$, $`m = 256`$: $`4 + 4 + 64\cdot3/8 + 256/8
 | Error decreases as $`1/\sqrt m`$ | proven (Proposition 4.3) |
 | 64 bytes per vector, 2× vs FP16 | arithmetic from the packing code; tested |
 | Top-8 overlap 91.1% ± 3.3% | measured |
+| Same bytes as FP8 at $`d = 64`$, 0.69× at $`d = 128`$ | arithmetic (§6) |
+| Quality vs FP8 and KIVI on the same KV | open |
+| Quality of the reconstruction-only path used by the vLLM connector | open; inner-product error 58.2 vs 25.1 with the sketch |
 
 ## References
 
@@ -191,4 +222,9 @@ Per vector with $`d = 64`$, $`b = 3`$, $`m = 256`$: $`4 + 4 + 64\cdot3/8 + 256/8
 5. J. Max. "Quantizing for minimum distortion." *IRE Transactions on Information Theory* 6(1):7–12, 1960. [PDF](https://cs.nyu.edu/home/people/in_memoriam/roweis/csc2515-2006/readings/max60.pdf). *Used for: the 3-bit Gaussian levels quoted in §3.*
 6. P. E. Fleischer. "Sufficient conditions for achieving minimum distortion in a quantizer." *IEEE International Convention Record*, Part 1, pp. 104–111, 1964. *Used for: global optimality for log-concave densities (§3).*
 7. M. S. Charikar. "Similarity estimation techniques from rounding algorithms." *Proc. 34th ACM STOC*, 2002. [doi:10.1145/509907.509965](https://doi.org/10.1145/509907.509965). *Background: sign random projections preserve angles.*
-8. `middleware/rdma_tensor_cache/scuffed_quant.py`, `tests/test_scuffed_quant.py`, `benchmarks/results/scuffed_quant_llm.json` (top-8 overlap in §6).
+8. `middleware/rdma_tensor_cache/scuffed_quant.py`, `tests/test_scuffed_quant.py`, `benchmarks/results/scuffed_quant_llm.json` (top-8 overlap and inner-product error in §7).
+9. Z. Liu, J. Yuan, H. Jin, S. Zhong, Z. Xu, V. Braverman, B. Chen, X. Hu. "KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache." *Proc. 41st International Conference on Machine Learning (ICML)*, PMLR 235, 2024. [arXiv:2402.02750](https://arxiv.org/abs/2402.02750). *Used for: per-channel keys, per-token values, the full-precision window (§6).*
+10. Z. Zhang, Y. Sheng, T. Zhou, T. Chen, L. Zheng, R. Cai, Z. Song, Y. Tian, C. Ré, C. Barrett, Z. Wang, B. Chen. "H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models." *Advances in Neural Information Processing Systems 36 (NeurIPS)*, 2023. [arXiv:2306.14048](https://arxiv.org/abs/2306.14048). *Used for: token eviction (§6).*
+11. G. Xiao, Y. Tian, B. Chen, S. Han, M. Lewis. "Efficient Streaming Language Models with Attention Sinks." *Proc. ICLR*, 2024. [arXiv:2309.17453](https://arxiv.org/abs/2309.17453). *Used for: keeping attention sinks plus a recent window (§6).*
+12. vLLM documentation. "Quantized KV Cache." [docs.vllm.ai](https://docs.vllm.ai/en/stable/features/quantization/quantized_kvcache/). *Used for: the FP8 KV cache option and its scales (§6).*
+13. `middleware/policy/default_policy.json` (rule `compress-bulk-when-link-busy`), `middleware/vllm_plugin/kv_codec.py` (`decode_kv` calls `decompress`), `benchmarks/benchmark_scuffed_quant_llm.py` (error with and without the sketch). *The code behind §6 and §7.*

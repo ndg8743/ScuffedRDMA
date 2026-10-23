@@ -13,9 +13,10 @@ GIF_W="${GIF_W:-1280}"; GIF_FPS="${GIF_FPS:-20}"; SPEED="${SPEED:-1.35}"
 declare -A FILE=(
   [S00Overview]=s01_problem.py [S01Traffic]=s01_problem.py [S02HeadOfLine]=s01_problem.py [S03Landscape]=s01_problem.py
   [S04DualPool]=s02_transport.py [S05BlobChannel]=s02_transport.py [S06Completion]=s02_transport.py [S07Connector]=s02_transport.py
+  [S01KVCache]=s04_kv_and_compression.py [S11Compare]=s04_kv_and_compression.py
   [S08WFA]=s03_algorithms.py [S09Policy]=s03_algorithms.py [S10PMP]=s03_algorithms.py [S11ScuffedQuant]=s03_algorithms.py [S12Storage]=s03_algorithms.py
 )
-ORDER=(S00Overview S01Traffic S02HeadOfLine S03Landscape S04DualPool S05BlobChannel S06Completion S07Connector S08WFA S09Policy S10PMP S11ScuffedQuant S12Storage)
+ORDER=(S00Overview S01KVCache S01Traffic S02HeadOfLine S03Landscape S04DualPool S05BlobChannel S06Completion S07Connector S08WFA S09Policy S10PMP S11ScuffedQuant S11Compare S12Storage)
 [[ $# -gt 0 ]] && ORDER=("$@")
 cd "$HERE"
 for s in "${ORDER[@]}"; do

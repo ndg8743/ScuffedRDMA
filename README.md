@@ -20,12 +20,16 @@ Each part has a short animation, a one-paragraph summary and its key math. Every
 
 ### [1. What moves: network and storage](docs/explained/01-traffic.md)
 
+![How the KV cache works: attention over cached keys and values, growth per token, paged blocks, prefill vs decode](docs/media/01_kvcache.gif)
+
+Each token leaves a key and a value at every layer. A new token's query is compared with every cached key, a softmax turns the scores into weights, and the output is the weighted sum of the cached values. The cache is exact (later tokens never change earlier keys or values, because of the causal mask), so prefill can build it on one server and decode can use it on another.
+
 ![KV traffic between prefill and decode, and spill to NVMe](docs/media/01_traffic.gif)
 
 Prefill on server 1 writes K and V for every layer and ships them to decode on server 2. While that bulk streams, other requests need small, urgent messages on the same link (control blobs, credits, token ids). When decode GPU memory passes a watermark, cold KV spills to NVMe instead of being recomputed.
 
 ```math
-\text{KV per token per layer} = 2 \times h_{kv} \times d_{\text{head}} \times \text{bytes} = 2 \times 8 \times 64 \times 2 = 2\ \text{KiB} \quad (\text{Granite 3.3-2B, bf16})
+o_t = \sum_{i \le t} \mathrm{softmax}_i\!\left(\frac{\langle q_t, k_i\rangle}{\sqrt{d}}\right) v_i, \qquad \text{KV per token per layer} = 2 \times h_{kv} \times d_{\text{head}} \times \text{bytes} = 2 \times 8 \times 64 \times 2 = 2\ \text{KiB} \quad (\text{Granite 3.3-2B, bf16})
 ```
 
 A 2,048-token prompt is 2 KiB × 40 layers × 2,048 = 160 MiB, which takes 134 ms to serialize at 10 Gb/s.
@@ -136,11 +140,23 @@ For each transfer the controller picks hot, cold or spill. Its cost is a straigh
 
 ![Rotation, Lloyd-Max codebook, QJL sketch and the 64-byte wire format](docs/media/11_scuffedquant.gif)
 
-Each KV vector is rotated with a random-sign Hadamard transform so all coordinates look alike, quantized to 3 bits with a Lloyd–Max codebook, and its residual is sketched with 256 sign bits. Attention needs inner products, and the sketch corrects them without bias. That is 64 bytes per vector at head_dim 64, 2× smaller than FP16, with 91.1% ± 3.3% top-8 attention overlap on Granite 3.3-2B.
+Each KV vector is rotated with a random-sign Hadamard transform so all coordinates look alike, quantized to 3 bits with a Lloyd–Max codebook, and its residual is sketched with 256 sign bits. Attention needs inner products, and the sketch corrects them (without bias for Gaussian projections, approximately for the ±1 ones the code uses). That is 64 bytes per vector at head_dim 64, 2× smaller than FP16, with 91.1% ± 3.3% top-8 attention overlap on Granite 3.3-2B.
 
 ```math
 \langle q, k \rangle \approx \langle q, \hat k \rangle + \lVert r \rVert\, \frac{\sqrt{\pi/2}}{m} \sum_{j=1}^{m} \mathrm{sign}(S r)_j\, (S q)_j, \qquad 4 + 4 + \tfrac{64 \cdot 3}{8} + \tfrac{256}{8} = 64\ \text{B}
 ```
+
+![How scuffedQuant differs from FP8, KIVI and token eviction](docs/media/11_compare.gif)
+
+How it differs: FP8, KIVI and token eviction change the GPU cache that attention reads at every decode step. scuffedQuant leaves the GPU cache in bf16 and only shrinks the bytes of a transfer on the wire or on NVMe. It handles outlier channels with a rotation instead of per-group scales.
+
+| bytes per K or V vector | bf16 | FP8 | KIVI 2-bit | scuffedQuant |
+|---|---|---|---|---|
+| head_dim 64 | 128 | 64 | about 24 + window | 64 |
+| head_dim 128 | 256 | 128 | about 48 + window | 88 |
+| where | | GPU cache | GPU cache | wire and NVMe only |
+
+On the vLLM connector path the receiver rebuilds from the 3-bit part alone, so the sketch is not used there yet. Quality against FP8 and KIVI on the same KV is not measured yet.
 
 ### [12. NVMe storage tier](docs/explained/12-storage-tier.md)
 

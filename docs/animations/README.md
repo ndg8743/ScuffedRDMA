@@ -5,6 +5,7 @@ Manim Community scenes behind the GIFs in the top-level README. One scene per th
 | Scene | File | GIF |
 |---|---|---|
 | `S00Overview` | `s01_problem.py` | `docs/media/00_overview.gif` |
+| `S01KVCache` | `s04_kv_and_compression.py` | `docs/media/01_kvcache.gif` |
 | `S01Traffic` | `s01_problem.py` | `docs/media/01_traffic.gif` |
 | `S02HeadOfLine` | `s01_problem.py` | `docs/media/02_headofline.gif` |
 | `S03Landscape` | `s01_problem.py` | `docs/media/03_landscape.gif` |
@@ -16,6 +17,7 @@ Manim Community scenes behind the GIFs in the top-level README. One scene per th
 | `S09Policy` | `s03_algorithms.py` | `docs/media/09_policy.gif` |
 | `S10PMP` | `s03_algorithms.py` | `docs/media/10_pmp.gif` |
 | `S11ScuffedQuant` | `s03_algorithms.py` | `docs/media/11_scuffedquant.gif` |
+| `S11Compare` | `s04_kv_and_compression.py` | `docs/media/11_compare.gif` |
 | `S12Storage` | `s03_algorithms.py` | `docs/media/12_storage.gif` |
 
 `style.py` holds the palette (orange hot, blue cold, violet spill, green ok, red stall), captions and box helpers.
