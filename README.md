@@ -92,8 +92,8 @@ flowchart LR
     ROT --> QZ["Lloyd-Max codebook<br/>3 bits / coord"]
     QZ --> IDX[["indices<br/>uint8"]]
     ROT --> RES[residual = x − x̂]
-    RES --> QJL["QJL sketch<br/>sign(S · r/‖r‖)"]
-    QJL --> SIG[["signs<br/>1 bit / coord"]]
+    RES --> QJL["256-bit QJL sketch<br/>sign(S · r/‖r‖)"]
+    QJL --> SIG[["signs<br/>256 bits / vector"]]
     IDX --> OUT[["CompressedKV<br/>≈ 4× at 3 bits"]]
     SIG --> OUT
     N1 --> NRM[["norms<br/>fp32"]]
@@ -110,7 +110,7 @@ Four components:
 - **Dual QP pool.** Two RC queue-pair pools on one protection domain. Hot pool: busy-poll CQ. Cold pool: sleep-poll. Splits hot and cold traffic onto independent work queues.
 - **WFA classifier.** Labels each transfer hot or cold from tensor size and prefill/decode phase. Logs the decision for every transfer.
 - **PMP controller.** Bang-bang bandwidth allocation via Pontryagin's Maximum Principle. Switching function: `S = α·q_H·C·μ_H − β·q_C·C·μ_C`. Inputs: observed queue depth and measured service rates.
-- **scuffedQuant.** Two-stage KV compression (TurboQuant). Stage 1: Walsh-Hadamard rotation + Lloyd-Max codebook at 3 bits, no calibration. Stage 2: 1-bit QJL sign sketch of the quantization residual. Individual vectors are lossy; inner products are preserved.
+- **scuffedQuant.** Two-stage KV compression in the TurboQuant style. Stage 1: randomized Walsh-Hadamard rotation + Lloyd-Max codebook at 3 bits, no calibration. Stage 2: 256-bit QJL sign sketch (Zandieh et al.) of the quantization residual. Individual vectors are lossy; inner products are preserved.
 
 ---
 
@@ -123,18 +123,19 @@ Four components:
 | `middleware/tests/` | pytest suite for bootstrap and QP state machine |
 | `benchmarks/` | Dual QP, UCX comparison, scuffedQuant LLM/MLX scripts |
 | `deployment/` | Docker/K8s for Chimera/Cerberus, FA3 Blackwell patch |
-| `Updates/` | Thesis updates 1–5 (LaTeX + PDF) |
+| `Updates/` | Thesis updates 1–7 (LaTeX + PDF), proposal, rolling draft, backlog in `Drafts/updates-todo/` |
 | `scripts/` | SoftRoCE setup, cluster bring-up, benchmark sweep |
 | `ucx/` | Submodule: [openucx/ucx](https://github.com/openucx/ucx) (upstream PR target) |
 | `vllm/` | Submodule: [vllm-project/vllm](https://github.com/vllm-project/vllm) (reference) |
 | `uccl/` | Submodule: [uccl-project/uccl](https://github.com/uccl-project/uccl) (P2P RDMA collective comparison) |
+| `References/` | Saved papers, slides, and pages. `Bookmarks_10-22/RANKED_SOURCES.md` ranks every thesis source and RDMA bookmark (S/A/B/C) with a local copy or source link for each |
 | `REFERENCES.md` | Full annotated bibliography |
 
 ## Hardware
 
 | Node | Role | GPUs | VRAM | NIC | RDMA |
 |------|------|------|------|-----|------|
-| Cerberus | Prefill | 2× RTX 5090 | 64 GB | Intel X710 10GbE | SoftRoCE, iWARP SR-IOV |
+| Cerberus | Prefill | 2× RTX 5090 | 64 GB | Intel X710 10GbE | SoftRoCE (X710 has no iWARP) |
 | Chimera | Decode | 3× RTX 3090 | 72 GB | Aquantia AQC107 10GbE | SoftRoCE |
 | Tower 1 | Dev | RTX 5070 Ti | 16 GB | ConnectX-4 100GbE | Hardware RoCEv2 |
 | Tower 2 | Dev | 2× Tesla V100 | 64 GB | ConnectX-4 100GbE | Hardware RoCEv2, GPUDirect |
@@ -150,8 +151,9 @@ Four components:
 | Dual QP overhead vs single QP | +0.6 µs | Update 4 |
 | Cross-node decode latency (SoftRoCE) | 8 µs | `results/dual_qp_remote_benchmark.json` |
 | UCX tag_bw cross-node | 111.86 MB/s | Update 4 |
-| scuffedQuant 3-bit top-8 (Granite 3.3-2B, FP32) | 91.1% / 40 layers | `results/scuffed_quant_llm.json` |
+| scuffedQuant 3-bit + 256-bit QJL, top-8 overlap (Granite 3.3-2B, FP32) | 91.1% ± 3.3% (40 layers, min 82.8%) | `results/scuffed_quant_llm.json` |
 | scuffedQuant 3-bit top-8 (Granite 3.3-2B, MLX 4-bit) | 100.0% / 40 layers | `results/scuffed_quant_mlx.json` |
+| scuffedQuant compression vs FP16 KV | 4.0× | `results/scuffed_quant_llm.json` |
 | FA3 Blackwell patch, RTX 5090 | +15.5% throughput | `deployment/patches/` |
 | gpt-oss-120b TCP baseline (3× 3090, MXFP4) | 104.4 tok/s | `deployment/benchmarks/` |
 
@@ -165,21 +167,29 @@ Six PRs against [openucx/ucx](https://github.com/openucx/ucx), reviewed in Updat
 
 - [x] Dual QP pool over SoftRoCE with WFA routing (loopback + cross-node; `benchmarks/results/dual_qp_benchmark.json`, `dual_qp_remote_benchmark.json`)
 - [x] PMP controller implementation (`middleware/rdma_tensor_cache/pmp_controller.py`)
-- [x] scuffedQuant: PolarQuant + QJL, run on Granite 3.3-2B KV cache (`benchmarks/results/scuffed_quant_llm.json`, `scuffed_quant_mlx.json`)
+- [x] scuffedQuant: Hadamard rotation + Lloyd-Max + 256-bit QJL, run on Granite 3.3-2B KV cache (`benchmarks/results/scuffed_quant_llm.json`, `scuffed_quant_mlx.json`)
 - [x] UCX codebase analysis → six upstream PRs submitted (#11304–#11309; review status in Update 5)
 - [x] RDMA bootstrap: binary handshake, GID discovery, QP state machine with retry (`middleware/rdma_bootstrap.py`, `rdma_gid_discovery.py`, `rdma_qp_state_machine.py`)
 - [x] Security audit (Update 5): four middleware findings fixed, six UCX PRs reviewed clean
 - [x] Python MVP running on Chimera↔Cerberus 10GbE (Update 4)
+- [x] Standalone `RDMAKVCacheConnector` prototype with WFA heat classification (`middleware/rdma_tensor_cache/vllm_connector.py`)
+- [x] Storage-tier design for KV spill/retrieve over GPFS, sandook, WEKA (Update 6)
+- [x] Transport landscape: Ray Direct Transport, ROCm eRNIC, near-SoL collectives, libfabric / UCX / DOCA positioning, GPFS RDMA defect record (Update 7)
 
 ## Planned
 
-- [ ] vLLM `KvConnector` plug-in for disaggregated serving
+- [ ] `ScuffedRdmaConnector`: wire the prototype into vLLM's KV connector API in place of `NixlConnector`
 - [ ] Multi-threaded cross-node benchmark with concurrent hot/cold traffic
 - [ ] TTFT measurement on gpt-oss-120b split across both nodes
 - [ ] Positional-encoding-aware WFA (route by predicted read frequency, not just size)
 - [ ] Fused gather→Hadamard→rescale Triton kernel for scuffedQuant decompression
 - [ ] Rust or C++ port of the hot-path data plane
 - [ ] GPUDirect RDMA on Tower 2 (ConnectX-4 passthrough pending)
+- [ ] NIXL + Ray RDT over SoftRoCE: view-count sweep on the 10GbE link, with and without competing hot traffic, to check for single-path HOL blocking (Update 7)
+- [ ] Completion-signaling microbenchmark on hot QPs: CQ vs flag-in-payload vs sentinel vs trailing READ, reported as instructions per op (Update 7)
+- [ ] Dual QP pool on libfabric's verbs provider vs the libibverbs pool, same payloads (Update 7)
+- [ ] Per-QP-class Prometheus counters incl. QP error/reconnect (Update 7)
+- [ ] KV spill/retrieve to NVMe gated by WFA; storage-pressure term in PMP (Update 6)
 
 ---
 
@@ -207,17 +217,20 @@ python benchmarks/aggregate_results.py --results-dir benchmarks/results
 |--------|-----------|--------|
 | Jan–Feb 2026 | Hardware bring-up, Updates 1–3 | done |
 | Mar–Apr 2026 | Python MVP, UCX PRs, scuffedQuant | done |
-| May–Jul 2026 | KvConnector integration, TTFT measurement | in progress |
-| Aug–Oct 2026 | Native port, full thesis draft | planned |
-| Nov–Dec 2026 | Defense | planned |
+| May–Sep 2026 | Storage tier (Update 6), transport landscape (Update 7) | done |
+| Sep–Nov 2026 | vLLM connector integration, TTFT, transport microbenchmarks | in progress |
+| Oct–Nov 2026 | Full thesis draft (`Updates/Drafts/draft1.tex`) | in progress |
+| Dec 2026 | Defense | planned |
 
 ## Citations
 
-Full bibliography in [REFERENCES.md](REFERENCES.md). Core references the design leans on:
+Full bibliography in [REFERENCES.md](REFERENCES.md); ranked source list in [References/Bookmarks_10-22/RANKED_SOURCES.md](References/Bookmarks_10-22/RANKED_SOURCES.md). Core references the design leans on:
 
 - Kwon et al., *PagedAttention*, SOSP 2023. [arXiv:2309.06180](https://arxiv.org/abs/2309.06180)
 - Dao, *FlashAttention-2*. [arXiv:2307.08691](https://arxiv.org/abs/2307.08691)
 - Zandieh et al., *TurboQuant*. [arXiv:2504.19874](https://arxiv.org/abs/2504.19874)
+- Zandieh, Daliri, Han, *QJL: 1-Bit Quantized JL Transform for KV Cache Quantization*. [arXiv:2406.03482](https://arxiv.org/abs/2406.03482)
+- TransferEngine (closest system-level comparison). [arXiv:2510.27656](https://arxiv.org/abs/2510.27656)
 - Pontryagin et al., *The Mathematical Theory of Optimal Processes*, 1962.
 
 ## License
