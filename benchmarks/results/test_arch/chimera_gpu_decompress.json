@@ -1,0 +1,90 @@
+{
+  "hostname": "chimera",
+  "gpu": "3090",
+  "gpu_name": "NVIDIA GeForce RTX 3090",
+  "torch_version": "2.6.0+cu124",
+  "cuda_version": "12.4",
+  "records": [
+    {
+      "rows": 4096,
+      "dim": 128,
+      "bits": 8,
+      "compression_ratio": 3.0476190476190474,
+      "decompress_gpu_us": 611.2396763637662,
+      "decompress_cpu_us": 9176.455554552376,
+      "cpu_over_gpu": 15.012859782176845
+    },
+    {
+      "rows": 4096,
+      "dim": 128,
+      "bits": 4,
+      "compression_ratio": 4.923076923076923,
+      "decompress_gpu_us": 1410.9556982293725,
+      "decompress_cpu_us": 9004.191495478153,
+      "cpu_over_gpu": 6.381625948126958
+    },
+    {
+      "rows": 4096,
+      "dim": 128,
+      "bits": 3,
+      "compression_ratio": 5.818181818181818,
+      "decompress_gpu_us": 1467.8844809532166,
+      "decompress_cpu_us": 8928.185561671853,
+      "cpu_over_gpu": 6.082348902465443
+    },
+    {
+      "rows": 32768,
+      "dim": 128,
+      "bits": 8,
+      "compression_ratio": 3.0476190476190474,
+      "decompress_gpu_us": 4098.392883315682,
+      "decompress_cpu_us": 142294.56393513829,
+      "cpu_over_gpu": 34.71960058158678
+    },
+    {
+      "rows": 32768,
+      "dim": 128,
+      "bits": 4,
+      "compression_ratio": 4.923076923076923,
+      "decompress_gpu_us": 8582.894182763994,
+      "decompress_cpu_us": 186773.66245537996,
+      "cpu_over_gpu": 21.76115171388869
+    },
+    {
+      "rows": 32768,
+      "dim": 128,
+      "bits": 3,
+      "compression_ratio": 5.818181818181818,
+      "decompress_gpu_us": 3977.220356464386,
+      "decompress_cpu_us": 135442.49651022255,
+      "cpu_over_gpu": 34.05456182232416
+    },
+    {
+      "rows": 131072,
+      "dim": 128,
+      "bits": 8,
+      "compression_ratio": 3.0476190476190474,
+      "decompress_gpu_us": 32940.99707622081,
+      "decompress_cpu_us": 1008316.3955714554,
+      "cpu_over_gpu": 30.609771563330455
+    },
+    {
+      "rows": 131072,
+      "dim": 128,
+      "bits": 4,
+      "compression_ratio": 4.923076923076923,
+      "decompress_gpu_us": 33205.92015981674,
+      "decompress_cpu_us": 1016180.7745462283,
+      "cpu_over_gpu": 30.60239769461147
+    },
+    {
+      "rows": 131072,
+      "dim": 128,
+      "bits": 3,
+      "compression_ratio": 5.818181818181818,
+      "decompress_gpu_us": 33582.70552009344,
+      "decompress_cpu_us": 1026064.8688999936,
+      "cpu_over_gpu": 30.5533712370515
+    }
+  ]
+}

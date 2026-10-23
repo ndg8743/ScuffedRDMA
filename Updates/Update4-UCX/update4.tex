@@ -556,6 +556,9 @@ Per-QP traffic class & \#11252, \#10325 & Symmetric TC via direct \texttt{ibv\_m
 Beyond the bypass, I submitted six pull requests to \texttt{openucx/ucx} (\href{https://github.com/openucx/ucx/pulls?q=is\%3Apr+author\%3Andg8743}{\#11304--\#11309}) that fix the underlying issues directly: calculated RNDV threshold instead of the hardcoded 256KB, adaptive TX CQ moderation to prevent stalls, eager inline sends with CUDA memory domains loaded, a TCP wireup fallback for SoftRoCE where UD is unavailable, a bandwidth-estimate query for informed placement, and traffic-class propagation in the IB address for symmetric QoS.
 
 \section{KV Cache Compression Pipeline and TurboQuant}
+\footnote{Update~5-2 extends this pipeline to Mamba-3 SSM state,
+Granite~4 hybrid blocks, and Granite~4 MoE expert activations.
+See \texttt{Updates/Update5-2-Architectures/update5\_2.tex}.}
 
 \subsection{Three Compression Stages on Orthogonal Axes}
 

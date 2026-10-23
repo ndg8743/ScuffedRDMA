@@ -1,0 +1,36 @@
+{
+  "model": "state-spaces/mamba-130m-hf",
+  "architecture": "mamba3",
+  "hostname": "cerberus",
+  "gpu": "5090",
+  "seq_len": 30,
+  "state_shape": [
+    24,
+    1536,
+    16
+  ],
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 1.1428571428571428,
+      "rank_overlap_topk": 0.9947916666666666,
+      "decompress_us": 338.9941994100809,
+      "compress_us": 4374.000185634941
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 1.3333333333333333,
+      "rank_overlap_topk": 0.9791666666666666,
+      "decompress_us": 309.2950404000779,
+      "compress_us": 3635.6568064851067
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 1.391304347826087,
+      "rank_overlap_topk": 0.9739583333333334,
+      "decompress_us": 321.97524948666495,
+      "compress_us": 3574.541498286029
+    }
+  ],
+  "notes": "mamba-3 unavailable (OSError); fell back to state-spaces/mamba-130m-hf"
+}

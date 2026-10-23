@@ -267,6 +267,112 @@ class ScuffedQuant:
         scores += _qjl_correct(queries, c.qjl_signs, c.residual_norms, self.S)
         return scores
 
+    def compress_ssm_state(self, state: np.ndarray) -> CompressedKV:
+        """
+        Compress an SSM hidden state (Mamba-family).
+
+        The state typically arrives shaped (batch, d_state, d_model) or
+        (batch, n_layers, d_state, d_model). We flatten every axis except
+        the last (which must match self.dim) and delegate to compress().
+        """
+        if state.shape[-1] != self.dim:
+            raise ValueError(
+                f"compress_ssm_state: last dim {state.shape[-1]} != {self.dim}")
+        flat = state.reshape(-1, self.dim).astype(np.float32, copy=False)
+        return self.compress(flat)
+
+    def compress_expert_activation(self, activation: np.ndarray) -> CompressedKV:
+        """
+        Compress an MoE expert-output activation before all-to-all dispatch.
+
+        Activations are (n_tokens_per_expert, d_model) after routing. If the
+        caller passes a 3D (n_experts, n_tokens, d_model) tensor, we flatten
+        experts and tokens together; the receiving side re-splits by the
+        expert-count it already knows.
+        """
+        if activation.shape[-1] != self.dim:
+            raise ValueError(
+                f"compress_expert_activation: last dim {activation.shape[-1]} "
+                f"!= {self.dim}")
+        flat = activation.reshape(-1, self.dim).astype(np.float32, copy=False)
+        return self.compress(flat)
+
+    def _build_hadamard(self, device):
+        """Construct a (d_pad, d_pad) normalized Hadamard matrix on `device`.
+
+        Cached per-device so the cost is one-time. The normalization is
+        H = W / sqrt(d), which makes H orthonormal (H @ H = I) so a
+        single matmul inverts the forward rotation. This replaces the
+        butterfly loop in decompress_torch with one BLAS call that
+        torch.compile can fuse into a fast autotuned kernel.
+        """
+        import torch
+        attr = f"_hadamard_{device}"
+        if hasattr(self, attr):
+            return getattr(self, attr)
+        d = self._d_pad
+        h = torch.tensor([[1.0]], device=device, dtype=torch.float32)
+        while h.shape[0] < d:
+            h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
+        h = h / (d ** 0.5)
+        setattr(self, attr, h)
+        return h
+
+    def decompress_torch(self, c: CompressedKV, device: str):
+        """
+        GPU decompression path using a single Hadamard matmul. Returns a
+        (n, dim) float32 tensor on `device`. Eager / non-autotuned.
+        """
+        import torch
+        attr = f"_torch_state_{device}"
+        if not hasattr(self, attr):
+            codebook = torch.from_numpy(self.codebook).to(device=device, dtype=torch.float32)
+            signs = torch.from_numpy(self._signs[:self._d_pad]).to(device=device, dtype=torch.float32)
+            setattr(self, attr, (codebook, signs))
+        codebook_t, signs_t = getattr(self, attr)
+        H = self._build_hadamard(device)
+
+        indices_t = torch.from_numpy(c.indices).to(device=device, dtype=torch.long)
+        norms_t = torch.from_numpy(c.norms).to(device=device, dtype=torch.float32)
+
+        x = codebook_t[indices_t]                    # (n, d_pad) gather
+        x = x @ H                                    # inverse Hadamard
+        x = x * signs_t                              # undo the random sign diag
+        x = x[:, :c.dim] * norms_t.unsqueeze(-1)     # truncate + rescale
+        return x
+
+    def decompress_torch_autotune(self, c: CompressedKV, device: str, mode: str = "max-autotune"):
+        """
+        Autotuned decompression. Compiles the inner kernel with
+        torch.compile on first call (mode="reduce-overhead" or
+        "max-autotune"); subsequent calls reuse the tuned kernel. The
+        output is bit-identical to decompress_torch.
+        """
+        import torch
+        attr = f"_torch_state_{device}"
+        if not hasattr(self, attr):
+            codebook = torch.from_numpy(self.codebook).to(device=device, dtype=torch.float32)
+            signs = torch.from_numpy(self._signs[:self._d_pad]).to(device=device, dtype=torch.float32)
+            setattr(self, attr, (codebook, signs))
+        codebook_t, signs_t = getattr(self, attr)
+        H = self._build_hadamard(device)
+
+        compiled_attr = f"_compiled_{device}_{mode}"
+        if not hasattr(self, compiled_attr):
+            def _kernel(codebook_t, indices_t, H, signs_t, norms_t, dim):
+                x = codebook_t[indices_t]
+                x = x @ H
+                x = x * signs_t
+                x = x[:, :dim] * norms_t.unsqueeze(-1)
+                return x
+            compiled = torch.compile(_kernel, mode=mode, dynamic=False)
+            setattr(self, compiled_attr, compiled)
+        compiled = getattr(self, compiled_attr)
+
+        indices_t = torch.from_numpy(c.indices).to(device=device, dtype=torch.long)
+        norms_t = torch.from_numpy(c.norms).to(device=device, dtype=torch.float32)
+        return compiled(codebook_t, indices_t, H, signs_t, norms_t, c.dim)
+
     def compression_ratio(self, n_vectors: int) -> float:
         """Compression ratio vs FP32."""
         original = n_vectors * self.dim * 4

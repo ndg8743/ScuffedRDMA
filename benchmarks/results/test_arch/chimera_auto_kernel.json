@@ -1,0 +1,31 @@
+{
+  "hostname": "chimera",
+  "gpu": "3090",
+  "gpu_name": "NVIDIA GeForce RTX 3090",
+  "torch_version": "2.6.0+cu124",
+  "cuda_version": "12.4",
+  "records": [
+    {
+      "rows": 4096,
+      "dim": 128,
+      "bits": 3,
+      "eager_us": 606.6373782232404,
+      "compiled_reduce_overhead_us": 645.1795808970928,
+      "compiled_max_autotune_us": 674.595981836319,
+      "max_autotune_compile_s": 10.591183445882052,
+      "speedup_ro_over_eager": 0.9402612794715833,
+      "speedup_mx_over_eager": 0.899260289947046
+    },
+    {
+      "rows": 32768,
+      "dim": 128,
+      "bits": 3,
+      "eager_us": 8283.116738311946,
+      "compiled_reduce_overhead_us": 8463.361700996757,
+      "compiled_max_autotune_us": 8552.86433827132,
+      "max_autotune_compile_s": 10.645413591060787,
+      "speedup_ro_over_eager": 0.978702911555395,
+      "speedup_mx_over_eager": 0.9684611389482305
+    }
+  ]
+}

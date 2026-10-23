@@ -1,0 +1,37 @@
+{
+  "model": "ibm-granite/granite-3.3-2b-instruct",
+  "architecture": "transformer",
+  "hostname": "chimera",
+  "gpu": "3090",
+  "seq_len": 36,
+  "state_shape": [
+    4,
+    8,
+    36,
+    64
+  ],
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 2.4615384615384617,
+      "rank_overlap_topk": 0.98828125,
+      "decompress_us": 770.1092399656773,
+      "compress_us": 2577.182778622955
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 3.5555555555555554,
+      "rank_overlap_topk": 0.91015625,
+      "decompress_us": 696.9125242903829,
+      "compress_us": 2026.4204358682036
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 4.0,
+      "rank_overlap_topk": 0.82421875,
+      "decompress_us": 696.8427915126085,
+      "compress_us": 1911.4407477900386
+    }
+  ],
+  "notes": "KV cache from outputs.past_key_values; per-layer K flattened to (heads*seq, head_dim)."
+}

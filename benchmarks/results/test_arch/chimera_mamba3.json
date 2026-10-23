@@ -1,0 +1,36 @@
+{
+  "model": "state-spaces/mamba-130m-hf",
+  "architecture": "mamba3",
+  "hostname": "chimera",
+  "gpu": "3090",
+  "seq_len": 30,
+  "state_shape": [
+    24,
+    1536,
+    16
+  ],
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 1.1428571428571428,
+      "rank_overlap_topk": 1.0,
+      "decompress_us": 554.169489381214,
+      "compress_us": 3456.221214340379
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 1.3333333333333333,
+      "rank_overlap_topk": 0.984375,
+      "decompress_us": 563.324235069255,
+      "compress_us": 2952.823143762847
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 1.391304347826087,
+      "rank_overlap_topk": 0.9739583333333334,
+      "decompress_us": 578.6188315444937,
+      "compress_us": 2671.6349433021
+    }
+  ],
+  "notes": "mamba-3 unavailable (OSError); fell back to state-spaces/mamba-130m-hf"
+}
