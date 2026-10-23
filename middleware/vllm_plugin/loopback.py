@@ -41,7 +41,7 @@ GRANITE_33_2B = {"layers": 40, "kv_heads": 8, "head_dim": 64}
 
 
 def _make_cache(n_layers: int, num_blocks: int, block_size: int, kv_heads: int, head_dim: int,
-                dtype: str, fill: bool, seed: int = 0) -> Dict[str, Any]:
+                dtype: str, fill: bool, seed: int = 0, device: str = "cpu") -> Dict[str, Any]:
     shape = (2, num_blocks, block_size, kv_heads, head_dim)
     names = [f"model.layers.{i}.self_attn.attn" for i in range(n_layers)]
     try:
@@ -49,9 +49,11 @@ def _make_cache(n_layers: int, num_blocks: int, block_size: int, kv_heads: int, 
         g = torch.Generator().manual_seed(seed)
         tdt = getattr(torch, dtype)
         if fill:
-            return {n: torch.randn(shape, generator=g).to(tdt) for n in names}
-        return {n: torch.zeros(shape, dtype=tdt) for n in names}
+            return {n: torch.randn(shape, generator=g).to(tdt).to(device) for n in names}
+        return {n: torch.zeros(shape, dtype=tdt, device=device) for n in names}
     except ImportError:
+        if device != "cpu":
+            raise RuntimeError("device caches need torch")
         npdt = np.float16 if dtype in ("bfloat16", "float16") else np.float32
         rng = np.random.default_rng(seed)
         if fill:
@@ -66,7 +68,7 @@ def _digest(cache: Dict[str, Any], block_ids: List[int]) -> str:
         sub = t[:, block_ids]
         if type(sub).__module__.startswith("torch"):
             import torch
-            sub = sub.contiguous().view(torch.uint8).numpy()
+            sub = sub.contiguous().cpu().view(torch.uint8).numpy()
         h.update(np.ascontiguousarray(sub).tobytes())
     return h.hexdigest()
 
@@ -97,7 +99,7 @@ def consumer(port: int, args: Dict[str, Any], result_q: Optional[Any] = None) ->
                           load_timeout_s=args.get("timeout", 120.0))
     w = WorkerSide(cfg, tel=tel)
     cache = _make_cache(args["layers"], args["num_blocks"], args["block_size"], args["kv_heads"],
-                        args["head_dim"], args["dtype"], fill=False)
+                        args["head_dim"], args["dtype"], fill=False, device=args.get("device", "cpu"))
     w.register_kv_caches(cache)
     per = []
     for xid, n, _src, dst in _plan(args["prompt_lens"], args["block_size"], args["num_blocks"]):
@@ -122,7 +124,7 @@ def producer(peer: str, port: int, args: Dict[str, Any]) -> Dict[str, Any]:
                           ep_type=args.get("ep_type"), compress=args.get("compress"))
     w = WorkerSide(cfg, tel=tel)
     cache = _make_cache(args["layers"], args["num_blocks"], args["block_size"], args["kv_heads"],
-                        args["head_dim"], args["dtype"], fill=True)
+                        args["head_dim"], args["dtype"], fill=True, device=args.get("device", "cpu"))
     w.register_kv_caches(cache)
     per = []
     for xid, n, src, _dst in _plan(args["prompt_lens"], args["block_size"], args["num_blocks"]):
@@ -166,7 +168,7 @@ def default_args(**over) -> Dict[str, Any]:
     a = dict(layers=GRANITE_33_2B["layers"], kv_heads=GRANITE_33_2B["kv_heads"],
              head_dim=GRANITE_33_2B["head_dim"], block_size=16, num_blocks=512, dtype="bfloat16",
              prompt_lens=[128, 512, 2048], transport="tcp", provider=None, ep_type=None,
-             compress=None, timeout=120.0)
+             compress=None, timeout=120.0, device="cpu")
     a.update(over)
     return a
 
@@ -188,12 +190,13 @@ def main(argv: Optional[List[str]] = None) -> None:
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--prompt-lens", default="128,512,2048")
     ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--device", default="cpu", help="cpu or cuda[:N]: where the synthetic paged caches live")
     a = ap.parse_args(argv)
     args = default_args(layers=a.layers, kv_heads=a.kv_heads, head_dim=a.head_dim, block_size=a.block_size,
                         num_blocks=a.num_blocks, dtype=a.dtype,
                         prompt_lens=[int(x) for x in a.prompt_lens.split(",")],
                         transport=a.transport, provider=a.provider, ep_type=a.ep_type,
-                        compress=a.compress, timeout=a.timeout)
+                        compress=a.compress, timeout=a.timeout, device=a.device)
     if a.role == "both":
         out = run_both(args)
     elif a.role == "consumer":

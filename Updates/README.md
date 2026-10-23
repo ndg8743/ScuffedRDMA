@@ -4,7 +4,7 @@ Thesis updates for ScuffedRDMA (RDMA transport middleware for disaggregated LLM 
 
 ## Current status
 
-Update 8 (draft) builds the dual pool on libfabric (`middleware/libscuffedfabric/`) and a native libibverbs implementation of the same API (`middleware/libscuffedverbs/`), so both stacks run the identical benchmark. The method and build are done; the cluster tables are filled by running notebooks 01 to 03 in cluster mode. Update 7 read Ray Direct Transport, ROCm eRNIC and the near speed-of-light collectives paper against the middleware and placed it among the libfabric, UCX and DOCA stacks.
+Update 8 (draft) moves the dual pool onto libfabric (`middleware/libscuffedfabric/`), with a native libibverbs implementation of the same API (`middleware/libscuffedverbs/`) so both stacks run one benchmark, and carries it up to vLLM through `FabricBlobChannel` and `ScuffedRdmaConnector`. The baseline is NIXL's own `LIBFABRIC` backend next to UCX. Text and build are done; the tables fill from notebooks 01 to 03 and 06 in cluster mode and notebook 08 on one GPU (`scripts/local_gpu/setup_gpu_env.sh` sets that machine up). Update 7 read Ray Direct Transport, ROCm eRNIC and the near speed-of-light collectives paper against the middleware and placed it among the libfabric, UCX and DOCA stacks.
 
 Two earlier figures are withdrawn and get re-measured in notebook 01: the 8 µs cross-node latency (the Python pool did not check completion status) and the 4x-vs-FP16 compression ratio (it was against FP32; against FP16 it is 2x at head_dim 64).
 
@@ -21,14 +21,14 @@ Two earlier figures are withdrawn and get re-measured in notebook 01: the 8 µs 
 | [Update 5-2](Update5-2-Architectures/README.md) | per-architecture scuffedQuant, test_arch harness | two drafts: canonical and `stack-draft/` |
 | [Update 6](Update6-StorageTier/README.md) | storage tier for KV offload | spill, coalescing, PMP storage arm now built |
 | [Update 7](Update7-TransportLandscape/README.md) | RDT, eRNIC, SoL collectives, libfabric / UCX / DOCA | |
-| [Update 8 (draft)](Update8-Libfabric/update8.pdf) | dual pool on libfabric vs libibverbs | provider behavior found while building; experiments E1 to E6 |
+| [Update 8 (draft)](Update8-Libfabric/README.md) | libfabric under the stack, from queue pairs to vLLM | provider behavior; NIXL's libfabric backend as baseline; E1 to E6 transport, E7 one GPU, E8 cross-node TTFT |
 | [Drafts/updates-todo](Drafts/updates-todo/README.md) | backlog drafts | keep / merge / drop per draft |
 
 `Drafts/draft1.tex` is the rolling thesis draft.
 
 ## Running the work
 
-Every update's README ends with a "Run it" section pointing at the notebook and tests that cover it. The notebooks live in `../notebooks/` and run in `MODE="local"` (smoke) or `MODE="cluster"` (Cerberus and Chimera).
+Every update's README ends with a "Run it" section pointing at the notebook and tests that cover it. The notebooks live in `../notebooks/` and run in `MODE="local"` (smoke) or `MODE="cluster"` (Cerberus and Chimera); notebook 08 also has `MODE="gpu"` for one GPU machine.
 
 ## Notes
 

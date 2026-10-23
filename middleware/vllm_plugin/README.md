@@ -2,7 +2,9 @@
 
 Out-of-tree vLLM V1 KV connector for disaggregated prefill (Cerberus, 2x RTX 5090) and decode (Chimera, 3x RTX 3090). Replaces `NixlConnector` / `P2pNcclConnector`: KV moves through the `BlobChannel` interface (`middleware/fabric/channel.py`), so the same connector runs over the libfabric hot/cold pool (`transport: fabric`) or plain TCP (`transport: tcp`).
 
-Written against vLLM `620e8924` (2026-04-12), the commit pinned by the `vllm/` submodule. `KVConnectorBase_V1` is marked experimental upstream; `tests/test_vllm_connector.py::test_signatures_match_vllm_source` re-checks our method signatures against whatever vLLM source is on disk (`VLLM_SRC=/path/to/vllm`).
+Written against vLLM `620e8924` (2026-04-12), the commit pinned by the `vllm/` submodule. `KVConnectorBase_V1` is marked experimental upstream; `tests/test_vllm_connector.py::test_signatures_match_vllm_source` re-checks our method signatures against whatever vLLM source is on disk (`VLLM_SRC=/path/to/vllm`). The suite also passes against vLLM 0.24.0 (what `uv pip install vllm` resolves on 2026-10-22): signatures, import and subclass check, and the producer to consumer run through vLLM's own `KVConnectorBase_V1`.
+
+Baselines in `benchmarks/vllm_disagg/launch.sh`: `CONNECTOR=nixl` (NixlConnector, UCX) and `CONNECTOR=nixl-libfabric` (NixlConnector with `"backends": ["LIBFABRIC"]`). NIXL's libfabric plugin picks cxi, efa, tcp or sockets and lists GPUDirect RDMA as required, so on SoftRoCE and the ConnectX-4 towers it runs over libfabric `tcp` at best. This connector stages KV through host memory and runs on the verbs provider.
 
 ## Files
 

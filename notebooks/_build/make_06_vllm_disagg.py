@@ -18,6 +18,7 @@ KV_PORT = 14600
 ENDPOINTS = {
     "single": "http://localhost:8300",
     "nixl": "http://localhost:8001",
+    "nixl-libfabric": "http://localhost:8003",
     "scuffed-tcp": "http://localhost:8002",
     "scuffed-fabric-verbs": "http://localhost:8000",
 }
@@ -27,8 +28,8 @@ MAX_TOKENS = 64
 WAIT_FOR_SERVERS_S = 0      # >0: poll /health on every endpoint before sweeping'''
 
 INTRO = """KV cache transfer for disaggregated prefill (Cerberus) / decode (Chimera) through `ScuffedRdmaConnector`
-(`middleware/vllm_plugin/`), compared against vLLM's `NixlConnector`, the same connector over TCP, and a single
-non-disaggregated server.
+(`middleware/vllm_plugin/`), compared against vLLM's `NixlConnector` (UCX backend and LIBFABRIC backend), the same connector over TCP,
+and a single non-disaggregated server.
 
 - **local**: runs the connector test suite, then pushes a Granite 3.3-2B shaped KV cache between two processes
   through the connector's own data path (no vLLM, no GPU), over TCP and over the libfabric pool when it is built.
@@ -92,6 +93,11 @@ except ImportError:
                                  PROXY_PORT=8000, KV_PORT=KV_PORT),
     "scuffed-tcp": dict(CONNECTOR="tcp", PROXY_PORT=8002, KV_PORT=KV_PORT + 100, PREFILL_PORT=8102, DECODE_PORT=8202),
     "nixl": dict(CONNECTOR="nixl", PROXY_PORT=8001, PREFILL_PORT=8101, DECODE_PORT=8201),
+    # NIXL's LIBFABRIC backend picks cxi > efa > tcp > sockets, so on these nodes it runs over libfabric tcp.
+    # Its README lists libfabric >= 1.21 and GPUDirect RDMA as requirements: if it fails to start, the
+    # error in the decode log is the result.
+    "nixl-libfabric": dict(CONNECTOR="nixl-libfabric", NIXL_FI_PROVIDER="tcp", PROXY_PORT=8003,
+                           PREFILL_PORT=8103, DECODE_PORT=8203, NIXL_SIDE_PORT_PREFILL=5610, NIXL_SIDE_PORT_DECODE=5610),
 }
 for label, env in setups.items():
     env = dict(env, MODEL=MODEL, PREFILL_HOST=PREFILL_HOST, DECODE_HOST=DECODE_HOST)

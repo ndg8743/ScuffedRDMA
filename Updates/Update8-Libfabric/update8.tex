@@ -2,14 +2,15 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{graphicx,amsmath,amssymb,booktabs,hyperref,microtype,xurl}
 \usepackage{enumitem}
+\emergencystretch=3em
 \setlist{nosep}
 \hypersetup{colorlinks=true,linkcolor=black,citecolor=blue,urlcolor=blue}
 \setcounter{tocdepth}{2}
 \newcommand{\pend}{\textit{pending}}
 
-\title{Update 8: The Dual QP Pool on libfabric}
+\title{Update 8: libfabric Under the Stack, From Queue Pairs to vLLM}
 \author{Nathan Gopee\\MS Computer Science Candidate, SUNY New Paltz\\\texttt{gopeen1@newpaltz.edu}\\[4pt]Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
-\date{October 2026 (draft: method and build complete, cluster numbers pending)}
+\date{October 2026 (draft: built and tested; cluster and GPU tables pending)}
 
 \begin{document}
 \maketitle
@@ -17,26 +18,27 @@
 
 \section{Summary}
 
-Update 7 placed libscuffedrdma among the libfabric, UCX and DOCA stacks and noted that libfabric's endpoint model matches the hot/cold split directly. This update builds that version and sets up the comparison against the libibverbs pool.
+Update 7 placed libscuffedrdma among the libfabric, UCX and DOCA stacks and noted that libfabric's endpoint model matches the hot/cold split directly. This update moves the middleware onto libfabric and carries it up to vLLM.
 
 What exists now:
 \begin{itemize}
-\item \texttt{libscuffedfabric}: the dual pool on libfabric. Each class (hot, cold) gets its own endpoint, CQs and, if wanted, its own provider and endpoint type (\texttt{FI\_EP\_MSG} or \texttt{FI\_EP\_RDM}). Classes with the same provider and type share one fabric, domain and memory registration.
-\item \texttt{libscuffedverbs}: the same C API implemented on raw libibverbs RC queue pairs. The benchmark source is shared, so \texttt{sf\_bench} and \texttt{sv\_bench} differ only in the library they link.
-\item Benchmarks for hot-path latency under five completion-signaling mechanisms, cold bandwidth, and a mixed hot/cold head-of-line test, with per-post instruction counts and CPU pinning.
-\item A Python binding and a blob channel over the pool, which the vLLM connector uses as its transport.
+\item \texttt{libscuffedfabric}: the dual pool on libfabric. Each class (hot, cold) gets its own endpoint and CQs, and can use its own provider and endpoint type (\texttt{FI\_EP\_MSG} or \texttt{FI\_EP\_RDM}).
+\item \texttt{libscuffedverbs}: the same C API on raw libibverbs RC queue pairs, so both stacks run one benchmark source.
+\item \texttt{FabricBlobChannel}: a Python blob channel over the pool, and \texttt{ScuffedRdmaConnector}, a vLLM V1 KV connector that moves disaggregated-prefill KV through it.
+\item A baseline path through vLLM's \texttt{NixlConnector} with NIXL's own \texttt{LIBFABRIC} backend, next to the usual UCX one.
+\item Around the transport: unified telemetry, a WFA with learned weights, the rule-tree policy engine, the PMP storage arm and an NVMe tier (Section~\ref{sec:stack}).
+\item Nine Jupyter notebooks. Each runs in a local mode (smoke tests on any machine) and a cluster or GPU mode that produces the numbers.
 \end{itemize}
 
-Everything below was built and exercised end to end on libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers. Those runs check correctness only. The comparison itself (verbs provider and native verbs on SoftRoCE between Cerberus and Chimera, and on ConnectX-4 between the towers) is notebook 03 in cluster mode, and its tables are empty here on purpose.
+Everything below was built and run end to end on libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers, and the connector passes its tests against vLLM 0.24.0's own base class. None of those runs are results. The tables are filled by notebooks 01 to 03 and 06 on Cerberus and Chimera, and by notebook 08 on a single desktop GPU.
 
 \section{Why libfabric}
 
-Three things point the same way.
-
 \begin{enumerate}
-\item \textbf{The endpoint model fits the design.} libfabric exposes connected (\texttt{MSG}) and reliable-unconnected (\texttt{RDM}) endpoints, completion counters as a lighter alternative to CQs, selective completion, and wait objects on CQs~\cite{grun2015,fi_endpoint,fi_cntr}. Hot traffic wants the cheapest possible completion; cold traffic wants a deep queue and a thread that sleeps. With libibverbs both have to be built by hand. libfabric exposes them as configuration.
-\item \textbf{GPFS runs on it.} IBM Storage Scale uses libfabric underneath its RDMA path. A cold class on the same stack the file system already uses is the natural route for KV spill to a GPFS tier (Update 6).
-\item \textbf{The stack choice is measurable and matters.} Smith's MUG'23 comparison concludes that libfabric and UCX ``both provide very similar performance benefits''~\cite{smith_mug23}. EPCC's ARCHER2 study found little difference in OSU micro-benchmarks but large application-level differences, concentrated in \texttt{MPI\_Alltoallv}, and could not reproduce them with the micro-benchmarks~\cite{bareford2022}. Micro-benchmarks alone do not settle a stack comparison. That is why this update measures under mixed traffic and at the connector level, not only with ping-pong.
+\item \textbf{The endpoint model fits the design.} libfabric exposes connected (\texttt{MSG}) and reliable-unconnected (\texttt{RDM}) endpoints, completion counters as a lighter alternative to CQs, selective completion, and wait objects on CQs~\cite{grun2015,fi_endpoint,fi_cntr}. Hot traffic wants the cheapest completion; cold traffic wants a deep queue and a thread that sleeps. With libibverbs both are built by hand. With libfabric they are configuration.
+\item \textbf{GPFS runs on it.} IBM Storage Scale uses libfabric under its RDMA path, so a cold class on the same stack is the natural route for KV spill to a GPFS tier (Update 6).
+\item \textbf{The serving stack is already moving there.} NIXL ships a libfabric backend that vLLM can select~\cite{nixl_lf,vllm_nixl}, NVIDIA's Dynamo setup for AWS selects it for EFA~\cite{dynamo_efa}, and EFA itself is reached through libfabric~\cite{chen_efa}. fabric-lib, a point-to-point RDMA library for LLM systems, builds its API on one-sided \texttt{WriteImm} with an \texttt{ImmCounter} for completion and reaches 400\,Gbps on ConnectX-7 and EFA~\cite{fabriclib}. Those are the same two primitives this pool uses (\texttt{fi\_writedata} and the remote-write counter in E5).
+\item \textbf{The stack choice is measurable.} Smith's MUG'23 comparison concludes that libfabric and UCX ``both provide very similar performance benefits''~\cite{smith_mug23}. EPCC's ARCHER2 study found little difference in OSU micro-benchmarks but large application-level differences in \texttt{MPI\_Alltoallv}~\cite{bareford2022}. Micro-benchmarks alone do not settle it, so this update measures under mixed traffic and at the connector level too.
 \end{enumerate}
 
 \section{Mapping the pool onto libfabric}
@@ -54,7 +56,7 @@ Cold completion & send CQ + completion channel & CQ with \texttt{FI\_WAIT\_UNSPE
 Notification & \texttt{RDMA\_WRITE\_WITH\_IMM} (32-bit imm) & \texttt{fi\_writedata}, \texttt{cq\_data\_size} bytes (4 on verbs, 8 on tcp/shm) \\
 Receive slots & posted recv WRs & posted \texttt{fi\_recv}, required under \texttt{FI\_RX\_CQ\_DATA} \\
 Remote addressing & virtual address + rkey & virtual address or offset (\texttt{FI\_MR\_VIRT\_ADDR}), provider or requested key \\
-Connection setup & QPN/PSN/GID over a TCP side channel & MSG: passive endpoint, connect param selects the class; RDM: \texttt{fi\_getname} + \texttt{fi\_av\_insert} \\
+Connection setup & QPN/PSN/GID over a TCP side channel & MSG: passive endpoint, connect param selects the class; RDM: \texttt{fi\_av\_insert} \\
 Remote-write counting & none & \texttt{FI\_RMA\_EVENT} counter, endpoint or MR bound \\
 Progress & NIC / rxe kernel thread & provider-defined: auto (verbs) or manual (\texttt{ofi\_rxm}, \texttt{shm}) \\
 \bottomrule
@@ -63,34 +65,75 @@ Progress & NIC / rxe kernel thread & provider-defined: auto (verbs) or manual (\
 \label{tab:map}
 \end{table}
 
-The mixed configuration from Update 7, a hot class on an RDM endpoint and a cold class on a connected one, is a run-time option (\texttt{--hot-prov 'verbs;ofi\_rxm' --hot-ep rdm --cold-prov verbs --cold-ep msg}). It needs two domains, so the arena is registered twice. On verbs, \texttt{ofi\_rxm} runs its own eager and rendezvous protocol on top of RC~\cite{fi_rxm}, so this configuration puts a protocol layer back on the hot path. Whether that costs more than the RDM endpoint's connection handling saves is one of the questions the matrix in Section~\ref{sec:exp} answers.
+The mixed configuration from Update 7, hot on an RDM endpoint and cold on a connected one, is a run-time option (\texttt{--hot-prov 'verbs;ofi\_rxm' --hot-ep rdm --cold-prov verbs --cold-ep msg}). It needs two domains, so the arena is registered twice. On verbs, \texttt{ofi\_rxm} runs its own eager and rendezvous protocol on top of RC~\cite{fi_rxm}, which puts a protocol layer back on the hot path. E4 measures whether that costs more than it saves.
 
-\section{One harness, two libraries}
-
-\texttt{sv\_bench} is \texttt{sf\_bench.c} compiled against \texttt{libscuffedverbs}. Payload offsets, warmup, window, timing (\texttt{CLOCK\_MONOTONIC\_RAW}), percentile code and JSON schema are identical. The verbs library checks \texttt{wc.status} on every completion and treats error and flush completions as errors.
-
-That check is a correction carried into this update. The Python pool from Update 4 did not check completion status, so failed or flushed writes counted as fast completions. The 8\,$\mu$s cross-node figure reported earlier included 8\,MB writes that ``completed'' in about 8\,$\mu$s, which 10GbE cannot do. The pool now raises on a bad status, and notebook 01 re-runs that benchmark. Until then, that figure is withdrawn. The scuffedQuant ratio quoted as 4$\times$ against FP16 was against FP32. With bit-packed indices and a 256-bit QJL sketch at head\_dim 64 it is 2$\times$ against FP16.
+\texttt{sv\_bench} is \texttt{sf\_bench.c} compiled against \texttt{libscuffedverbs}. Payload offsets, warmup, window, timing (\texttt{CLOCK\_MONOTONIC\_RAW}), percentile code and JSON schema are identical, and the verbs library checks \texttt{wc.status} on every completion.
 
 \section{Provider behavior found while building}
 
-These come from libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers in a two-core container. They shaped the library and the benchmark. Whether the verbs provider shares any of them is part of the cluster run.
+From libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers in a two-core container. Whether the verbs provider shares any of these is part of the cluster run.
 
 \begin{itemize}
-\item \textbf{\texttt{tcp} needs target-side CQ reads despite \texttt{FI\_PROGRESS\_AUTO}.} With the target not reading the cold endpoint's CQ, a 1\,MB write stream stalled after about three writes (socket buffers full). The benchmark server now runs a yielding progress thread on the cold endpoint for every provider. On verbs it polls an empty CQ.
-\item \textbf{Remote-write counters are not uniform.} \texttt{tcp} advertises \texttt{FI\_RMA\_EVENT} but did not increment an endpoint-bound \texttt{FI\_REMOTE\_WRITE} counter. Registering the MR with \texttt{FI\_RMA\_EVENT} was accepted, but \texttt{fi\_mr\_enable} returned \texttt{-FI\_ENOSYS}. \texttt{ofi\_rxm} does not offer the capability. \texttt{shm} counts through the endpoint. The library binds both ways, and the benchmark probes one write in each direction before trusting a counter.
-\item \textbf{Connection-request info drops optional caps.} On the passive side, the \texttt{fi\_info} delivered with \texttt{FI\_CONNREQ} lacked \texttt{FI\_RMA\_EVENT} even though the listener requested it. The library copies it back before creating the endpoint.
-\item \textbf{\texttt{ofi\_rxm} connects on first use.} The initiator's first write spins on \texttt{-FI\_EAGAIN} until the target makes progress. Posting is now bounded (60\,s), so an idle peer becomes an error instead of a hang.
+\item \textbf{\texttt{tcp} needs target-side CQ reads despite \texttt{FI\_PROGRESS\_AUTO}.} With the target not reading the cold CQ, a 1\,MB write stream stalled after about three writes. The benchmark server now runs a yielding progress thread on the cold endpoint for every provider.
+\item \textbf{Remote-write counters are not uniform.} \texttt{tcp} advertises \texttt{FI\_RMA\_EVENT} but did not increment an endpoint-bound counter, and \texttt{fi\_mr\_enable} on an \texttt{FI\_RMA\_EVENT} MR returned \texttt{-FI\_ENOSYS}. \texttt{ofi\_rxm} does not offer it. \texttt{shm} counts through the endpoint. The library binds both ways and the benchmark probes one write each way before trusting a counter.
+\item \textbf{Connection-request info drops optional caps.} The passive side's \texttt{FI\_CONNREQ} info lacked \texttt{FI\_RMA\_EVENT} although the listener asked for it. The library copies it back.
+\item \textbf{\texttt{ofi\_rxm} connects on first use.} The initiator's first write spins on \texttt{-FI\_EAGAIN} until the target makes progress. Posting is bounded (60\,s), so an idle peer becomes an error instead of a hang.
 \item \textbf{\texttt{shm} does not advertise write-after-write ordering} for RMA, so the sentinel mechanism is skipped there.
-\item \textbf{With one endpoint the target cannot tell classes apart.} The single-endpoint baseline therefore measures exactly the coupling the dual pool removes. It is not a mode that could be made class-aware.
+\item \textbf{With one endpoint the target cannot tell classes apart.} The single-endpoint baseline therefore measures exactly the coupling the dual pool removes.
+\end{itemize}
+
+\section{libfabric under vLLM}
+
+\subsection{FabricBlobChannel}
+The connector needs ``send this named blob, receive named blobs'', not raw writes. \texttt{FabricBlobChannel} provides that over the pool with credit-based slots. Each blob goes with \texttt{fi\_writedata} into a receiver slot on the class the sender picks (cold by default, hot when the WFA tags it), with the slot number and a DATA tag in the immediate. The receiver returns a credit as an 8\,B write on the hot endpoint (CREDIT tag + slot). Credits and control blobs do not share an endpoint with bulk KV, which is the head-of-line property the thesis is about, applied to the connector's own protocol. A \texttt{TcpBlobChannel} with the same interface is the fallback and the baseline.
+
+\subsection{ScuffedRdmaConnector}
+An out-of-tree \texttt{KVConnectorBase\_V1} loaded through \texttt{kv\_connector\_module\_path}. The proxy sends the prompt to prefill with \texttt{max\_tokens=1} and a transfer id. Each attention layer's \texttt{save\_kv\_layer} gathers that request's paged blocks, copies them to host memory, encodes them (raw bfloat16, or scuffedQuant for the cold path) and queues one blob per layer. The WFA tags each blob hot or cold. Decode reports the prompt as externally matched, waits per layer, and scatters into its own paged cache. Layers that never arrive go back to vLLM through \texttt{get\_block\_ids\_with\_load\_errors} and are recomputed. If the libfabric channel cannot open, the connector falls back to TCP and records a \texttt{tcp\_fallback} telemetry event.
+
+Staging through host memory is a deliberate choice for this hardware: Tower 2's Proxmox kernel lacks \texttt{CONFIG\_INFINIBAND\_PEER\_MEM}, SoftRoCE has no GPUDirect path, and neither does a desktop GPU under WSL2. It costs a device-to-host copy per layer. E7 and E8 show how much of TTFT that is.
+
+The connector was written against vLLM \texttt{620e8924} (April 2026). Its tests now also pass against vLLM 0.24.0, the version a fresh install resolves today: method signatures against the 0.24.0 source, import and subclass check against the installed package, and a producer to consumer run through vLLM's own \texttt{KVConnectorBase\_V1} (CPU, no model).
+
+\subsection{NIXL's libfabric backend as the baseline}
+vLLM reads NIXL backends from a \texttt{backends} list in \texttt{kv\_connector\_extra\_config}, default UCX~\cite{vllm_nixl}. Setting it to \texttt{LIBFABRIC} is a one-line change. That makes the stock stack's libfabric path a direct baseline: same model, same proxy, same sweep, different connector. The launcher has it as \texttt{CONNECTOR=nixl-libfabric}.
+
+Reading the plugin at NIXL commit \texttt{d642316} (22 Oct 2026)~\cite{nixl_lf}:
+\begin{itemize}
+\item Provider discovery asks for \texttt{FI\_EP\_RDM} with \texttt{FI\_MSG}\,\textbar\,\texttt{FI\_RMA} and takes \texttt{cxi}, then \texttt{efa}, then \texttt{tcp}, then \texttt{sockets}. \texttt{verbs} is not in that list.
+\item Its README lists libfabric 1.21 or newer and GPUDirect RDMA as requirements, and AWS EFA as the only validated hardware.
+\end{itemize}
+So on Cerberus and Chimera (SoftRoCE) and on the towers (ConnectX-4 without peer memory), NIXL's libfabric backend can at most run over libfabric \texttt{tcp}, and may not start at all. If it does not start, the error is the result and goes in the table as such. The contrast is the point: the libfabric path the serving stack ships is shaped around EFA and Slingshot with GPUDirect, while this pool targets verbs on commodity RoCE with host staging.
+
+\section{The rest of the stack}
+\label{sec:stack}
+
+Built this month, around the transport. All of it has tests and a notebook.
+
+\begin{itemize}
+\item \textbf{Telemetry} (\texttt{middleware/telemetry.py}). One \texttt{SignalVector} per transfer (size, role, phase, QP class, queue depth, completion latency, inter-arrival), per-class counters including QP errors, reconnects and TCP fallbacks, log-bucketed latency histograms, and Prometheus export. The pyverbs pool, the libfabric pool and the connector all report into it, so the classifier, the policy engine and the evaluation read the same numbers.
+\item \textbf{Learned WFA} (\texttt{wfa\_learner.py}, notebook 04). Transition weights fit by gradient descent on \texttt{SignalVector} features, with phase-by-size terms so each phase can have its own size cutoff. On synthetic traces the static threshold classifier routes most decode KV deltas cold: they fall in its 4\,KB to 256\,KB band, where it routes by access count, and most have not been seen often enough to go hot. The learned weights recover the labeling rule. That is a synthetic result and partly by construction, since the oracle defines decode deltas as hot. The real test is training on telemetry dumps from the cluster runs, labeled by measured completion latency.
+\item \textbf{Rule-Node Expression Trees} (\texttt{middleware/policy/}). Boolean trees over signals and context (GPU memory, link utilization), tried in priority order, deciding route (hot, cold, spill) and compression. Classifiers plug in as leaves, so the WFA is one input to the policy, not the policy.
+\item \textbf{PMP storage arm} (\texttt{pmp\_controller.py}, notebook 07). A third bang-bang arm for spill that activates above a GPU-memory watermark, with hysteresis. Below the watermark the two-arm controller from Update 4 is unchanged.
+\item \textbf{NVMe tier} (\texttt{storage\_tier.py}, notebook 07). Spill and retrieve with coalesced \texttt{pwrite}, CRC-checked reads, extent reuse, optional \texttt{O\_DIRECT}, gated by the policy or PMP decision.
+\item \textbf{scuffedQuant wire format.} Indices are now bit-packed and \texttt{CompressedKV.nbytes} reports packed bytes. At head\_dim 64, 3 bits and a 256-bit QJL sketch, that is 2$\times$ against FP16.
+\item \textbf{NCCL net plugin} (\texttt{middleware/nccl\_plugin/}) builds. An NCCL and vLLM run on it is still open.
+\end{itemize}
+
+\section{Corrections}
+
+\begin{itemize}
+\item The 8\,$\mu$s cross-node figure is withdrawn. The Python pool from Update 4 did not check completion status, so failed or flushed writes counted as fast completions, including 8\,MB writes that ``completed'' in about 8\,$\mu$s, which 10GbE cannot do. The pool now raises on a bad status and notebook 01 re-runs it.
+\item The scuffedQuant ratio quoted as 4$\times$ against FP16 was against FP32. It is 2$\times$ against FP16 (above).
+\item Several README rows (SoftRoCE bandwidth, single-QP p50, dual-QP overhead, FA3 speedup) cited sources that do not hold them. They are removed and re-measured where they matter.
 \end{itemize}
 
 \section{Experiments}
 \label{sec:exp}
 
-All runs: Cerberus as client, Chimera as server, SoftRoCE on the 10GbE link, hot and cold threads pinned to separate cores away from the NIC interrupts. Repeat on Tower 1 and Tower 2 over ConnectX-4 for the hardware-RoCE column. Every number in the tables traces to a JSON file under \texttt{benchmarks/results/fabric/} that records the exact server and client command.
+E1 to E6 and E8: Cerberus as client or prefill, Chimera as server or decode, SoftRoCE on 10GbE, hot and cold threads pinned away from the NIC interrupts. Repeat E1 to E5 on Tower 1 and Tower 2 over ConnectX-4. Every number traces to a JSON file that records the exact commands, \texttt{fi\_info --version} and the provider string per class.
 
 \subsection{E1. Hot-path latency by stack}
-\texttt{sig -M cq}, one-way latency (RTT/2), 8\,B to 64\,KB. Notebook 03, section 1.
+\texttt{sig -M cq}, one-way latency (RTT/2), 8\,B to 64\,KB. Notebook 03.
 
 \begin{table}[ht]
 \centering\small
@@ -108,10 +151,10 @@ libfabric verbs;ofi\_rxm RDM & \pend & \pend & \pend & \pend \\
 \end{table}
 
 \subsection{E2. Cold bandwidth}
-\texttt{bw}, window 16, 4\,KB to 16\,MB, with and without a wait object on the cold CQ. Notebook 03, section 2.
+\texttt{bw}, window 16, 4\,KB to 16\,MB, with and without a wait object on the cold CQ. Notebook 03.
 
 \subsection{E3. Head-of-line blocking, single vs dual endpoint}
-\texttt{hol}: hot 64\,B and 4\,KB ping-pong while the cold class streams 256\,KB, 1\,MB and 4\,MB writes, window 8. The thesis claim holds on a stack if dual-endpoint hot p99 under load stays near its unloaded p99 while single-endpoint p99 grows with cold message size. If both grow, the bottleneck sits below the queue pair (for SoftRoCE, the rxe kernel thread), which is itself a result. Notebook 01.
+Hot 64\,B and 4\,KB ping-pong while cold streams 256\,KB, 1\,MB and 4\,MB writes, window 8. The claim holds on a stack if dual-endpoint hot p99 under load stays near its unloaded p99 while single-endpoint p99 grows with cold size. If both grow, the bottleneck is below the queue pair (for SoftRoCE, the rxe kernel thread), which is itself a result. Notebook 01.
 
 \begin{table}[ht]
 \centering\small
@@ -130,29 +173,59 @@ libfabric verbs;ofi\_rxm RDM, dual EP & \pend & \pend & \pend \\
 \end{table}
 
 \subsection{E4. libfabric configuration matrix}
-Under the same mixed load: MSG/MSG, RDM/RDM, hot RDM + cold MSG, hot completions through \texttt{fi\_cntr}, cold CQ with a wait object, and the single-endpoint baseline. Notebook 03, section 3.
+Under the same mixed load: MSG/MSG, RDM/RDM, hot RDM + cold MSG, hot completions through \texttt{fi\_cntr}, cold CQ with a wait object, and the single-endpoint baseline. Notebook 03.
 
 \subsection{E5. Completion signaling}
-CQ data, flag in payload, sentinel write, remote-write counter, and write followed by an 8\,B read (the GPFS flush pattern), each with user-space instructions retired per post, following Papadopoulou et al.'s per-operation accounting~\cite{papadopoulou2017}. Adopt a mechanism only if it moves p99. Notebook 02.
+CQ data, flag in payload, sentinel write, remote-write counter, and write followed by an 8\,B read (the GPFS flush pattern), each with user-space instructions retired per post, following Papadopoulou et al.'s per-operation accounting~\cite{papadopoulou2017}. The counter row is the libfabric form of fabric-lib's \texttt{ImmCounter}. Adopt a mechanism only if it moves p99. Notebook 02.
 
-\subsection{E6. Application level}
-\texttt{FabricBlobChannel} against \texttt{TcpBlobChannel} for 4\,KB to 32\,MB blobs, cross node, with an end-to-end acknowledgment per blob (\texttt{benchmarks/fabric/blob\_bench.py}). This is the transport under the vLLM connector, so it links the micro-benchmarks to the TTFT runs in notebook 06.
+\subsection{E6. Blob channel}
+\texttt{FabricBlobChannel} against \texttt{TcpBlobChannel}, 4\,KB to 32\,MB, cross node, one acknowledgment per blob. This is the transport under the connector, so it links E1 to E5 to E7 and E8.
+
+\subsection{E7. vLLM disaggregated serving on one GPU}
+Notebook 08, on a desktop GPU (WSL2) or one lab node alone. \nolinkurl{scripts/local_gpu/setup_gpu_env.sh} installs libfabric, CUDA torch and vLLM, builds the native libraries and runs the tests. Prefill and decode instances share the card (Granite 3.3-2B, 0.40 of memory each) and talk through \texttt{FabricBlobChannel} on libfabric \texttt{shm}. Checks:
+\begin{itemize}
+\item the connector's data path with KV caches on the GPU, byte-exact over TCP, libfabric \texttt{shm} and libfabric \texttt{tcp};
+\item greedy outputs from the disaggregated pair against a single instance, token for token;
+\item TTFT and ITL for both, plus the same sweep through \texttt{NixlConnector} with the UCX and \texttt{LIBFABRIC} backends when NIXL is installed;
+\item scuffedQuant on real Granite KV (per-layer top-8 overlap, mean and spread) and GPU decompression cost.
+\end{itemize}
+These are single-host numbers. They show the connector works inside real vLLM with real GPU tensors and what disaggregation costs on one card. They are not transport results.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Setup (one GPU) & TTFT p50, 2K prompt (ms) & ITL p50 (ms) & greedy match \\
+\midrule
+single instance & \pend & \pend & reference \\
+ScuffedRdmaConnector, libfabric shm & \pend & \pend & \pend \\
+NixlConnector, UCX & \pend & \pend & \pend \\
+NixlConnector, LIBFABRIC & \pend & \pend & \pend \\
+\bottomrule
+\end{tabular}
+\caption{Single-GPU end-to-end run (notebook 08).}
+\end{table}
+
+\subsection{E8. vLLM disaggregated serving across nodes}
+Notebook 06. Prefill on Cerberus, decode on Chimera, the same TTFT/ITL sweep (128 to 4096 prompt tokens) against five setups: single node, \texttt{ScuffedRdmaConnector} on libfabric verbs, the same connector on TCP, \texttt{NixlConnector} on UCX, and \texttt{NixlConnector} on its \texttt{LIBFABRIC} backend over \texttt{tcp}. This is the experiment the thesis question is asked at.
 
 \section{What the comparison can and cannot show}
 
 \begin{itemize}
-\item On SoftRoCE the verbs provider and native verbs reach the same rxe device, so their difference is libfabric's software path (dispatch, completion translation, and for RDM the \texttt{ofi\_rxm} protocol). It is not a NIC difference. The ConnectX-4 runs separate software cost from a hardware path that is no longer the bottleneck.
-\item rxe processes packets in a kernel thread. If that thread saturates, separate QPs share it, and dual-endpoint gains shrink regardless of library. E3 shows whether that happens.
-\item Provider versions matter. The cluster runs record \texttt{fi\_info --version} and the provider string per class in every JSON.
+\item On SoftRoCE the verbs provider and native verbs reach the same rxe device, so their difference is libfabric's software path. The ConnectX-4 runs separate software cost from a hardware path that is no longer the bottleneck.
+\item rxe processes packets in a kernel thread. If it saturates, separate QPs share it and dual-endpoint gains shrink regardless of library. E3 shows whether that happens.
+\item NIXL's libfabric backend runs here over \texttt{tcp} at best, so E8 compares this pool against NIXL's libfabric path as it behaves on commodity RoCE, not on EFA.
+\item E7 runs on one host through shared memory. It isolates connector and vLLM overhead; it says nothing about the network.
 \end{itemize}
 
 \section{Next steps}
 
 \begin{enumerate}
-\item Run notebooks 00 to 03 in cluster mode on Cerberus and Chimera, then on the two towers. Fill E1 to E5 from the JSON.
-\item Run the vLLM connector over \texttt{FabricBlobChannel} on the verbs provider and compare TTFT and ITL against NIXL (notebook 06).
-\item If hot-RDM plus cold-MSG wins E4, make it the default and route the cold class's NVMe and GPFS spill through the same libfabric domain.
-\item Feed the telemetry signal dumps from these runs into the learned WFA (notebook 04).
+\item Run notebook 08 on the desktop GPU and fill E7.
+\item Run notebooks 00 to 03 on Cerberus and Chimera, then the towers. Fill E1 to E5.
+\item Run notebook 06 across nodes for E8, including the NIXL \texttt{LIBFABRIC} row.
+\item If hot RDM + cold MSG wins E4, make it the default and route NVMe and GPFS spill through the same libfabric domain.
+\item Train the learned WFA on the telemetry dumps from these runs, labeled by measured latency, and compare against the static classifier on real traces.
 \end{enumerate}
 
 \begin{thebibliography}{99}\small
@@ -169,6 +242,21 @@ OpenFabrics Interfaces Working Group, \texttt{fi\_cntr(3)} man page, libfabric. 
 \bibitem{fi_rxm}
 OpenFabrics Interfaces Working Group, \texttt{fi\_rxm(7)} and \texttt{fi\_verbs(7)} man pages, libfabric. \url{https://ofiwg.github.io/libfabric/}
 
+\bibitem{nixl_lf}
+NVIDIA, NIXL libfabric plugin, \nolinkurl{src/plugins/libfabric/README.md} and \nolinkurl{src/utils/libfabric/libfabric_common.cpp}, commit \texttt{d642316}, 2026. \url{https://github.com/ai-dynamo/nixl}
+
+\bibitem{vllm_nixl}
+vLLM, \texttt{NixlConnector} worker, \nolinkurl{vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py}, v0.24.0. \url{https://github.com/vllm-project/vllm}
+
+\bibitem{dynamo_efa}
+NVIDIA Dynamo documentation, ``EFA on AWS.'' \url{https://docs.nvidia.com/dynamo/latest/kubernetes/installation/rdma-setup/efa-on-aws}
+
+\bibitem{chen_efa}
+L.~Chen, ``Harnessing 3200 Gbps Network (1): RDMA and EFA,'' 2024. \url{https://le.qun.ch/en/blog/2024/12/25/libfabric-efa-1-rdma/}
+
+\bibitem{fabriclib}
+N.~Licker, K.~Hu, V.~Zaytsev, and L.~Chen, ``fabric-lib: RDMA Point-to-Point Communication for LLM Systems'' (formerly TransferEngine), arXiv:2510.27656v2, 2026.
+
 \bibitem{smith_mug23}
 B.~Smith, ``Omni-Path and the Open Fabrics Interfaces,'' Cornelis Networks, MVAPICH User Group (MUG) 2023.
 
@@ -177,9 +265,6 @@ M.~Bareford, D.~Henty, W.~Lucas, and A.~Turner, ``OpenFabrics and UCX Performanc
 
 \bibitem{papadopoulou2017}
 N.~Papadopoulou, L.~Oden, and P.~Balaji, ``A Performance Study of UCX over InfiniBand,'' \emph{Proc.\ IEEE/ACM CCGrid}, 2017.
-
-\bibitem{zambre2018}
-R.~Zambre, ``For the RDMA novice: libfabric, libibverbs, InfiniBand, OFED, MOFED?,'' 2018. \url{https://www.rohitzambre.com/blog/2018/2/9/for-the-rdma-novice-libfabric-libibverbs-infiniband-ofed-mofed}
 
 \end{thebibliography}
 \end{document}

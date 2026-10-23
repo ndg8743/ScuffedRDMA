@@ -7,7 +7,11 @@
 #   ./launch.sh single                                                      # no-disagg baseline, one node
 #   ./launch.sh print                                                       # show every command, run nothing
 #
-# CONNECTOR: scuffed | nixl | tcp   (tcp = ScuffedRdmaConnector over its TCP channel)
+# CONNECTOR: scuffed | nixl | nixl-libfabric | tcp
+#   tcp            = ScuffedRdmaConnector over its TCP channel
+#   nixl           = vLLM NixlConnector, UCX backend
+#   nixl-libfabric = vLLM NixlConnector, LIBFABRIC backend (FI_PROVIDER from NIXL_FI_PROVIDER, default tcp)
+#   NIXL_SIDE_PORT_PREFILL / NIXL_SIDE_PORT_DECODE: side-channel ports (set different ones when both run on one host)
 # Every knob is an env var; defaults below. vLLM must be installed on both nodes.
 set -euo pipefail
 
@@ -47,17 +51,28 @@ serve_cmd() {     # $1 = prefill | decode
   case "$CONNECTOR" in
     scuffed|tcp)
       if [[ "$1" == "prefill" ]]; then cfg="$(scuffed_cfg kv_producer)"; else cfg="$(scuffed_cfg kv_consumer)"; fi ;;
-    nixl)
-      cfg='{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
-      local host="$PREFILL_HOST"; [[ "$1" == "decode" ]] && host="$DECODE_HOST"
-      env="VLLM_NIXL_SIDE_CHANNEL_HOST=$host VLLM_NIXL_SIDE_CHANNEL_PORT=5600 UCX_TLS=rc,tcp,cuda_copy " ;;
+    nixl|nixl-libfabric)
+      local host="$PREFILL_HOST" sport="${NIXL_SIDE_PORT_PREFILL:-5600}"
+      [[ "$1" == "decode" ]] && host="$DECODE_HOST" && sport="${NIXL_SIDE_PORT_DECODE:-5600}"
+      if [[ "$CONNECTOR" == "nixl" ]]; then
+        cfg='{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+        env="VLLM_NIXL_SIDE_CHANNEL_HOST=$host VLLM_NIXL_SIDE_CHANNEL_PORT=$sport UCX_TLS=rc,tcp,cuda_copy "
+      else
+        # NIXL's own libfabric backend, the direct baseline for ScuffedRdmaConnector over libfabric.
+        # Its provider discovery (src/utils/libfabric/libfabric_common.cpp, nixl d642316) asks for
+        # FI_EP_RDM + FI_MSG|FI_RMA and takes cxi, then efa, then tcp, then sockets. verbs is not in
+        # that list, so on Cerberus / Chimera and the towers it can only run over tcp. The plugin
+        # README also lists libfabric >= 1.21 and GPUDirect RDMA as requirements.
+        cfg='{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+        env="VLLM_NIXL_SIDE_CHANNEL_HOST=$host VLLM_NIXL_SIDE_CHANNEL_PORT=$sport FI_PROVIDER=${NIXL_FI_PROVIDER:-tcp} "
+      fi ;;
     *) echo "unknown CONNECTOR=$CONNECTOR" >&2; exit 2 ;;
   esac
   echo "${env}vllm serve $MODEL --port $port --gpu-memory-utilization $GPU_UTIL --max-model-len $MAX_MODEL_LEN --no-enable-prefix-caching $EXTRA_ARGS --kv-transfer-config '$cfg'"
 }
 
 proxy_cmd() {
-  local mode="scuffed"; [[ "$CONNECTOR" == "nixl" ]] && mode="nixl"
+  local mode="scuffed"; [[ "$CONNECTOR" == nixl* ]] && mode="nixl"
   echo "python -m middleware.vllm_plugin.proxy --prefill http://$PREFILL_HOST:$PREFILL_PORT --decode http://$DECODE_HOST:$DECODE_PORT --port $PROXY_PORT --mode $mode"
 }
 

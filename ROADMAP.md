@@ -2,14 +2,15 @@
 
 Status of every next step from the proposal through Update 8, checked against the code, results and tests in this repo (22 Oct 2026). Per-update detail and evidence: `Updates/*/README.md`.
 
-**Legend.** built: code and tests in the repo, runs here. cluster: built, needs a run on Cerberus / Chimera (or the towers) to produce thesis numbers. open: not built. deferred / dropped: out of the current plan.
+**Legend.** built: code and tests in the repo, runs here. cluster: built, needs a run on Cerberus / Chimera (or the towers) to produce thesis numbers. gpu: built, needs one machine with an NVIDIA GPU (notebook 08). open: not built. deferred / dropped: out of the current plan.
 
 ## Critical path to the defense
 
 1. **Cluster runs of notebooks 00 to 03** (Cerberus client, Chimera server, SoftRoCE; then Tower 1 and Tower 2 over ConnectX-4). Fills Update 8 E1 to E5 and replaces the withdrawn 8 µs figure. *cluster*
-2. **vLLM disaggregated serving with ScuffedRdmaConnector over FabricBlobChannel, TTFT / ITL against NIXL** (notebook 06). *cluster*
-3. **Update 8 write-up** from the JSON, then the related-work chapter in `Updates/Drafts/draft1.tex` (RDT, eRNIC, SoL, the libfabric / UCX / DOCA taxonomy, and the libfabric results). *open*
-4. **NIXL + Ray RDT view-count sweep with competing hot traffic** (Update 7, step 2). *open*
+2. **Single-GPU end-to-end run** (notebook 08 on the desktop GPU after `scripts/local_gpu/setup_gpu_env.sh`): vLLM prefill + decode with the connector on one card, greedy match, TTFT / ITL. Fills Update 8 E7. *gpu*
+3. **vLLM disaggregated serving with ScuffedRdmaConnector over FabricBlobChannel, TTFT / ITL against NIXL on UCX and on its LIBFABRIC backend** (notebook 06). Update 8 E8. *cluster*
+4. **Update 8 tables** from the JSON (draft text done), then the related-work chapter in `Updates/Drafts/draft1.tex` (RDT, eRNIC, SoL, the libfabric / UCX / DOCA taxonomy, NIXL's libfabric backend, fabric-lib, and the libfabric results). *open*
+5. **NIXL + Ray RDT view-count sweep with competing hot traffic** (Update 7, step 2). *open*
 
 ## Transport
 
@@ -52,8 +53,9 @@ Status of every next step from the proposal through Update 8, checked against th
 
 | Item | From | Status | Where |
 |---|---|---|---|
-| ScuffedRdmaConnector on vLLM V1 KV connector API | U2, U4 step 2 | built, 32 tests incl. signature check vs vLLM 620e8924 | `middleware/vllm_plugin/` |
-| TTFT / ITL vs NIXL and single node | U2 | cluster | notebook 06, `benchmarks/vllm_disagg/` |
+| ScuffedRdmaConnector on vLLM V1 KV connector API | U2, U4 step 2 | built, 32 tests; signatures, import and an end-to-end run through vLLM's own base class pass against vLLM 620e8924 and 0.24.0 | `middleware/vllm_plugin/` |
+| Connector with KV caches on the GPU; vLLM prefill + decode on one card | U8 E7 | gpu (`pytest -m gpu`, notebook 08) | `tests/test_gpu.py`, `scripts/local_gpu/` |
+| TTFT / ITL vs NIXL (UCX and LIBFABRIC backends) and single node | U2, U8 E8 | cluster | notebook 06, `benchmarks/vllm_disagg/launch.sh` (`CONNECTOR=nixl-libfabric`) |
 | 7B / 13B / 70B sweep and ablations | U2 phase 5 | partly cluster (WFA vs static: nb 04; dual vs single: nb 01); model-size sweep open | |
 
 ## Deferred or dropped

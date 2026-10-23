@@ -97,14 +97,14 @@ TurboQuant-style rotate, quantize, and sketch the residual (Zandieh et al.); the
 | PMP controller | `middleware/rdma_tensor_cache/pmp_controller.py` | bang-bang hot/cold; storage-pressure arm returns HOT/COLD/SPILL |
 | Storage tier | `middleware/rdma_tensor_cache/storage_tier.py` | NVMe spill/retrieve, coalescing, O_DIRECT, crc32 |
 | scuffedQuant | `middleware/rdma_tensor_cache/scuffed_quant.py` | bit-packed wire format, size reported from packed bytes |
-| vLLM connector | `middleware/vllm_plugin/` | `ScuffedRdmaConnector` on `KVConnectorBase_V1`, proxy, loopback check |
+| vLLM connector | `middleware/vllm_plugin/` | `ScuffedRdmaConnector` on `KVConnectorBase_V1`, proxy, loopback check; tests pass against vLLM 620e8924 and 0.24.0 |
 | NCCL net plugin | `middleware/nccl_plugin/` | `ncclNetPlugin_v8`, hot/cold QPs split at 4 KB; builds, not yet run under NCCL |
 
 ---
 
 ## Notebooks
 
-Each notebook has a parameter cell. `MODE = "local"` runs smoke sizes on any Linux box with libfabric (tcp / shm providers), results to `/tmp`. `MODE = "cluster"` runs on Cerberus and Chimera, results to `benchmarks/results/`, tagged with hostname and UTC time. Local numbers are smoke tests, not results.
+Each notebook has a parameter cell. `MODE = "local"` runs smoke sizes on any Linux box with libfabric (tcp / shm providers), results to `/tmp`. `MODE = "cluster"` runs on Cerberus and Chimera, results to `benchmarks/results/`, tagged with hostname and UTC time. Notebook 08 has `MODE = "gpu"` for one machine with an NVIDIA GPU. Local numbers are smoke tests, not results.
 
 | Notebook | What it runs |
 |---|---|
@@ -114,8 +114,9 @@ Each notebook has a parameter cell. `MODE = "local"` runs smoke sizes on any Lin
 | [03_libfabric_vs_libibverbs](notebooks/03_libfabric_vs_libibverbs.ipynb) | latency and bandwidth per stack, MSG / RDM / mixed endpoints, counters vs CQ, wait objects, blob channel vs TCP |
 | [04_wfa_and_policy](notebooks/04_wfa_and_policy.ipynb) | learned WFA vs static thresholds, policy tree decisions with explanations |
 | [05_scuffedquant](notebooks/05_scuffedquant.ipynb) | packed sizes, Granite 3.3-2B top-8 overlap per layer |
-| [06_vllm_disagg_ttft](notebooks/06_vllm_disagg_ttft.ipynb) | ScuffedRdmaConnector loopback, TTFT / ITL sweeps against NIXL and single-node baselines |
+| [06_vllm_disagg_ttft](notebooks/06_vllm_disagg_ttft.ipynb) | ScuffedRdmaConnector loopback, TTFT / ITL sweeps against NIXL (UCX and LIBFABRIC backends) and single-node baselines |
 | [07_storage_tier](notebooks/07_storage_tier.ipynb) | NVMe spill coalescing sweep, PMP storage arm |
+| [08_local_gpu](notebooks/08_local_gpu.ipynb) | one GPU: connector with KV caches on the GPU, scuffedQuant on real KV, vLLM prefill + decode on one card through libfabric `shm`, greedy-output match and TTFT / ITL against a single instance and NIXL |
 
 ## Repository
 
@@ -129,10 +130,11 @@ Each notebook has a parameter cell. `MODE = "local"` runs smoke sizes on any Lin
 | `middleware/vllm_plugin/` | ScuffedRdmaConnector, disagg proxy, loopback |
 | `middleware/nccl_plugin/` | NCCL net plugin |
 | `notebooks/` | research notebooks (generated from `notebooks/_build/`) |
+| `scripts/local_gpu/` | `setup_gpu_env.sh`: libfabric, CUDA torch, vLLM, builds and tests on a GPU machine (WSL2 or Linux) |
 | `tests/`, `middleware/tests/` | pytest suite (`pytest -q` from the repo root) |
 | `benchmarks/` | benchmark scripts, `fabric/runner.py`, `vllm_disagg/`, `test_arch/`, results |
 | `deployment/` | Docker/K8s for Chimera/Cerberus, FA3 Blackwell patch |
-| `Updates/` | Updates 1 through 7 and 5-2 (LaTeX + PDF), each with a README of the work and sources; Update 8 draft |
+| `Updates/` | Updates 1 through 8 and 5-2 (LaTeX + PDF), each with a README of the work and sources |
 | `References/` | saved papers and pages; `Bookmarks_10-22/RANKED_SOURCES.md` ranks every source |
 | `vllm/`, `uccl/` | submodules (reference / comparison) |
 | `REFERENCES.md` | annotated bibliography |
@@ -183,7 +185,8 @@ Only numbers with a results file in the repo.
 ## Planned
 
 - [ ] Cluster runs of notebooks 01 to 03 on Cerberus ↔ Chimera (SoftRoCE) and Tower 1 ↔ Tower 2 (ConnectX-4): the libfabric versus libibverbs comparison for Update 8
-- [ ] vLLM disaggregated serving with ScuffedRdmaConnector, TTFT / ITL against NIXL (notebook 06)
+- [ ] Single-GPU end-to-end run on the desktop GPU (notebook 08): vLLM prefill + decode with the connector, greedy match, TTFT / ITL
+- [ ] vLLM disaggregated serving with ScuffedRdmaConnector across nodes, TTFT / ITL against NIXL on UCX and on its LIBFABRIC backend (notebook 06)
 - [ ] NIXL + Ray RDT view-count sweep over SoftRoCE with competing hot traffic (Update 7)
 - [ ] NCCL plugin under NCCL with vLLM tensor parallel; PMP-driven split instead of the fixed 4 KB threshold
 - [ ] Signal dumps from the transports into the learned WFA (notebook 04 cluster cell)
@@ -213,6 +216,9 @@ middleware/libscuffedverbs/sv_bench -r client -H <server ip> -d rxe0 -m hol
 
 # vLLM connector data path without vLLM
 python3 -m middleware.vllm_plugin.loopback --role both --transport fabric --provider tcp
+
+# GPU machine (Ubuntu under WSL2, or Linux): CUDA torch + vLLM + libfabric, builds, tests
+bash scripts/local_gpu/setup_gpu_env.sh            # then notebooks/08_local_gpu.ipynb with MODE = "gpu"
 ```
 
 The notebooks wrap all of this; start with `notebooks/00_environment_check.ipynb` on each node.
@@ -236,7 +242,8 @@ Full bibliography in [REFERENCES.md](REFERENCES.md); ranked source list in [Refe
 - Zandieh et al., *TurboQuant*. [arXiv:2504.19874](https://arxiv.org/abs/2504.19874)
 - Zandieh, Daliri, Han, *QJL: 1-Bit Quantized JL Transform for KV Cache Quantization*. [arXiv:2406.03482](https://arxiv.org/abs/2406.03482)
 - Grun et al., *A Brief Introduction to the OpenFabrics Interfaces*, HotI 2015. libfabric man pages: `fi_endpoint(3)`, `fi_cntr(3)`, `fi_mr(3)`, `fi_verbs(7)`, `fi_rxm(7)`
-- TransferEngine (closest system-level comparison). [arXiv:2510.27656](https://arxiv.org/abs/2510.27656)
+- Licker, Hu, Zaytsev, Chen, *fabric-lib: RDMA Point-to-Point Communication for LLM Systems* (formerly TransferEngine; closest system-level comparison). [arXiv:2510.27656](https://arxiv.org/abs/2510.27656)
+- NIXL libfabric plugin (the stock stack's libfabric path; baseline in notebooks 06 and 08). [ai-dynamo/nixl](https://github.com/ai-dynamo/nixl/tree/main/src/plugins/libfabric)
 - Pontryagin et al., *The Mathematical Theory of Optimal Processes*, 1962.
 
 ## License

@@ -19,7 +19,7 @@ KV compression
 - TurboQuant (Zandieh et al., arXiv:2504.19874): random rotation plus scalar quantization plus a QJL residual sketch. No local PDF; the Pure Storage write-up is at [TurboQuant_KV_Cache_FlashBlade.md](../../References/Bookmarks_Collection/TurboQuant_KV_Cache_FlashBlade.md). QJL (arXiv:2406.03482) and PolarQuant (arXiv:2502.02617) have no local copies.
 
 Production systems and transport
-- TransferEngine (arXiv:2510.27656): one-sided WriteImm across multiple NICs; the closest system-level comparison. [fabric_lib_RDMA_Point_to_Point_...2510.27656.pdf](../../References/Bookmarks_RDMA/Papers_Papers/fabric_lib_RDMA_Point_to_Point_Communication_for_LLM_Systems_2510.27656.pdf)
+- TransferEngine (arXiv:2510.27656, retitled fabric-lib in v2, 2026): one-sided WriteImm across multiple NICs; the closest system-level comparison. [fabric_lib_RDMA_Point_to_Point_...2510.27656.pdf](../../References/Bookmarks_RDMA/Papers_Papers/fabric_lib_RDMA_Point_to_Point_Communication_for_LLM_Systems_2510.27656.pdf)
 - Mistral, Heaps do lie: the UCX mmap GOT-patching leak (~400 MB/min) in production vLLM; the reason the data path bypasses UCX. [Debugging_Memory_Leak_vLLM_Mistral.md](../../References/Bookmarks_Collection/Debugging_Memory_Leak_vLLM_Mistral.md)
 - llm-d v0.5: UCCL's software transport over UCX. [llm-d_v0.5_Performance.md](../../References/Bookmarks_Collection/llm-d_v0.5_Performance.md)
 - NVIDIA Dynamo / NIXL. [GitHub_NIXL_NVIDIA_Inference_Xfer.md](../../References/Bookmarks_Collection/GitHub_NIXL_NVIDIA_Inference_Xfer.md)

@@ -16,6 +16,9 @@ Brings the Chimera (head) and Cerberus (worker) nodes up with vLLM via docker co
 ### `benchmark_all.sh`
 Loops over a comma-separated list of transports, calls `start_cluster.sh` for each, fires `--iterations` completion requests at the vLLM endpoint, and writes per-transport JSON plus a `summary.json`, `comparison.csv`, and optional LaTeX table. Current defaults target Llama-4-Scout-17B.
 
+### `local_gpu/setup_gpu_env.sh`
+One-time setup for the single-GPU run (notebook 08) on Ubuntu under WSL2 or native Linux. Checks the NVIDIA driver (under WSL2 it comes from the Windows driver; no Linux driver is installed), apt installs libfabric, rdma-core and a compiler, creates `~/scuffed` with CUDA torch and vLLM through `uv pip install vllm --torch-backend=auto` (`--backend cu128|cu129|cu130` to force one; RTX 50-series needs 12.8+), verifies `torch.cuda` with a bf16 matmul and the arch list, builds the native libraries, registers a "scuffed (CUDA)" Jupyter kernel, and runs `pytest -m gpu` and the full suite. `--check` only reports, `--dry-run` prints the commands, `--nixl` adds NIXL for the baseline rows.
+
 ## Stale / obsolete
 
 The `.ps1` PowerShell scripts and `mlxup_output.txt` were one-shot Windows-side tooling for a Tower 1 Windows box that is no longer in the loop. The Windows tower was retired when Tower 1 moved to Linux and Mellanox firmware flashing was done off that host. Candidates for deletion:
