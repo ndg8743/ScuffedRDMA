@@ -24,7 +24,9 @@ Each part has a short animation, a one-paragraph summary and its key math. Every
 
 Prefill on server 1 writes K and V for every layer and ships them to decode on server 2. While that bulk streams, other requests need small, urgent messages on the same link (control blobs, credits, token ids). When decode GPU memory passes a watermark, cold KV spills to NVMe instead of being recomputed.
 
-$$\text{KV per token per layer} = 2 \times h_{kv} \times d_{\text{head}} \times \text{bytes} = 2 \times 8 \times 64 \times 2 = 2\ \text{KiB} \quad (\text{Granite 3.3-2B, bf16})$$
+```math
+\text{KV per token per layer} = 2 \times h_{kv} \times d_{\text{head}} \times \text{bytes} = 2 \times 8 \times 64 \times 2 = 2\ \text{KiB} \quad (\text{Granite 3.3-2B, bf16})
+```
 
 A 2,048-token prompt is 2 KiB × 40 layers × 2,048 = 160 MiB, which takes 134 ms to serialize at 10 Gb/s.
 
@@ -34,9 +36,11 @@ A 2,048-token prompt is 2 KiB × 40 layers × 2,048 = 160 MiB, which takes 134 m
 
 With one queue, a small message waits for every byte queued in front of it. The dual pool gives hot traffic its own queue, so nothing bulk sits ahead of it. Below the queues the NIC and wire are still shared, and experiment E3 measures whether SoftRoCE keeps the separation.
 
-$$W_{\text{FIFO}} = \frac{8}{C}\sum_{\text{ahead}} s_i \;=\; 4 \times 0.84\ \text{ms} = 3.36\ \text{ms} \quad\text{(four 1 MiB blocks at 10 Gb/s)}$$
+```math
+W_{\text{FIFO}} = \frac{8}{C}\sum_{\text{ahead}} s_i \;=\; 4 \times 0.84\ \text{ms} = 3.36\ \text{ms} \quad\text{(four 1 MiB blocks at 10 Gb/s)}
+```
 
-On average (M/G/1 queue, Pollaczek–Khinchine) every message waits $W = \frac{\lambda\,\mathbb E[S^2]}{2(1-\rho)}$, which depends on the square of message sizes, so a few huge messages make everyone wait.
+On average (M/G/1 queue, Pollaczek–Khinchine) every message waits $`W = \frac{\lambda\,\mathbb E[S^2]}{2(1-\rho)}`$, which depends on the square of message sizes, so a few huge messages make everyone wait.
 
 ### [3. Where industry stands](docs/explained/03-industry.md)
 
@@ -70,7 +74,9 @@ Each traffic class gets its own libfabric endpoint, completion queue and provide
 
 The sender holds one credit per free receive slot at the peer. It writes a chunk and its notification in a single `fi_writedata` (`imm = DATA | slot`). The receiver copies the chunk out, then returns the credit with an 8-byte write on the hot endpoint. A slot is never overwritten while in use, and the notification can't arrive before its data.
 
-$$\text{throughput} \;\le\; \frac{N \cdot B}{R} \qquad (N \text{ slots of } B \text{ bytes, credit round trip } R;\ \text{Little's law})$$
+```math
+\text{throughput} \;\le\; \frac{N \cdot B}{R} \qquad (N \text{ slots of } B \text{ bytes, credit round trip } R;\ \text{Little's law})
+```
 
 ### [6. How the receiver learns data arrived](docs/explained/06-completion-signaling.md)
 
@@ -92,7 +98,9 @@ A one-sided write lands without the target's CPU, so the target needs a signal. 
 
 The proxy sends the prompt to prefill with `max_tokens=1` and a transfer id. Each attention layer pushes its KV as one blob (bulk cold, the done marker hot). Decode loads layer by layer into its paged cache. A missing layer is recomputed, and a failed libfabric open falls back to TCP with a telemetry event.
 
-$$\text{staging cost per layer} \approx \frac{b}{P_{\text{PCIe}}} \quad\text{vs}\quad \frac{8b}{C}\ \text{on the wire} \qquad (4\ \text{MiB}: \approx 0.2\ \text{ms vs } 3.4\ \text{ms})$$
+```math
+\text{staging cost per layer} \approx \frac{b}{P_{\text{PCIe}}} \quad\text{vs}\quad \frac{8b}{C}\ \text{on the wire} \qquad (4\ \text{MiB}: \approx 0.2\ \text{ms vs } 3.4\ \text{ms})
+```
 
 ### [8. WFA classifier: static thresholds vs learned weights](docs/explained/08-wfa-classifier.md)
 
@@ -100,7 +108,9 @@ $$\text{staging cost per layer} \approx \frac{b}{P_{\text{PCIe}}} \quad\text{vs}
 
 Each tensor has a cold/warm/hot automaton; hot goes to the hot endpoint. The static version uses size thresholds and a phase detector that never sees decode, because decode visits layers in order just like prefill. So most decode KV deltas go cold. The learned version scores the next state from the transfer's features and can hold a different size cutoff per phase.
 
-$$P(s' \mid s, x) = \frac{\exp\big(W_{s,s'}\cdot\varphi(x)\big)}{\sum_{r} \exp\big(W_{s,r}\cdot\varphi(x)\big)}, \qquad \frac{\partial \mathcal L}{\partial W_{s,r}} = \frac1N\sum_{n:\,s_n=s}\big(P_{n,r} - \mathbb 1[r=y_n]\big)\varphi_n + \lambda W_{s,r}$$
+```math
+P(s' \mid s, x) = \frac{\exp\big(W_{s,s'}\cdot\varphi(x)\big)}{\sum_{r} \exp\big(W_{s,r}\cdot\varphi(x)\big)}, \qquad \frac{\partial \mathcal L}{\partial W_{s,r}} = \frac1N\sum_{n:\,s_n=s}\big(P_{n,r} - \mathbb 1[r=y_n]\big)\varphi_n + \lambda W_{s,r}
+```
 
 ### [9. Rule-Node Expression Trees](docs/explained/09-policy-trees.md)
 
@@ -108,7 +118,9 @@ $$P(s' \mid s, x) = \frac{\exp\big(W_{s,s'}\cdot\varphi(x)\big)}{\sum_{r} \exp\b
 
 Rules are boolean trees over signals and context (GPU memory, link load), tried in priority order. Each sets `route` (hot, cold, spill) and/or `compress`, and the first rule to set a field owns it. Example: a 4 MiB prefill block at 93% GPU memory and 85% link load is spilled (rule 90) and compressed (rule 60).
 
-$$\text{route} = \text{action of } \min\{\, i : \text{rule}_i \text{ matches and sets route} \,\}, \qquad \text{cost} = O(\text{nodes in the policy})$$
+```math
+\text{route} = \text{action of } \min\{\, i : \text{rule}_i \text{ matches and sets route} \,\}, \qquad \text{cost} = O(\text{nodes in the policy})
+```
 
 ### [10. PMP bang-bang controller: hot, cold or spill](docs/explained/10-pmp-controller.md)
 
@@ -116,7 +128,9 @@ $$\text{route} = \text{action of } \min\{\, i : \text{rule}_i \text{ matches and
 
 For each transfer the controller picks hot, cold or spill. Its cost is a straight-line function of the choice, so the best choice is always all-or-nothing (bang-bang), never a split. It picks the option with the smallest cost, where each queue's cost is approximated by its weighted depth. One caveat: the derivation shows the implemented switching rule's sign and rate scaling don't match the model it came from. That is written up and not yet fixed.
 
-$$\sigma_H = \alpha\, q_H\, C\mu_H, \qquad \sigma_C = \beta\, q_C\, C\mu_C, \qquad \sigma_S = \delta\, q_S\, \mu_S - \gamma\, \frac{\max(0,\,u - u_0)}{1-u_0}, \qquad \text{choose } \arg\min_i \sigma_i$$
+```math
+\sigma_H = \alpha\, q_H\, C\mu_H, \qquad \sigma_C = \beta\, q_C\, C\mu_C, \qquad \sigma_S = \delta\, q_S\, \mu_S - \gamma\, \frac{\max(0,\,u - u_0)}{1-u_0}, \qquad \text{choose } \arg\min_i \sigma_i
+```
 
 ### [11. scuffedQuant: rotate, quantize, sketch the residual](docs/explained/11-scuffedquant.md)
 
@@ -124,7 +138,9 @@ $$\sigma_H = \alpha\, q_H\, C\mu_H, \qquad \sigma_C = \beta\, q_C\, C\mu_C, \qqu
 
 Each KV vector is rotated with a random-sign Hadamard transform so all coordinates look alike, quantized to 3 bits with a Lloyd–Max codebook, and its residual is sketched with 256 sign bits. Attention needs inner products, and the sketch corrects them without bias. That is 64 bytes per vector at head_dim 64, 2× smaller than FP16, with 91.1% ± 3.3% top-8 attention overlap on Granite 3.3-2B.
 
-$$\langle q, k \rangle \approx \langle q, \hat k \rangle + \lVert r \rVert\, \frac{\sqrt{\pi/2}}{m} \sum_{j=1}^{m} \mathrm{sign}(S r)_j\, (S q)_j, \qquad 4 + 4 + \tfrac{64 \cdot 3}{8} + \tfrac{256}{8} = 64\ \text{B}$$
+```math
+\langle q, k \rangle \approx \langle q, \hat k \rangle + \lVert r \rVert\, \frac{\sqrt{\pi/2}}{m} \sum_{j=1}^{m} \mathrm{sign}(S r)_j\, (S q)_j, \qquad 4 + 4 + \tfrac{64 \cdot 3}{8} + \tfrac{256}{8} = 64\ \text{B}
+```
 
 ### [12. NVMe storage tier](docs/explained/12-storage-tier.md)
 
@@ -132,7 +148,9 @@ $$\langle q, k \rangle \approx \langle q, \hat k \rangle + \lVert r \rVert\, \fr
 
 Spilled blocks are batched into one `pwrite` + `fdatasync` in 4 KiB-aligned extents. Freed space is merged and reused first-fit, and reads are checked with CRC32. On server 2's NVMe, batching raised writes from 662 to 827 MB/s, matching a fixed-plus-per-block cost model whose limit is about 839 MB/s. Reads peaked at 20 blocks.
 
-$$\text{throughput}(n) = \frac{nB}{a + nb} \;\to\; \frac{B}{b} \approx 839\ \text{MB/s} \qquad (a \approx 1.6\ \text{ms},\ b \approx 1.91\ \text{ms per 1.5 MiB block})$$
+```math
+\text{throughput}(n) = \frac{nB}{a + nb} \;\to\; \frac{B}{b} \approx 839\ \text{MB/s} \qquad (a \approx 1.6\ \text{ms},\ b \approx 1.91\ \text{ms per 1.5 MiB block})
+```
 
 ## Components
 

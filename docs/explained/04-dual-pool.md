@@ -26,7 +26,7 @@ The pool opens two endpoints, hot and cold, each with its own transmit queue and
 
 **Claim.** With a shared CQ, the time to notice a hot completion grows with the number of cold completions ahead of it; with separate CQs it does not.
 
-**Argument.** A CQ is read in order. If $k$ cold completions are queued before a hot one, the poller must read and dispatch $k$ entries before it sees the hot one, costing $k \cdot c_{\text{poll}}$ extra (with $c_{\text{poll}}$ the per-entry read-and-dispatch cost). With a dedicated hot CQ, the poller's next read is the hot completion, independent of $k$. The cold CQ can be drained by a different thread at its own pace. $\square$
+**Argument.** A CQ is read in order. If $`k`$ cold completions are queued before a hot one, the poller must read and dispatch $`k`$ entries before it sees the hot one, costing $`k \cdot c_{\text{poll}}`$ extra (with $`c_{\text{poll}}`$ the per-entry read-and-dispatch cost). With a dedicated hot CQ, the poller's next read is the hot completion, independent of $`k`$. The cold CQ can be drained by a different thread at its own pace. $`\square`$
 
 ## 4. Different completion styles for different goals
 
@@ -43,7 +43,7 @@ The pool opens two endpoints, hot and cold, each with its own transmit queue and
 
 **Why selective completion.** With `FI_SELECTIVE_COMPLETION`, only requests posted with `FI_COMPLETION` generate a completion entry. For a burst of hot writes where only the last one matters, that saves one CQ entry per write.
 
-**Why a deeper cold queue.** Bandwidth on a link with round-trip time $R$ requires roughly $C \cdot R$ bytes in flight (the bandwidth-delay product). Bulk writes need many outstanding requests to keep the link busy; hot messages are rarely more than a few at a time.
+**Why a deeper cold queue.** Bandwidth on a link with round-trip time $`R`$ requires roughly $`C \cdot R`$ bytes in flight (the bandwidth-delay product). Bulk writes need many outstanding requests to keep the link busy; hot messages are rarely more than a few at a time.
 
 ## 5. Shared resources
 
@@ -88,5 +88,9 @@ From libfabric 1.17's `tcp`, `tcp;ofi_rxm` and `shm` providers (Update 8, Sectio
 
 ## References
 
-- P. Grun et al., "A Brief Introduction to the OpenFabrics Interfaces," HotI 2015.
-- libfabric man pages: `fi_endpoint(3)`, `fi_cq(3)`, `fi_cntr(3)`, `fi_mr(3)`, `fi_rxm(7)`, `fi_verbs(7)`: https://ofiwg.github.io/libfabric/
+1. P. Grun, S. Hefty, S. Sur, D. Goodell, R. D. Russell, H. Pritchard, J. M. Squyres. "A Brief Introduction to the OpenFabrics Interfaces: A New Network API for Maximizing High Performance Application Efficiency." *IEEE 23rd Symposium on High-Performance Interconnects (HOTI)*, 2015. [paper (PDF)](https://openfabrics.org/downloads/ofiwg/Industry_presentations/2015_HotI23/paper.pdf). *Used for: endpoint types, counters, selective completion (§1, §4).*
+2. OpenFabrics Interfaces Working Group. libfabric man pages `fi_endpoint(3)`, `fi_cq(3)`, `fi_cntr(3)`, `fi_mr(3)`, `fi_rxm(7)`, `fi_verbs(7)`. [ofiwg.github.io/libfabric](https://ofiwg.github.io/libfabric/). *Used for: wait objects, `FI_SELECTIVE_COMPLETION`, `FI_INJECT`, the rxm protocol (§4, §5).*
+3. InfiniBand Trade Association. *InfiniBand Architecture Specification, Volume 1.* [infinibandta.org](https://www.infinibandta.org/ibta-specification/). *Used for: RC queue pairs, completion queues and completion channels (§6 mapping).*
+4. R. Zambre. "For the RDMA novice: libfabric, libibverbs, InfiniBand, OFED, MOFED?" 2018. [rohitzambre.com](https://www.rohitzambre.com/blog/2018/2/9/for-the-rdma-novice-libfabric-libibverbs-infiniband-ofed-mofed). *Background on how the two libraries relate.*
+5. N. Papadopoulou, L. Oden, P. Balaji. "A Performance Study of UCX over InfiniBand." *Proc. 17th IEEE/ACM Int. Symposium on Cluster, Cloud and Grid Computing (CCGrid)*, pp. 345–354, 2017. *Used for: measuring software-path cost per operation, the reason one harness is shared (§6).*
+6. Update 8, Section 4 (`Updates/Update8-Libfabric/update8.pdf`). *Used for: the provider behaviors in §7.*

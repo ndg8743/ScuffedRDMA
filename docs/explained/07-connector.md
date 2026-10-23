@@ -30,15 +30,15 @@ Code: `middleware/vllm_plugin/` (`connector.py`, `core.py`, `kv_layout.py`, `kv_
 
 vLLM appends a random suffix to request ids internally, so the prefill and decode engines name the same request differently. The proxy generates one `xfer_id` and passes it to both through `kv_transfer_params`. (NIXL does the same thing.)
 
-**Collision bound.** `xfer_id` is a random UUID with 122 random bits. For $n$ ids, the probability that any two collide is at most $n^2 / 2^{123}$. Even for $n = 10^9$ requests that is about $10^{-19}$.
+**Collision bound.** `xfer_id` is a random UUID with 122 random bits. For $`n`$ ids, the probability that any two collide is at most $`n^2 / 2^{123}`$. Even for $`n = 10^9`$ requests that is about $`10^{-19}`$.
 
 ## 3. A lost layer degrades to recomputation, not a wrong answer
 
 **Claim.** If a layer's KV never arrives, the output is still correct (only slower).
 
-**Argument.** `start_load_kv` waits for each layer with a deadline. If the deadline passes, the blocks that layer would have filled are reported through `get_block_ids_with_load_errors`. vLLM treats those blocks as not computed and recomputes them, as it would without the connector. Blocks that did arrive came over a reliable transport and passed the blob header check (magic number, lengths), so they hold the producer's bytes. In both branches, every block decode attends over was either produced by prefill's forward pass or recomputed by decode's own, so the attention inputs match a non-disaggregated run. $\square$
+**Argument.** `start_load_kv` waits for each layer with a deadline. If the deadline passes, the blocks that layer would have filled are reported through `get_block_ids_with_load_errors`. vLLM treats those blocks as not computed and recomputes them, as it would without the connector. Blocks that did arrive came over a reliable transport and passed the blob header check (magic number, lengths), so they hold the producer's bytes. In both branches, every block decode attends over was either produced by prefill's forward pass or recomputed by decode's own, so the attention inputs match a non-disaggregated run. $`\square`$
 
-**Liveness.** Each layer wait is bounded by `load_timeout_s`, so a request waits at most $L \times$ `load_timeout_s` in the worst case (40 layers × 30 s by default; a real deployment should lower it) and then proceeds.
+**Liveness.** Each layer wait is bounded by `load_timeout_s`, so a request waits at most $`L \times`$ `load_timeout_s` in the worst case (40 layers × 30 s by default; a real deployment should lower it) and then proceeds.
 
 ## 4. Fallback when libfabric will not open
 
@@ -48,7 +48,7 @@ If the libfabric channel fails to open, the connector creates a TCP channel with
 
 None of the lab servers has a GPUDirect RDMA path (SoftRoCE has none; server 4's kernel lacks peer-memory support). So each layer is copied from GPU to host memory before it is sent, and from host to GPU after it arrives.
 
-**Cost model.** For a layer of $b$ bytes over a PCIe link with effective bandwidth $P$, each copy takes $b/P$. Example: a 4 MiB layer (2K tokens of Granite 3.3-2B) over a PCIe 4.0 x16 link at an effective ~20 GB/s takes about 0.2 ms, against 3.4 ms to put the same 4 MiB on a 10 Gb/s wire. The copy is roughly 6% of the wire time per layer at these rates. That is an estimate with an assumed PCIe rate; notebook 08 times the real copies.
+**Cost model.** For a layer of $`b`$ bytes over a PCIe link with effective bandwidth $`P`$, each copy takes $`b/P`$. Example: a 4 MiB layer (2K tokens of Granite 3.3-2B) over a PCIe 4.0 x16 link at an effective ~20 GB/s takes about 0.2 ms, against 3.4 ms to put the same 4 MiB on a 10 Gb/s wire. The copy is roughly 6% of the wire time per layer at these rates. That is an estimate with an assumed PCIe rate; notebook 08 times the real copies.
 
 **Why push is asynchronous.** `save_kv_layer` returns once the blocks are copied to host memory, and a background thread sends them. Prefill's GPU blocks can be freed as soon as the request finishes; the network time does not hold GPU memory. `sync_send: true` makes `wait_for_save` also wait for the bytes to leave, if needed.
 
@@ -69,5 +69,9 @@ The same request flow runs with vLLM's `NixlConnector` on its UCX backend (`CONN
 
 ## References
 
-- vLLM disaggregated prefill docs and `KVConnectorBase_V1` (`vllm/distributed/kv_transfer/kv_connector/v1/base.py`).
-- NIXL connector: `vllm/distributed/kv_transfer/kv_connector/v1/nixl/`.
+1. vLLM. `KVConnectorBase_V1`, [`vllm/distributed/kv_transfer/kv_connector/v1/base.py`](https://github.com/vllm-project/vllm/blob/v0.24.0/vllm/distributed/kv_transfer/kv_connector/v1/base.py) (v0.24.0). *Used for: the hooks in §1 and the load-error path in §3.*
+2. vLLM documentation. "Disaggregated Prefilling." [docs.vllm.ai](https://docs.vllm.ai/en/latest/features/disagg_prefill/). *Used for: the proxy pattern (§1).*
+3. vLLM. `NixlConnector`, [`vllm/distributed/kv_transfer/kv_connector/v1/nixl/`](https://github.com/vllm-project/vllm/tree/v0.24.0/vllm/distributed/kv_transfer/kv_connector/v1/nixl) (v0.24.0). *Used for: keying transfers through `kv_transfer_params` (§2) and the baselines (§6).*
+4. K. Davis, B. Peabody, P. Leach. "Universally Unique IDentifiers (UUIDs)." [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562), 2024. *Used for: 122 random bits in a version-4 UUID (§2).*
+5. NVIDIA. NIXL. [github.com/ai-dynamo/nixl](https://github.com/ai-dynamo/nixl). *Used for: the baseline transport (§6).*
+6. `middleware/vllm_plugin/` and `tests/test_vllm_connector.py` (dropped-layer test asserting load errors). *The implementation and tests behind §3.*

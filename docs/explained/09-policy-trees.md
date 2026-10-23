@@ -26,9 +26,9 @@ Code: `middleware/policy/tree.py` (`PolicyEngine`), default policy `middleware/p
 | `{"and": [n1, ..., nk]}` | true iff every child is true |
 | `{"or": [n1, ..., nk]}` | true iff some child is true |
 | `{"not": n}` | negation |
-| `{"threshold": {"field": f, "op": o, "value": v}}` | compares field $f$ with $v$ using $<, \le, >, \ge, =, \ne$ |
+| `{"threshold": {"field": f, "op": o, "value": v}}` | compares field $`f`$ with $`v`$ using $`<, \le, >, \ge, =, \ne`$ |
 | `{"in": {"field": f, "values": [...]}}` | membership |
-| `{"classifier": {"name": c, "equals": s}}` | calls registered classifier $c$ (for example the WFA) and compares its state |
+| `{"classifier": {"name": c, "equals": s}}` | calls registered classifier $`c`$ (for example the WFA) and compares its state |
 | `{"true": true}`, `{"false": true}` | constants |
 
 A leaf whose field is missing is false, and the miss is recorded (strict mode raises instead).
@@ -48,13 +48,13 @@ A leaf whose field is missing is false, and the miss is recorded (strict mode ra
 
 **Claim.** The value of every condition is the same as if all children were evaluated.
 
-**Proof.** For `and`: if child $j$ is false the conjunction is false regardless of the rest, and if no child is false all children were evaluated. Same for `or` with true. This is only safe if evaluating a child has no effect on later evaluations. Comparison leaves are pure functions of the inputs. Classifier leaves could have side effects (a WFA updates its state when called), so the engine calls each named classifier **at most once per decision** and reuses the answer for every other leaf that names it. With that memoization every leaf is a pure function of (inputs, memo), so skipping a leaf changes nothing that another leaf reads. $\square$
+**Proof.** For `and`: if child $`j`$ is false the conjunction is false regardless of the rest, and if no child is false all children were evaluated. Same for `or` with true. This is only safe if evaluating a child has no effect on later evaluations. Comparison leaves are pure functions of the inputs. Classifier leaves could have side effects (a WFA updates its state when called), so the engine calls each named classifier **at most once per decision** and reuses the answer for every other leaf that names it. With that memoization every leaf is a pure function of (inputs, memo), so skipping a leaf changes nothing that another leaf reads. $`\square`$
 
 ## 3. Proposition 2: each field belongs to the highest-priority rule that sets it
 
 **Claim.** After the procedure, `route` equals the action of the highest-priority rule (earliest in sorted order) whose condition is true and whose action contains `route`, or the default if there is none, stopping early at a `final` rule. The same holds for `compress`.
 
-**Proof (induction over the sorted rule list).** Invariant after processing the first $i$ rules: each field that is set holds the value from the earliest matching rule among those $i$ that sets it, and each unset field has no such rule among them. Initially nothing is set and nothing has been processed. Processing rule $i+1$: if it does not match, nothing changes. If it matches, it sets only fields that are still unset, and by the invariant no earlier matching rule sets those, so rule $i+1$ is the earliest for them. Fields already set are untouched. A `final` rule ends the loop with the invariant intact, and the default fills only fields no processed rule set. $\square$
+**Proof (induction over the sorted rule list).** Invariant after processing the first $`i`$ rules: each field that is set holds the value from the earliest matching rule among those $`i`$ that sets it, and each unset field has no such rule among them. Initially nothing is set and nothing has been processed. Processing rule $`i+1`$: if it does not match, nothing changes. If it matches, it sets only fields that are still unset, and by the invariant no earlier matching rule sets those, so rule $`i+1`$ is the earliest for them. Fields already set are untouched. A `final` rule ends the loop with the invariant intact, and the default fills only fields no processed rule set. $`\square`$
 
 **Consequence: later rules can read earlier decisions.** Rule 60 in the default policy tests `route ∈ {cold, spill}`. Because rules run in priority order and `route` is resolved as "the route decided so far", rule 60 sees whatever rules 100–70 chose. That is intended: "compress bulk when the link is busy" should apply to whatever is going cold or to disk.
 
@@ -76,9 +76,9 @@ Decision: spill to NVMe, compressed. The trace names rule 90 for `route` and rul
 
 ## 5. Proposition 3: cost is linear
 
-**Claim.** One decision costs $O(|T| + c)$, where $|T|$ is the total number of nodes in all rules and $c$ the number of distinct classifiers referenced.
+**Claim.** One decision costs $`O(|T| + c)`$, where $`|T|`$ is the total number of nodes in all rules and $`c`$ the number of distinct classifiers referenced.
 
-**Proof.** Each node is visited at most once per decision (each rule is evaluated at most once, and short-circuiting only skips nodes). A leaf costs $O(1)$ plus, for a classifier leaf, one classifier call at most once per name by memoization. Sorting rules happens once when the policy is loaded, not per decision. $\square$
+**Proof.** Each node is visited at most once per decision (each rule is evaluated at most once, and short-circuiting only skips nodes). A leaf costs $`O(1)`$ plus, for a classifier leaf, one classifier call at most once per name by memoization. Sorting rules happens once when the policy is loaded, not per decision. $`\square`$
 
 ## 6. Why trees instead of the WFA alone
 
@@ -95,5 +95,6 @@ The WFA predicts one thing (how hot a tensor is) from history. The policy combin
 
 ## References
 
-- vLLM Semantic Router (rule composition model).
-- `middleware/policy/tree.py` docstring (node types, resolution order).
+1. vLLM Semantic Router team. "vLLM Semantic Router: Signal Driven Decision." [arXiv:2603.04444](https://arxiv.org/abs/2603.04444), 2026; code at [github.com/vllm-project/semantic-router](https://github.com/vllm-project/semantic-router). *Used for: the rule-composition model the policy engine follows (§6).*
+2. A. V. Aho, M. S. Lam, R. Sethi, J. D. Ullman. *Compilers: Principles, Techniques, and Tools*, 2nd ed. Addison-Wesley, 2006, §6.6 (short-circuit evaluation of boolean expressions). *Background for Proposition 1.*
+3. `middleware/policy/tree.py` (node types, field resolution, per-decision classifier memoization), `middleware/policy/default_policy.json`, `tests/test_policy_tree.py`.

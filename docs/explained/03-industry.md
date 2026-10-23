@@ -71,8 +71,12 @@ The cell none of the above covers: **mixed hot/cold traffic, on commodity 10 GbE
 
 ## References
 
-- Update 7 (`Updates/Update7-TransportLandscape/`) for RDT, eRNIC, the near-speed-of-light collectives paper, and the GPFS defect record.
-- NIXL: https://github.com/ai-dynamo/nixl
-- vLLM: https://github.com/vllm-project/vllm
-- Mistral, "Debugging a memory leak in vLLM": https://mistral.ai/news/debugging-memory-leak-in-vllm
-- IBM APAR IV61625: https://www.ibm.com/support/pages/apar/IV61625
+1. Update 7 (`Updates/Update7-TransportLandscape/update7.pdf`). *Used for: problems 1 and 4 (the reading of RDT, NIXL, Mooncake, LMCache and the GPFS defect record).*
+2. Anyscale. "RDT: Ray Direct Transport, fast, easy weight syncing for RL," 2026. [anyscale.com/blog](https://www.anyscale.com/blog/rdt-ray-direct-transport-fast-easy-weight-syncing-for-rl-reinforcement-learning). *Problem 1.*
+3. R. Qin et al. "Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving." [arXiv:2407.00079](https://arxiv.org/abs/2407.00079), 2024. *Problem 1.*
+4. LMCache. "LMCache + vLLM v1 + NIXL." [blog.lmcache.ai](https://blog.lmcache.ai/2025-04-11-lmcache-vllmv1-nixl/), 2025. *Problem 1.*
+5. NVIDIA. NIXL libfabric plugin: `src/plugins/libfabric/README.md` and `src/utils/libfabric/libfabric_common.cpp` (`getAvailableNetworkDevices`), commit `d642316`, 22 Oct 2026. [github.com/ai-dynamo/nixl](https://github.com/ai-dynamo/nixl/tree/d642316/src/plugins/libfabric). *Problem 2.*
+6. vLLM v0.24.0. `NixlConnector` worker, [`vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py`](https://github.com/vllm-project/vllm/blob/v0.24.0/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py). *Problem 2: backend selection, default `["UCX"]`.*
+7. Mistral AI. "Debugging a memory leak in vLLM." [mistral.ai/news](https://mistral.ai/news/debugging-memory-leak-in-vllm). *Problem 3.*
+8. IBM. "APAR IV61625: RDMA reconnection problem." [ibm.com/support](https://www.ibm.com/support/pages/apar/IV61625). *Problem 4.*
+9. Update 4 (`Updates/Update4-UCX/`) and `middleware/rdma_tensor_cache/dual_qp_pool.py` (`check_completion`). *Problem 5.*

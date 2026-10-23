@@ -81,8 +81,9 @@ For each mechanism, p50 and p99 one-way latency for 8 B to 64 KiB, and user-spac
 
 ## References
 
-- InfiniBand Trade Association, *InfiniBand Architecture Specification Vol. 1* (RC ordering and write-with-immediate semantics).
-- libfabric `fi_endpoint(3)` (`FI_ORDER_WAW`), `fi_cntr(3)`, `fi_rma(3)`.
-- N. Papadopoulou, L. Oden, P. Balaji, "A Performance Study of UCX over InfiniBand," CCGrid 2017.
-- IBM Spectrum Scale alert for APARs IJ44524/IJ44525 (RDMA write flush).
-- N. Licker et al., "fabric-lib: RDMA Point-to-Point Communication for LLM Systems," arXiv:2510.27656.
+1. InfiniBand Trade Association. *InfiniBand Architecture Specification, Volume 1* (RC ordering rules; write-with-immediate completion semantics). [infinibandta.org](https://www.infinibandta.org/ibta-specification/). *Used for: Facts 1–3 and mechanisms 1, 3 and 5.*
+2. OpenFabrics Interfaces Working Group. `fi_endpoint(3)` (`msg_order`, `FI_ORDER_WAW`), `fi_cntr(3)`, `fi_rma(3)`. [ofiwg.github.io/libfabric](https://ofiwg.github.io/libfabric/). *Used for: mechanisms 3 and 4.*
+3. S. Shen et al. "Every μs Matters: Achieving Near Speed-of-Light Latency in GPU Collectives." [arXiv:2607.16100](https://arxiv.org/abs/2607.16100), 2026. *Used for: flag-in-data (LL-style) and sentinel signaling (mechanisms 2 and 3).*
+4. N. Licker, K. Hu, V. Zaytsev, L. Chen. "fabric-lib: RDMA Point-to-Point Communication for LLM Systems" (formerly TransferEngine). [arXiv:2510.27656](https://arxiv.org/abs/2510.27656), v2, 2026. *Used for: `ImmCounter`, the counterpart of mechanism 4.*
+5. IBM. "IBM Spectrum Scale Alert: Potential undetected data integrity issues for all clusters using RDMA (APARs IJ44524, IJ44525)." [ibm.com/support](https://www.ibm.com/support/pages/ibm-spectrum-scale-alert-potential-undetected-data-integrity-issues-all-clusters-using-rdma-0). *Used for: mechanism 5 (read-after-write as a flush).*
+6. N. Papadopoulou, L. Oden, P. Balaji. "A Performance Study of UCX over InfiniBand." *Proc. IEEE/ACM CCGrid*, pp. 345–354, 2017. *Used for: instructions-per-operation as the cost metric in E5.*
