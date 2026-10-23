@@ -1,27 +1,43 @@
 """
-scuffedQuant: KV cache compression via PolarQuant + QJL.
+scuffedQuant: two-stage KV cache compression.
 
-Two stages, each doing one thing:
+Stage 1 (rotate + scalar quantize): normalize each vector, apply a
+randomized Walsh-Hadamard rotation (random +-1 diagonal, then the fast
+WHT) so every coordinate follows the same near-Gaussian marginal, then
+quantize each coordinate with a Lloyd-Max codebook precomputed for that
+marginal. `bits` bits per coordinate, no calibration data. Plain
+Cartesian coordinates; there is no polar transform in this code.
 
-  Stage 1 (PolarQuant): Rotate the vector so all coordinates have the
-  same distribution, then quantize each coordinate with a precomputed
-  codebook. No calibration data needed.
+Stage 2 (QJL residual sketch): store sign(S r / ||r||) for the
+quantization residual r, with S a random +-1 matrix of shape
+(qjl_dim, dim), i.e. qjl_dim sign bits per vector (benchmarks use
+qjl_dim = 256), plus ||r||. attention_scores() adds the QJL inner
+product estimate to remove the bias of the stage-1 reconstruction.
 
-  Stage 2 (QJL): Store 1-bit signs of a random projection of the
-  quantization residual. Used to correct bias in inner products.
+Individual vectors are lossy; inner products (attention scores) are
+what the sketch keeps accurate.
 
-Result: individual vectors are lossy, but attention scores (inner
-products) are accurate. That's all attention needs.
+Wire format: CompressedKV.pack() bit-packs indices at `bits` bits per
+coordinate and signs at 1 bit each (np.packbits); CompressedKV.nbytes
+and packed_bytes() equal len(pack()).
 
-Based on: Zandieh et al., "TurboQuant", arXiv:2504.19874, 2025.
+References:
+  Zandieh et al., "TurboQuant: Online Vector Quantization with
+  Near-optimal Distortion Rate", arXiv:2504.19874 (rotate, scalar
+  quantize, QJL on the residual).
+  Zandieh, Daliri, Han, "QJL: 1-Bit Quantized JL Transform for KV
+  Cache Quantization with Zero Overhead", arXiv:2406.03482 (the sign
+  sketch and its unbiased inner-product estimator).
 """
+
+import struct
 
 import numpy as np
 from dataclasses import dataclass
 from typing import Tuple
 
 
-# --- Stage 1: PolarQuant ---
+# --- Stage 1: randomized Hadamard rotation + Lloyd-Max scalar quantizer ---
 
 def _walsh_hadamard(x: np.ndarray) -> np.ndarray:
     """
@@ -161,12 +177,33 @@ def _qjl_correct(queries: np.ndarray, signs: np.ndarray,
 
 # --- Main class ---
 
+_PACK_MAGIC = b"SCQ1"
+_PACK_VERSION = 1
+# magic, version, bits, qjl_dim, n_vectors, dim, d_pad
+_PACK_HDR = struct.Struct("<4sBBHIII")
+
+
+def _pack_uint(values: np.ndarray, bits: int) -> bytes:
+    """Pack small unsigned ints (< 2**bits) at `bits` bits each, LSB first."""
+    v = np.ascontiguousarray(values, dtype=np.uint8).reshape(-1)
+    shifts = np.arange(bits, dtype=np.uint8)
+    planes = ((v[:, None] >> shifts) & 1).astype(np.uint8)
+    return np.packbits(planes.reshape(-1), bitorder="little").tobytes()
+
+
+def _unpack_uint(buf: bytes, count: int, bits: int) -> np.ndarray:
+    raw = np.frombuffer(buf, dtype=np.uint8)
+    planes = np.unpackbits(raw, count=count * bits, bitorder="little").reshape(count, bits)
+    weights = (1 << np.arange(bits, dtype=np.uint16)).astype(np.uint16)
+    return (planes.astype(np.uint16) * weights).sum(axis=1).astype(np.uint8)
+
+
 @dataclass
 class CompressedKV:
-    """Compressed KV cache block."""
-    indices: np.ndarray       # (n, d_padded) uint8 codebook indices
+    """Compressed KV cache block. Arrays are unpacked in memory; pack() for the wire."""
+    indices: np.ndarray       # (n, d_padded) uint8 codebook indices, values < 2**bits
     norms: np.ndarray         # (n,) float32 original vector norms
-    qjl_signs: np.ndarray     # (n, m) uint8 sign bits
+    qjl_signs: np.ndarray     # (n, m) uint8 sign bits (0/1)
     residual_norms: np.ndarray  # (n,) float32 residual norms
     n_vectors: int
     dim: int
@@ -174,14 +211,70 @@ class CompressedKV:
     qjl_dim: int
 
     @property
+    def d_pad(self) -> int:
+        return int(self.indices.shape[1]) if self.indices.ndim == 2 else self.dim
+
+    def packed_bytes(self) -> int:
+        """Exact size of pack(): header + norms + residual norms + bit-packed indices + bit-packed signs."""
+        n = self.n_vectors
+        return (_PACK_HDR.size + 4 * n + 4 * n
+                + (n * self.d_pad * self.bits + 7) // 8
+                + (n * self.qjl_dim + 7) // 8)
+
+    @property
     def nbytes(self) -> int:
+        """Wire size in bytes (bit-packed). Equals len(self.pack())."""
+        return self.packed_bytes()
+
+    @property
+    def unpacked_nbytes(self) -> int:
+        """In-memory size of the unpacked arrays (one byte per index and per sign)."""
         return (self.indices.nbytes + self.norms.nbytes +
                 self.qjl_signs.nbytes + self.residual_norms.nbytes)
+
+    def pack(self) -> bytes:
+        n, d_pad = self.n_vectors, self.d_pad
+        if self.indices.size and int(self.indices.max()) >= (1 << self.bits):
+            raise ValueError("index exceeds bit width")
+        hdr = _PACK_HDR.pack(_PACK_MAGIC, _PACK_VERSION, self.bits, self.qjl_dim, n, self.dim, d_pad)
+        out = b"".join([
+            hdr,
+            np.ascontiguousarray(self.norms, dtype="<f4").tobytes(),
+            np.ascontiguousarray(self.residual_norms, dtype="<f4").tobytes(),
+            _pack_uint(self.indices, self.bits),
+            np.packbits(np.ascontiguousarray(self.qjl_signs, dtype=np.uint8).reshape(-1),
+                        bitorder="little").tobytes(),
+        ])
+        assert len(out) == self.packed_bytes()
+        return out
+
+    @classmethod
+    def unpack(cls, buf: bytes) -> "CompressedKV":
+        mv = memoryview(buf)
+        magic, ver, bits, qjl_dim, n, dim, d_pad = _PACK_HDR.unpack_from(mv, 0)
+        if magic != _PACK_MAGIC or ver != _PACK_VERSION:
+            raise ValueError("not a scuffedQuant v1 block")
+        off = _PACK_HDR.size
+        norms = np.frombuffer(mv[off:off + 4 * n], dtype="<f4").astype(np.float32)
+        off += 4 * n
+        rnorms = np.frombuffer(mv[off:off + 4 * n], dtype="<f4").astype(np.float32)
+        off += 4 * n
+        ib = (n * d_pad * bits + 7) // 8
+        indices = _unpack_uint(bytes(mv[off:off + ib]), n * d_pad, bits).reshape(n, d_pad)
+        off += ib
+        sb = (n * qjl_dim + 7) // 8
+        signs = np.unpackbits(np.frombuffer(mv[off:off + sb], dtype=np.uint8),
+                              count=n * qjl_dim, bitorder="little").reshape(n, qjl_dim)
+        off += sb
+        if off != len(mv):
+            raise ValueError(f"trailing bytes: parsed {off}, got {len(mv)}")
+        return cls(indices=indices, norms=norms, qjl_signs=signs, residual_norms=rnorms,
+                   n_vectors=n, dim=dim, bits=bits, qjl_dim=qjl_dim)
 
 
 class ScuffedQuant:
     """
-    KV cache quantizer: PolarQuant rotation + Lloyd-Max codebook + QJL correction.
+    KV cache quantizer: randomized Hadamard rotation + Lloyd-Max codebook + QJL residual sketch.
 
         sq = ScuffedQuant(dim=128, bits=3)
         compressed = sq.compress(keys)
@@ -374,7 +467,10 @@ class ScuffedQuant:
         return compiled(codebook_t, indices_t, H, signs_t, norms_t, c.dim)
 
     def compression_ratio(self, n_vectors: int) -> float:
-        """Compression ratio vs FP32."""
+        """Payload compression ratio vs FP32 (bit-packed sizes, header excluded).
+
+        Vs FP16 the ratio is half of this. For the exact wire size of a
+        block use CompressedKV.packed_bytes()."""
         original = n_vectors * self.dim * 4
         compressed = (
             n_vectors * self._d_pad * self.bits / 8 +  # indices

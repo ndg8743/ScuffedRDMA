@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "name": "thesis-default",
+  "description": "Current libscuffedrdma routing. Context fields: gpu_mem_util and link_util in [0, 1]. Register a classifier named 'wfa' (WFAClassifier or LearnedWFA) to enable the wfa-hot rule; without it that rule is skipped.",
+  "default": {
+    "route": "cold",
+    "compress": false
+  },
+  "rules": [
+    {
+      "name": "control-messages-hot",
+      "priority": 100,
+      "when": {
+        "in": {
+          "field": "role",
+          "values": [
+            "metadata",
+            "token"
+          ]
+        }
+      },
+      "then": {
+        "route": "hot",
+        "compress": false
+      },
+      "final": true
+    },
+    {
+      "name": "spill-bulk-under-gpu-pressure",
+      "priority": 90,
+      "when": {
+        "and": [
+          {
+            "threshold": {
+              "field": "gpu_mem_util",
+              "op": ">=",
+              "value": 0.9
+            }
+          },
+          {
+            "threshold": {
+              "field": "size_bytes",
+              "op": ">",
+              "value": 262144
+            }
+          },
+          {
+            "not": {
+              "in": {
+                "field": "phase",
+                "values": [
+                  "decode"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "route": "spill"
+      }
+    },
+    {
+      "name": "decode-small-kv-hot",
+      "priority": 80,
+      "when": {
+        "and": [
+          {
+            "in": {
+              "field": "phase",
+              "values": [
+                "decode"
+              ]
+            }
+          },
+          {
+            "in": {
+              "field": "role",
+              "values": [
+                "kv"
+              ]
+            }
+          },
+          {
+            "threshold": {
+              "field": "size_bytes",
+              "op": "<=",
+              "value": 262144
+            }
+          }
+        ]
+      },
+      "then": {
+        "route": "hot"
+      }
+    },
+    {
+      "name": "prefill-bulk-cold",
+      "priority": 70,
+      "when": {
+        "and": [
+          {
+            "in": {
+              "field": "phase",
+              "values": [
+                "prefill"
+              ]
+            }
+          },
+          {
+            "threshold": {
+              "field": "size_bytes",
+              "op": ">",
+              "value": 65536
+            }
+          }
+        ]
+      },
+      "then": {
+        "route": "cold"
+      }
+    },
+    {
+      "name": "compress-bulk-when-link-busy",
+      "priority": 60,
+      "when": {
+        "and": [
+          {
+            "threshold": {
+              "field": "link_util",
+              "op": ">=",
+              "value": 0.8
+            }
+          },
+          {
+            "in": {
+              "field": "route",
+              "values": [
+                "cold",
+                "spill"
+              ]
+            }
+          },
+          {
+            "threshold": {
+              "field": "size_bytes",
+              "op": ">=",
+              "value": 262144
+            }
+          }
+        ]
+      },
+      "then": {
+        "compress": true
+      }
+    },
+    {
+      "name": "wfa-hot",
+      "priority": 30,
+      "when": {
+        "and": [
+          {
+            "classifier": {
+              "name": "wfa",
+              "equals": "hot"
+            }
+          },
+          {
+            "threshold": {
+              "field": "size_bytes",
+              "op": "<=",
+              "value": 262144
+            }
+          }
+        ]
+      },
+      "then": {
+        "route": "hot"
+      }
+    },
+    {
+      "name": "tiny-anything-hot",
+      "priority": 20,
+      "when": {
+        "threshold": {
+          "field": "size_bytes",
+          "op": "<",
+          "value": 4096
+        }
+      },
+      "then": {
+        "route": "hot"
+      }
+    }
+  ]
+}
