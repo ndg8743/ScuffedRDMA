@@ -1,0 +1,28 @@
+{
+  "model": "state-spaces/mamba-2.8b-hf",
+  "architecture": "mamba",
+  "hostname": "chimera",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "seq_len": 12,
+  "per_bits": [
+    {
+      "bits": 8,
+      "compression_ratio": 2.490272373540856,
+      "rank_overlap_topk": 0.9980769230769231,
+      "compress_us": 33301.5990909189
+    },
+    {
+      "bits": 4,
+      "compression_ratio": 4.961240310077519,
+      "rank_overlap_topk": 0.9769230769230769,
+      "compress_us": 31921.06820642948
+    },
+    {
+      "bits": 3,
+      "compression_ratio": 6.597938144329897,
+      "rank_overlap_topk": 0.9557692307692308,
+      "compress_us": 31945.998081937432
+    }
+  ],
+  "notes": "state_source=hidden_states"
+}

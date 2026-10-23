@@ -1,0 +1,42 @@
+{
+  "hostname": "chimera",
+  "bits": 3,
+  "dim": 128,
+  "seq_len": 256,
+  "heads": 32,
+  "single_block_kb": 1568.0,
+  "coalesce_results": [
+    {
+      "coalesce": 1,
+      "payload_kb": 1568.0,
+      "write_us": 2425.0365095213056,
+      "write_mbps": 662.1063203361613,
+      "read_us": 927.4249896407127,
+      "read_mbps": 1731.2796376362758
+    },
+    {
+      "coalesce": 10,
+      "payload_kb": 15680.0,
+      "write_us": 21973.02004788071,
+      "write_mbps": 730.7288649904375,
+      "read_us": 7469.9780670925975,
+      "read_mbps": 2149.4467394399335
+    },
+    {
+      "coalesce": 20,
+      "payload_kb": 31360.0,
+      "write_us": 40006.39100559056,
+      "write_mbps": 802.6877504524846,
+      "read_us": 14679.36544213444,
+      "read_mbps": 2187.6040981871415
+    },
+    {
+      "coalesce": 50,
+      "payload_kb": 78400.0,
+      "write_us": 97026.06755308807,
+      "write_mbps": 827.423001103015,
+      "read_us": 72724.5535235852,
+      "read_mbps": 1103.913274269384
+    }
+  ]
+}
