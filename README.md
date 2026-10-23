@@ -14,7 +14,7 @@ Disaggregated prefill/decode serving moves the KV cache across nodes: prefill wr
 
 ## The thesis, section by section
 
-Each part as a short animation, then what it shows and the algorithm behind it. Every section title links to a longer write-up in [`docs/explained/`](docs/explained/) that derives the math and proves each claim, with what is proven, measured or still open marked at the end. The animations are made with [Manim Community](https://github.com/ManimCommunity/manim); the source is in [`docs/animations/`](docs/animations/) and `bash docs/animations/render.sh` rebuilds every GIF. Numbers in them are either arithmetic (sizes, line rate) or come from a results file in this repo. The ones marked illustrative are not measurements.
+Each part has a short animation, a one-paragraph summary and its key math. Every title links to a write-up in [`docs/explained/`](docs/explained/) with the full derivations and proofs. Animations are made with [Manim Community](https://github.com/ManimCommunity/manim) from [`docs/animations/`](docs/animations/). Their numbers are arithmetic or come from a results file in this repo, except where marked illustrative.
 
 **Color key:** orange = hot (latency-critical), blue = cold (bulk), violet = storage spill, green = decision or check passed, red = stall or failure.
 
@@ -22,198 +22,117 @@ Each part as a short animation, then what it shows and the algorithm behind it. 
 
 ![KV traffic between prefill and decode, and spill to NVMe](docs/media/01_traffic.gif)
 
-**Full explanation and proofs:** [docs/explained/01-traffic.md](docs/explained/01-traffic.md): KV size and wire-time derivations, RoCE packet overhead, how many requests fit in GPU memory, when spilling beats recomputing.
+Prefill on server 1 writes K and V for every layer and ships them to decode on server 2. While that bulk streams, other requests need small, urgent messages on the same link (control blobs, credits, token ids). When decode GPU memory passes a watermark, cold KV spills to NVMe instead of being recomputed.
 
-Prefill on server 1 reads the whole prompt once and writes K and V for every layer. For Granite 3.3-2B (40 layers, 8 KV heads, head_dim 64, bf16) that is 2 × 8 × 64 × 2 B = **2 KiB per token per layer**. A 2,048-token prompt is therefore 4 MiB per layer and 160 MiB per request, about 134 ms of serialization on a 10 Gb/s wire before any protocol overhead.
+$$\text{KV per token per layer} = 2 \times h_{kv} \times d_{\text{head}} \times \text{bytes} = 2 \times 8 \times 64 \times 2 = 2\ \text{KiB} \quad (\text{Granite 3.3-2B, bf16})$$
 
-While that streams, other requests need small messages on the same link: the connector's `__done__` control blob, flow-control credits, scheduler metadata, token ids. Those are 32 B to a few hundred KiB and sit on the decode critical path.
-
-On the decode side the paged KV cache fills GPU memory. Past a watermark, cold blocks are written to local NVMe (Update 6) instead of being dropped and recomputed, and the GPFS tier on Hydra is the next level down.
+A 2,048-token prompt is 2 KiB × 40 layers × 2,048 = 160 MiB, which takes 134 ms to serialize at 10 Gb/s.
 
 ### [2. Head-of-line blocking](docs/explained/02-head-of-line-blocking.md)
 
 ![One queue pair vs the dual pool](docs/media/02_headofline.gif)
 
-**Full explanation and proofs:** [docs/explained/02-head-of-line-blocking.md](docs/explained/02-head-of-line-blocking.md): FIFO worst case, the Pollaczek–Khinchine and priority-queue formulas with proofs, and a worked one-queue vs two-queue comparison.
+With one queue, a small message waits for every byte queued in front of it. The dual pool gives hot traffic its own queue, so nothing bulk sits ahead of it. Below the queues the NIC and wire are still shared, and experiment E3 measures whether SoftRoCE keeps the separation.
 
-With one queue pair, work requests leave in order. A 1 MiB block takes 8.39 Mbit ÷ 10 Gb/s = **0.84 ms** to serialize, so a 4 KiB decode message queued behind four of them waits **3.36 ms** before its first byte moves. That wait lands directly in time-to-first-token and in p99.
+$$W_{\text{FIFO}} = \frac{8}{C}\sum_{\text{ahead}} s_i \;=\; 4 \times 0.84\ \text{ms} = 3.36\ \text{ms} \quad\text{(four 1 MiB blocks at 10 Gb/s)}$$
 
-The dual pool gives each traffic class its own queue pair (libibverbs) or endpoint (libfabric), with its own completion handling, so nothing bulk sits ahead of a hot message in its own queue.
-
-The NIC and wire are still shared. On SoftRoCE the rxe kernel thread processes every QP, so whether the separation survives below the verbs layer is a measurement (Update 8, experiment E3), not an assumption. If hot p99 under a cold stream stays near its unloaded value with two endpoints and grows with one, the design works on that stack. If both grow, the bottleneck is below the QP.
+On average (M/G/1 queue, Pollaczek–Khinchine) every message waits $W = \frac{\lambda\,\mathbb E[S^2]}{2(1-\rho)}$, which depends on the square of message sizes, so a few huge messages make everyone wait.
 
 ### [3. Where industry stands](docs/explained/03-industry.md)
 
 ![The serving stack and five problems in it](docs/media/03_landscape.gif)
 
-**Full explanation and proofs:** [docs/explained/03-industry.md](docs/explained/03-industry.md): the evidence behind each of the five problems, with sources.
+The existing tools are built for one kind of traffic at a time, and the libfabric path the serving stack ships needs EFA-class hardware. On commodity Ethernet, mixed hot/cold traffic is left to whatever the library does underneath.
 
-| Problem | Evidence |
+| problem | evidence |
 |---|---|
-| **Built for bulk.** Ray Direct Transport, Mooncake, NIXL and LMCache move homogeneous bulk (weight sync, KV handoff). None classes mixed hot/cold traffic on a contended link. | Update 7 |
-| **The stock libfabric path is EFA-shaped.** NIXL's `LIBFABRIC` backend discovers providers in the order cxi, efa, tcp, sockets; verbs is not on the list. Its README requires GPUDirect RDMA and lists AWS EFA as the only validated hardware. On SoftRoCE, or ConnectX-4 without peer memory, it runs over libfabric `tcp` at best. | [nixl `src/utils/libfabric/libfabric_common.cpp`](https://github.com/ai-dynamo/nixl/tree/main/src/utils/libfabric), commit `d642316` |
-| **Library side effects.** Mistral traced a 400 MB/min memory leak in disaggregated vLLM to UCX hooking every `mmap` for its registration cache. | [Mistral engineering](https://mistral.ai/news/debugging-memory-leak-in-vllm) |
-| **Silent fallback.** IBM Storage Scale APAR IV61625: after a QP error there was no reconnect, and traffic moved to TCP without notice. | Update 7 |
-| **Unchecked completions.** This project's own Update 4 pool did not check `wc.status`, so failed writes counted as fast completions. The 8 µs figure is withdrawn; the pool now raises on a bad status. | `dual_qp_pool.py` `check_completion` |
-
-The thesis sits in the cell none of these cover: mixed hot/cold traffic on commodity 10 GbE with SoftRoCE, no GPUDirect, KV staged through host memory.
+| RDT, Mooncake, NIXL, LMCache move bulk only; none separates hot from cold | Update 7 |
+| NIXL's `LIBFABRIC` backend picks cxi, efa, tcp or sockets (never verbs) and needs GPUDirect RDMA | nixl `d642316` |
+| UCX's `mmap` hooks leaked 400 MB/min in disaggregated vLLM | [Mistral](https://mistral.ai/news/debugging-memory-leak-in-vllm) |
+| GPFS fell back to TCP silently after QP errors (APAR IV61625) | Update 7 |
+| Unchecked completion status produced this project's withdrawn 8 µs figure | `check_completion` |
 
 ### [4. The dual pool on libfabric](docs/explained/04-dual-pool.md)
 
 ![Endpoints, completion styles and providers per class](docs/media/04_dualpool.gif)
 
-**Full explanation and proofs:** [docs/explained/04-dual-pool.md](docs/explained/04-dual-pool.md): why separate endpoints and completion queues, busy-poll vs sleeping, and why one harness makes the libfabric/verbs comparison fair.
+Each traffic class gets its own libfabric endpoint, completion queue and provider. Hot busy-polls for the lowest latency; cold sleeps on a wait object and keeps a deep queue. `libscuffedverbs` implements the same API on raw verbs, so one benchmark compares the two libraries.
 
-`libscuffedfabric` opens one fabric and domain, registers one memory arena, and gives each class its own endpoint:
-
-- **Hot:** a 64-entry transmit queue, busy-polled CQ or an `fi_cntr` with `FI_SELECTIVE_COMPLETION` so only the operations that matter generate completions, and `FI_INJECT` for writes under the provider's inject size.
-- **Cold:** a 512-entry transmit queue and a CQ with a wait object, so its thread sleeps in `fi_cq_sread` instead of burning a core.
-
-Provider and endpoint type are chosen per class at run time (`verbs` MSG, `verbs;ofi_rxm` RDM, `tcp`, `shm`). Classes with the same provider and type share the domain and the registration; a mixed setup (hot RDM, cold MSG) needs two domains and registers the arena twice.
-
-`libscuffedverbs` implements the same C API (`scuffed_fabric.h`) on raw RC queue pairs, so `sf_bench` and `sv_bench` are one benchmark source linked against two libraries. Any difference between them comes from the library, not the harness.
-
-| libibverbs | libfabric |
-|---|---|
-| RC QP per class | endpoint per class, `FI_EP_MSG` or `FI_EP_RDM` |
-| `RDMA_WRITE_WITH_IMM` | `fi_writedata` with remote CQ data |
-| send CQ + completion channel | CQ with `FI_WAIT_UNSPEC`, `fi_cq_sread` |
-| (none) | `fi_cntr` remote-write counter (`FI_RMA_EVENT`) |
-| QPN / PSN / GID over a TCP side channel | passive endpoint (MSG) or `fi_av_insert` (RDM) |
+| | hot | cold |
+|---|---|---|
+| queue depth | 64 | 512 |
+| completion | busy-polled CQ or `fi_cntr` | CQ with wait object, `fi_cq_sread` |
+| provider / type | per class: `verbs` MSG, `verbs;ofi_rxm` RDM, `tcp`, `shm` | same choice, independent of hot |
 
 ### [5. FabricBlobChannel: credits and one-sided writes](docs/explained/05-blob-channel.md)
 
 ![Credit-based blob protocol over the pool](docs/media/05_blobchannel.gif)
 
-**Full explanation and proofs:** [docs/explained/05-blob-channel.md](docs/explained/05-blob-channel.md): protocol spec and proofs: no slot overwritten in use, no early notification, correct reassembly, throughput bound from Little's law.
+The sender holds one credit per free receive slot at the peer. It writes a chunk and its notification in a single `fi_writedata` (`imm = DATA | slot`). The receiver copies the chunk out, then returns the credit with an 8-byte write on the hot endpoint. A slot is never overwritten while in use, and the notification can't arrive before its data.
 
-The connector needs "send this named blob", not raw writes. `FabricBlobChannel` builds that on the pool:
-
-1. Each side's region is split into **receive slots** (written by the peer), **staging slots** (source of its own writes) and a small **scratch** area for credits.
-2. A sender holds one **credit per free receive slot** at the peer. To send, it takes a credit, copies a 64-byte header (magic, blob id, key length, flags, total, chunk offset, chunk length), the key and the chunk into the matching staging slot.
-3. One `fi_writedata` puts it into the peer's slot with `imm = DATA | slot`. Payload and notification are one operation on one endpoint, so the notification cannot overtake its payload.
-4. The receiver copies the chunk out and returns the slot with an 8-byte `fi_writedata` on the **hot** endpoint, `imm = CREDIT | slot`. Credits do not wait behind KV on the cold endpoint.
-
-Blobs larger than a slot are chunked. With N slots, N chunks are in flight; the sender stalls only when every slot is full.
+$$\text{throughput} \;\le\; \frac{N \cdot B}{R} \qquad (N \text{ slots of } B \text{ bytes, credit round trip } R;\ \text{Little's law})$$
 
 ### [6. How the receiver learns data arrived](docs/explained/06-completion-signaling.md)
 
 ![Five completion-signaling mechanisms](docs/media/06_completion.gif)
 
-**Full explanation and proofs:** [docs/explained/06-completion-signaling.md](docs/explained/06-completion-signaling.md): what ordering guarantee each mechanism relies on, why it is correct, and when it is not.
+A one-sided write lands without the target's CPU, so the target needs a signal. Each of the five options relies on a different ordering guarantee. Experiment E5 measures p99 latency and instructions per post for each.
 
-| Mechanism | How the target finds out | Needs | Seen while building |
-|---|---|---|---|
-| CQ data | the immediate lands in the target's CQ | a posted receive per write | |
-| flag in payload | target spins on the buffer's last bytes | the NIC placing the last bytes last | |
-| sentinel write | a second 8-byte write after the payload | write-after-write ordering | `shm` does not advertise it |
-| remote-write counter | `fi_cntr` counts arrivals | `FI_RMA_EVENT` | `tcp` advertised it but did not count |
-| write + 8-byte read | the read returns only after the write is placed | one more round trip | |
-
-The counter is the libfabric form of fabric-lib's `ImmCounter`; write + read is the GPFS flush pattern. Experiment E5 (`sf_bench -m sig`) measures p99 and user-space instructions retired per post for each. A mechanism gets adopted only if it moves p99.
+| mechanism | relies on |
+|---|---|
+| CQ data (write with immediate) | completion is generated after the data is placed |
+| flag in payload | the NIC placing the last bytes last (not guaranteed for multi-packet writes) |
+| sentinel write | write-after-write ordering (`FI_ORDER_WAW`; `shm` lacks it) |
+| remote-write counter | counter bumped at completion (`tcp` did not count) |
+| write + 8-byte read | in-order execution on RC; the GPFS flush pattern |
 
 ### [7. ScuffedRdmaConnector inside vLLM](docs/explained/07-connector.md)
 
 ![Request flow through prefill, the channel and decode](docs/media/07_connector.gif)
 
-**Full explanation and proofs:** [docs/explained/07-connector.md](docs/explained/07-connector.md): request lifecycle, why a lost layer degrades to recompute rather than a wrong answer, and the cost of host staging.
+The proxy sends the prompt to prefill with `max_tokens=1` and a transfer id. Each attention layer pushes its KV as one blob (bulk cold, the done marker hot). Decode loads layer by layer into its paged cache. A missing layer is recomputed, and a failed libfabric open falls back to TCP with a telemetry event.
 
-1. The proxy sends the prompt to prefill with `max_tokens=1`, `do_remote_decode` and a transfer id.
-2. Each attention layer's `save_kv_layer` gathers that request's paged blocks, copies them to host memory, encodes them (raw bf16, or scuffedQuant for the cold path) and queues one blob per layer. The WFA tags each blob; `wait_for_save` adds a hot `__done__` blob.
-3. `request_finished` returns `kv_transfer_params`; the proxy forwards the full request to decode with them.
-4. Decode reports the prompt as externally matched, `start_load_kv` waits for each layer and scatters it into the local paged cache, and tokens stream back through the proxy.
-
-If a layer never arrives (30 s default), its blocks go back to vLLM through `get_block_ids_with_load_errors` and are recomputed. If the libfabric channel won't open, the connector uses TCP and records a `tcp_fallback` event. Staging through host memory is deliberate: SoftRoCE has no GPUDirect path, and server 4's kernel lacks peer memory support. The connector passes its tests against vLLM `620e8924` and 0.24.0; baselines are vLLM's `NixlConnector` with the UCX backend and with its `LIBFABRIC` backend (`CONNECTOR=nixl-libfabric` in `benchmarks/vllm_disagg/launch.sh`).
+$$\text{staging cost per layer} \approx \frac{b}{P_{\text{PCIe}}} \quad\text{vs}\quad \frac{8b}{C}\ \text{on the wire} \qquad (4\ \text{MiB}: \approx 0.2\ \text{ms vs } 3.4\ \text{ms})$$
 
 ### [8. WFA classifier: static thresholds vs learned weights](docs/explained/08-wfa-classifier.md)
 
 ![Three-state automaton and per-phase cutoffs](docs/media/08_wfa.gif)
 
-**Full explanation and proofs:** [docs/explained/08-wfa-classifier.md](docs/explained/08-wfa-classifier.md): proof that the static phase detector never sees decode, the learned model's gradient, and proof that its training has a single optimum.
+Each tensor has a cold/warm/hot automaton; hot goes to the hot endpoint. The static version uses size thresholds and a phase detector that never sees decode, because decode visits layers in order just like prefill. So most decode KV deltas go cold. The learned version scores the next state from the transfer's features and can hold a different size cutoff per phase.
 
-Every tensor gets a small automaton with three states, cold, warm and hot, updated each time that tensor is transferred. Hot routes to the hot endpoint; warm and cold go to the cold one.
-
-**Learned version.** For the current state $s$ and a transfer described by $x$, each possible next state $s'$ gets a score $W_{s,s'} \cdot \varphi(x)$ (a weighted sum of features), and the scores are turned into probabilities with a softmax:
-
-$$P(s' \mid s, x) = \frac{\exp\big(W_{s,s'}\cdot\varphi(x)\big)}{\sum_{r} \exp\big(W_{s,r}\cdot\varphi(x)\big)}$$
-
-$\varphi(x)$ is the transfer's features (log₂ size, access frequency, queue depth, prefill or decode, log₂ sequence length, log₂ time since the last transfer, control message or not), standardized, plus a constant and two products: log₂ size × prefill and log₂ size × decode. Those products let the size cutoff differ by phase. The weights $W$ (3 × 3 × number of features) are fit by minimizing cross-entropy, with the previous state taken from the training labels. The write-up derives the gradient and proves this training problem has exactly one optimum.
-
-**Static version** (`WFAClassifier`). Under 4 KiB hot, over 256 KiB cold, and in between hot only after 10 accesses (5 if it thinks the phase is decode). Its phase detector looks for layer indices that repeat to spot decode, but a decode step visits layers 0, 1, 2, … in order, exactly like prefill, so it never reports decode (proven in the write-up). On synthetic traces it therefore sends most decode KV deltas (4 KiB to 256 KiB) cold. The learned weights recover per-phase cutoffs. That result is synthetic and partly by construction, since the oracle labels define decode deltas up to 256 KiB as hot. The real test is training on telemetry from the cluster runs, labeled by measured completion latency (`wfa_learner.latency_label`, notebook 04).
+$$P(s' \mid s, x) = \frac{\exp\big(W_{s,s'}\cdot\varphi(x)\big)}{\sum_{r} \exp\big(W_{s,r}\cdot\varphi(x)\big)}, \qquad \frac{\partial \mathcal L}{\partial W_{s,r}} = \frac1N\sum_{n:\,s_n=s}\big(P_{n,r} - \mathbb 1[r=y_n]\big)\varphi_n + \lambda W_{s,r}$$
 
 ### [9. Rule-Node Expression Trees](docs/explained/09-policy-trees.md)
 
 ![Evaluating the default policy on one transfer](docs/media/09_policy.gif)
 
-**Full explanation and proofs:** [docs/explained/09-policy-trees.md](docs/explained/09-policy-trees.md): formal semantics and proofs: short-circuiting is safe, the highest-priority rule owns each field, linear cost.
+Rules are boolean trees over signals and context (GPU memory, link load), tried in priority order. Each sets `route` (hot, cold, spill) and/or `compress`, and the first rule to set a field owns it. Example: a 4 MiB prefill block at 93% GPU memory and 85% link load is spilled (rule 90) and compressed (rule 60).
 
-A rule is a boolean tree over signals (the `SignalVector`) and context (GPU memory, link utilization), plus an action that sets `route` (hot, cold, spill) and/or `compress`. Node types: `and`, `or`, `not`, `threshold`, `in`, and `classifier` (calls a registered classifier such as the WFA, at most once per decision).
-
-Rules run in priority order. A matching rule fills only the fields that are still unset, so the first rule to set a field owns it; `final` stops evaluation. Later rules can read the route decided so far. Every decision carries a trace of which rule set what and why.
-
-Worked example from `middleware/policy/default_policy.json`: a 4 MiB prefill KV block with GPU memory at 93% and the link at 85%. Rule 100 fails (role is kv). Rule 90 (GPU ≥ 0.9 ∧ size > 256 KiB ∧ ¬decode) sets `route=spill`. Rule 80 short-circuits on phase. Rule 70 matches but route is taken. Rule 60 (link ≥ 0.8 ∧ route ∈ {cold, spill} ∧ size ≥ 256 KiB) sets `compress=true`. Result: spill to NVMe, compressed.
+$$\text{route} = \text{action of } \min\{\, i : \text{rule}_i \text{ matches and sets route} \,\}, \qquad \text{cost} = O(\text{nodes in the policy})$$
 
 ### [10. PMP bang-bang controller: hot, cold or spill](docs/explained/10-pmp-controller.md)
 
 ![Switching coefficients and the decision per step](docs/media/10_pmp.gif)
 
-**Full explanation and proofs:** [docs/explained/10-pmp-controller.md](docs/explained/10-pmp-controller.md): full derivation from Pontryagin's principle, proof of the all-or-nothing property, where 'cost ≈ queue depth' comes from, and a sign issue found in the code.
+For each transfer the controller picks hot, cold or spill. Its cost is a straight-line function of the choice, so the best choice is always all-or-nothing (bang-bang), never a split. It picks the option with the smallest cost, where each queue's cost is approximated by its weighted depth. One caveat: the derivation shows the implemented switching rule's sign and rate scaling don't match the model it came from. That is written up and not yet fixed.
 
-For every transfer the controller makes one choice: hot queue, cold queue, or (when GPU memory is tight) spill to NVMe. It treats the queues as a system that changes over time and asks which choice keeps the total waiting cost lowest. Pontryagin's principle answers this by attaching a "price" to each queue (its **costate**: how much one more unit of waiting work there costs from now on) and minimizing a quantity called the **Hamiltonian**, the running cost plus each queue's price times how fast that queue is growing.
-
-The key fact is that the Hamiltonian is a straight-line function of the choice. A straight line on an interval is smallest at one of its ends, so the best choice is always all-or-nothing, never a fractional split. That is what "bang-bang" means, and it holds for three options as well (a linear function on a triangle is smallest at a corner).
-
-With two queues the decision depends on the sign of the **switching function**
-
-$$S = \lambda_{q_H}\, C\, \mu_H - \lambda_{q_C}\, C\, \mu_C ,$$
-
-where $\lambda_{q_H}, \lambda_{q_C}$ are the two queues' prices, $C$ is the link capacity and $\mu_H, \mu_C$ are how fast each queue drains. The controller approximates each price by a weighted queue depth ($\lambda_{q_H} \approx \alpha q_H$, $\lambda_{q_C} \approx \beta q_C$). The write-up shows this is the short-horizon version of a cost that grows with the square of the queue length.
-
-With spill, the controller picks the smallest of three costs:
-
-$$\sigma_H = \alpha\, q_H\, C\, \mu_H, \qquad \sigma_C = \beta\, q_C\, C\, \mu_C, \qquad \sigma_S = \delta\, q_S\, \mu_S - \gamma\, p, \qquad p = \frac{\max(0,\, u - u_0)}{1 - u_0}.$$
-
-Here $u$ is GPU KV memory occupancy, $u_0$ the watermark, and $p$ the pressure above it (0 below the watermark, 1 when full). Below the watermark spill is off and the decision is the two-queue one. Above it, $-\gamma p$ makes spilling cheap until pressure drops. A deadband keeps the previous choice while it is within a margin of the best, so decisions don't flip back and forth. The queue values in the animation are illustrative.
-
-**Found while proving it.** The formula for $S$ comes from a model where the choice is *how to share the link*; under that model, $S > 0$ means *serve hot*. The code uses the choice as *which queue a new transfer joins* and sends it cold when $S > 0$. For that routing choice the derivation gives a different rule: compare $\alpha q_H/\mu_H$ with $\beta q_C/\mu_C$, with the drain rates dividing rather than multiplying. The write-up has both derivations. The code is unchanged until that is decided.
+$$\sigma_H = \alpha\, q_H\, C\mu_H, \qquad \sigma_C = \beta\, q_C\, C\mu_C, \qquad \sigma_S = \delta\, q_S\, \mu_S - \gamma\, \frac{\max(0,\,u - u_0)}{1-u_0}, \qquad \text{choose } \arg\min_i \sigma_i$$
 
 ### [11. scuffedQuant: rotate, quantize, sketch the residual](docs/explained/11-scuffedquant.md)
 
 ![Rotation, Lloyd-Max codebook, QJL sketch and the 64-byte wire format](docs/media/11_scuffedquant.gif)
 
-**Full explanation and proofs:** [docs/explained/11-scuffedquant.md](docs/explained/11-scuffedquant.md): proofs that the rotation preserves inner products, the codebook optimality conditions, and that the sketch correction is unbiased with error shrinking as 1/√m.
+Each KV vector is rotated with a random-sign Hadamard transform so all coordinates look alike, quantized to 3 bits with a Lloyd–Max codebook, and its residual is sketched with 256 sign bits. Attention needs inner products, and the sketch corrects them without bias. That is 64 bytes per vector at head_dim 64, 2× smaller than FP16, with 91.1% ± 3.3% top-8 attention overlap on Granite 3.3-2B.
 
-For each K or V vector $x$ (head_dim $d$):
-
-1. Store $\lVert x \rVert$ and work with $x / \lVert x \rVert$.
-2. Rotate with a randomized Hadamard transform $H\,\mathrm{diag}(\pm 1)$. Energy spreads evenly across coordinates and they look Gaussian, so one fixed codebook fits every vector and outliers stop wasting levels.
-3. Quantize each coordinate to the nearest of 8 Lloyd-Max levels, fit once to the distribution of rotated coordinates (about $\mathcal{N}(0, 1/d)$; times $\sqrt d$ they are about ±0.25, ±0.75, ±1.33, ±2.1): 3 bits per coordinate, giving $\hat x$.
-4. Take the residual $r = x - \hat x$ and store $\lVert r \rVert$ plus a 1-bit Johnson-Lindenstrauss sketch, $\mathrm{sign}(S r)$ with $m = 256$ random projections (QJL).
-
-Attention needs inner products, not exact vectors. The sketch gives an unbiased correction to the quantized term:
-
-$$\langle q, k \rangle \approx \langle q, \hat k \rangle + \lVert r \rVert \, \frac{\sqrt{\pi/2}}{m} \sum_{j=1}^{m} \mathrm{sign}(S r)_j \, (S q)_j$$
-
-At head_dim 64 the packed wire format is 4 B ($\lVert x \rVert$) + 4 B ($\lVert r \rVert$) + 24 B (64 × 3-bit indices) + 32 B (256 sign bits) = **64 B per vector, 2× smaller than FP16** (the earlier "4×" was against FP32). On Granite 3.3-2B the top-8 attention overlap is 91.1% ± 3.3% over 40 layers, minimum 82.8% (`benchmarks/results/scuffed_quant_llm.json`). TurboQuant-style rotate and quantize (Zandieh et al.); the sketch is QJL (Zandieh, Daliri, Han).
+$$\langle q, k \rangle \approx \langle q, \hat k \rangle + \lVert r \rVert\, \frac{\sqrt{\pi/2}}{m} \sum_{j=1}^{m} \mathrm{sign}(S r)_j\, (S q)_j, \qquad 4 + 4 + \tfrac{64 \cdot 3}{8} + \tfrac{256}{8} = 64\ \text{B}$$
 
 ### [12. NVMe storage tier](docs/explained/12-storage-tier.md)
 
 ![Spill, coalesced writes, extent reuse, verified reads, measured sweep](docs/media/12_storage.gif)
 
-**Full explanation and proofs:** [docs/explained/12-storage-tier.md](docs/explained/12-storage-tier.md): proofs of O_DIRECT alignment and no double allocation, CRC32 guarantees, and a cost model fitted to the measured sweep.
+Spilled blocks are batched into one `pwrite` + `fdatasync` in 4 KiB-aligned extents. Freed space is merged and reused first-fit, and reads are checked with CRC32. On server 2's NVMe, batching raised writes from 662 to 827 MB/s, matching a fixed-plus-per-block cost model whose limit is about 839 MB/s. Reads peaked at 20 blocks.
 
-When the controller or the policy picks spill, `StorageTier.spill(key, buf)` queues the block and returns a future. Every `coalesce` blocks become one `pwrite` and one `fdatasync` into a single backing file, in 4096-byte aligned extents. `delete(key)` returns the extent to a free list, neighbors merge, and the next spill reuses space first-fit. `retrieve(key)` is a `pread` followed by a CRC32 check; contiguous keys are read with one `pread`. `O_DIRECT` is used when the filesystem allows it, and the tier records why when it doesn't.
-
-Measured on server 2's NVMe with 1.5 MiB KV blocks (`benchmarks/results/test_arch/chimera_storage_spill.json`):
-
-| coalesce | write MB/s | read MB/s |
-|---|---|---|
-| 1 | 662 | 1731 |
-| 10 | 731 | 2149 |
-| 20 | 803 | 2188 |
-| 50 | 827 | 1104 |
-
-Writes gain from batching. Reads peak at 20 blocks and fall at 50 on this drive, so the batch size is a tuning knob, not "bigger is better".
+$$\text{throughput}(n) = \frac{nB}{a + nb} \;\to\; \frac{B}{b} \approx 839\ \text{MB/s} \qquad (a \approx 1.6\ \text{ms},\ b \approx 1.91\ \text{ms per 1.5 MiB block})$$
 
 ## Components
 
