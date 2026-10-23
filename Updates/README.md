@@ -1,24 +1,35 @@
 # Updates
 
-Weekly thesis updates for the ScuffedRDMA project (RDMA transport for distributed LLM inference). Each folder contains a `.tex` source plus the rendered `.pdf`. Read the PDFs in order if you want the narrative arc.
+Thesis updates for ScuffedRDMA (RDMA transport middleware for disaggregated LLM inference). Each folder holds the `.tex` source, the rendered `.pdf`, and a `README.md` that documents the work behind the update: the sources it leans on, the code and results that came out of it, the status of every next step, and corrections found later.
 
 ## Current status
 
-Update 7 is the latest. It reads three recent developments (Ray Direct Transport, AMD's ROCm eRNIC, and the near speed-of-light GPU collectives paper) against libscuffedrdma, places the middleware among the libfabric / UCX / DOCA transport stacks, and collects GPFS's published RDMA defect record. Update 6 covered storage-tier integration (GPFS, sandook, WEKA) for KV cache offloading, block size tradeoffs, and how the dual QP pool extends to cover storage traffic. Update 5 reviewed the six upstream UCX PRs and hardened the middleware.
+Update 8 (draft) builds the dual pool on libfabric (`middleware/libscuffedfabric/`) and a native libibverbs implementation of the same API (`middleware/libscuffedverbs/`), so both stacks run the identical benchmark. The method and build are done; the cluster tables are filled by running notebooks 01 to 03 in cluster mode. Update 7 read Ray Direct Transport, ROCm eRNIC and the near speed-of-light collectives paper against the middleware and placed it among the libfabric, UCX and DOCA stacks.
+
+Two earlier figures are withdrawn and get re-measured in notebook 01: the 8 µs cross-node latency (the Python pool did not check completion status) and the 4x-vs-FP16 compression ratio (it was against FP32; against FP16 it is 2x at head_dim 64).
 
 ## Index
 
-- **Proposal/** - Original and revised thesis proposals (`propsal.tex`, `revised_proposal_v2.tex`). `Hydra_Lab_Test.md` is the SoftRoCE / SR-IOV / GPUDirect setup guide for the Hydra cluster.
-- **Update1-HardwareSetup** - Hardware procurement and bring-up for the two-tower testbed: V100s, ConnectX-4 NICs, DDR5, BIOS/rebar, photos of the rack.
-- **Update2-ImplementationPlan** - Thesis scope and architecture. What vLLM already provides, what the adaptive RDMA contribution is, the evaluation plan, and risk mitigation.
-- **Update3-TensorCacheArchitecture** - RDMA tensor cache design, NVIDIA communication stack survey, MLA/MQA KV cache problem, CUDA vs Triton, three experimental pillars, and ScuffedKernels / ScuffedSearch sub-projects.
-- **Update4-UCX** - UCX codebase analysis, PMP/WFA classification theory, upstream PR table, TurboQuant KV compression pipeline, cross-node SoftRoCE benchmark results, and the Python MVP.
-- **Update5-UCX-Review** - Review of the six upstream UCX PRs with real diffs, CI flakiness notes, security audit, and middleware hardening.
-- **Update5-2-Architectures** - scuffedQuant beyond the Transformer KV cache (Mamba-3 SSM state, Granite 4 hybrid, Granite 4 MoE expert activations), the `benchmarks/test_arch/` harness for Chimera / Cerberus runs, GPU decompression and auto-kernel benchmarks.
-- **Update6-StorageTier** - Storage-tier integration: GPFS block size tradeoffs, sandook NVMe aggregation, WEKA AMG, four-tier KV memory hierarchy, dual QP extension to storage spill/retrieve.
-- **Update7-TransportLandscape** - Ray Direct Transport, ROCm eRNIC, and near-SoL collectives read against the middleware; where libscuffedrdma sits among libfabric / UCX / DOCA; GPFS RDMA defect record.
-- **Drafts/** - `draft1.tex` is the rolling thesis draft. `updates-todo/` holds exploratory updates that are not yet in the main sequence (FlashAttention-3 on Blackwell, gpt-oss-120b benchmarks, transport middleware, infrastructure testing, WFA classifier validation, mechanistic interpretability, work-first scheduling, USB4, lock-free middleware, Kokkos remote spaces, architecture comparison).
+| Update | Topic | Notes |
+|---|---|---|
+| [Proposal](Proposal/README.md) | original and revised proposals, Hydra lab test guide | what was kept, reshaped, deferred |
+| [Update 1](Update1-HardwareSetup/README.md) | hardware procurement and bring-up | |
+| [Update 2](Update2-ImplementationPlan/README.md) | scope, architecture, evaluation plan | phase-by-phase status |
+| [Update 3](Update3-TensorCacheArchitecture/README.md) | tensor cache, communication stack survey, experimental pillars | |
+| [Update 4](Update4-UCX/README.md) | UCX analysis, PMP/WFA theory, scuffedQuant, Python MVP | the UCX PRs were not merged |
+| [Update 5](Update5-UCX-Review/README.md) | PR review, security audit, middleware hardening | |
+| [Update 5-2](Update5-2-Architectures/README.md) | per-architecture scuffedQuant, test_arch harness | two drafts: canonical and `stack-draft/` |
+| [Update 6](Update6-StorageTier/README.md) | storage tier for KV offload | spill, coalescing, PMP storage arm now built |
+| [Update 7](Update7-TransportLandscape/README.md) | RDT, eRNIC, SoL collectives, libfabric / UCX / DOCA | |
+| [Update 8 (draft)](Update8-Libfabric/update8.pdf) | dual pool on libfabric vs libibverbs | provider behavior found while building; experiments E1 to E6 |
+| [Drafts/updates-todo](Drafts/updates-todo/README.md) | backlog drafts | keep / merge / drop per draft |
+
+`Drafts/draft1.tex` is the rolling thesis draft.
+
+## Running the work
+
+Every update's README ends with a "Run it" section pointing at the notebook and tests that cover it. The notebooks live in `../notebooks/` and run in `MODE="local"` (smoke) or `MODE="cluster"` (Cerberus and Chimera).
 
 ## Notes
 
-The `Drafts/updates-todo/` folder uses its own numbering that does not line up with the main Update1-5 sequence. For example, `Update4-FlashAttention3Blackwell` is a drafted side-update, not a replacement for `Update4-UCX`. Treat `updates-todo/` as a backlog of potential future updates rather than a parallel canonical sequence.
+`Drafts/updates-todo/` uses its own numbering that does not line up with the main sequence. `updates-todo/Update4-FlashAttention3Blackwell` is a side draft, not a replacement for `Update4-UCX`.

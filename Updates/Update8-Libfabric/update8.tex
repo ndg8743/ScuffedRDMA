@@ -1,0 +1,185 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx,amsmath,amssymb,booktabs,hyperref,microtype,xurl}
+\usepackage{enumitem}
+\setlist{nosep}
+\hypersetup{colorlinks=true,linkcolor=black,citecolor=blue,urlcolor=blue}
+\setcounter{tocdepth}{2}
+\newcommand{\pend}{\textit{pending}}
+
+\title{Update 8: The Dual QP Pool on libfabric}
+\author{Nathan Gopee\\MS Computer Science Candidate, SUNY New Paltz\\\texttt{gopeen1@newpaltz.edu}\\[4pt]Advisors: Dr.\ Wafi Danesh \& Dr.\ Ashley Suchy}
+\date{October 2026 (draft: method and build complete, cluster numbers pending)}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Summary}
+
+Update 7 placed libscuffedrdma among the libfabric, UCX and DOCA stacks and noted that libfabric's endpoint model matches the hot/cold split directly. This update builds that version and sets up the comparison against the libibverbs pool.
+
+What exists now:
+\begin{itemize}
+\item \texttt{libscuffedfabric}: the dual pool on libfabric. Each class (hot, cold) gets its own endpoint, CQs and, if wanted, its own provider and endpoint type (\texttt{FI\_EP\_MSG} or \texttt{FI\_EP\_RDM}). Classes with the same provider and type share one fabric, domain and memory registration.
+\item \texttt{libscuffedverbs}: the same C API implemented on raw libibverbs RC queue pairs. The benchmark source is shared, so \texttt{sf\_bench} and \texttt{sv\_bench} differ only in the library they link.
+\item Benchmarks for hot-path latency under five completion-signaling mechanisms, cold bandwidth, and a mixed hot/cold head-of-line test, with per-post instruction counts and CPU pinning.
+\item A Python binding and a blob channel over the pool, which the vLLM connector uses as its transport.
+\end{itemize}
+
+Everything below was built and exercised end to end on libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers. Those runs check correctness only. The comparison itself (verbs provider and native verbs on SoftRoCE between Cerberus and Chimera, and on ConnectX-4 between the towers) is notebook 03 in cluster mode, and its tables are empty here on purpose.
+
+\section{Why libfabric}
+
+Three things point the same way.
+
+\begin{enumerate}
+\item \textbf{The endpoint model fits the design.} libfabric exposes connected (\texttt{MSG}) and reliable-unconnected (\texttt{RDM}) endpoints, completion counters as a lighter alternative to CQs, selective completion, and wait objects on CQs~\cite{grun2015,fi_endpoint,fi_cntr}. Hot traffic wants the cheapest possible completion; cold traffic wants a deep queue and a thread that sleeps. With libibverbs both have to be built by hand. libfabric exposes them as configuration.
+\item \textbf{GPFS runs on it.} IBM Storage Scale uses libfabric underneath its RDMA path. A cold class on the same stack the file system already uses is the natural route for KV spill to a GPFS tier (Update 6).
+\item \textbf{The stack choice is measurable and matters.} Smith's MUG'23 comparison concludes that libfabric and UCX ``both provide very similar performance benefits''~\cite{smith_mug23}. EPCC's ARCHER2 study found little difference in OSU micro-benchmarks but large application-level differences, concentrated in \texttt{MPI\_Alltoallv}, and could not reproduce them with the micro-benchmarks~\cite{bareford2022}. Micro-benchmarks alone do not settle a stack comparison. That is why this update measures under mixed traffic and at the connector level, not only with ping-pong.
+\end{enumerate}
+
+\section{Mapping the pool onto libfabric}
+
+\begin{table}[ht]
+\centering\small
+\resizebox{\textwidth}{!}{\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Concept} & \textbf{libibverbs (\texttt{libscuffedverbs})} & \textbf{libfabric (\texttt{libscuffedfabric})} \\
+\midrule
+Class channel & RC QP per class & endpoint per class, \texttt{FI\_EP\_MSG} or \texttt{FI\_EP\_RDM} \\
+Shared resources & one PD, one MR & one fabric + domain + \texttt{fi\_mr\_reg} when providers and types match \\
+Hot completion & busy-polled send CQ & busy-polled CQ, or \texttt{fi\_cntr} with \texttt{FI\_SELECTIVE\_COMPLETION} \\
+Cold completion & send CQ + completion channel & CQ with \texttt{FI\_WAIT\_UNSPEC}, \texttt{fi\_cq\_sread} \\
+Notification & \texttt{RDMA\_WRITE\_WITH\_IMM} (32-bit imm) & \texttt{fi\_writedata}, \texttt{cq\_data\_size} bytes (4 on verbs, 8 on tcp/shm) \\
+Receive slots & posted recv WRs & posted \texttt{fi\_recv}, required under \texttt{FI\_RX\_CQ\_DATA} \\
+Remote addressing & virtual address + rkey & virtual address or offset (\texttt{FI\_MR\_VIRT\_ADDR}), provider or requested key \\
+Connection setup & QPN/PSN/GID over a TCP side channel & MSG: passive endpoint, connect param selects the class; RDM: \texttt{fi\_getname} + \texttt{fi\_av\_insert} \\
+Remote-write counting & none & \texttt{FI\_RMA\_EVENT} counter, endpoint or MR bound \\
+Progress & NIC / rxe kernel thread & provider-defined: auto (verbs) or manual (\texttt{ofi\_rxm}, \texttt{shm}) \\
+\bottomrule
+\end{tabular}}
+\caption{The same pool in both libraries. Both export \texttt{scuffed\_fabric.h}.}
+\label{tab:map}
+\end{table}
+
+The mixed configuration from Update 7, a hot class on an RDM endpoint and a cold class on a connected one, is a run-time option (\texttt{--hot-prov 'verbs;ofi\_rxm' --hot-ep rdm --cold-prov verbs --cold-ep msg}). It needs two domains, so the arena is registered twice. On verbs, \texttt{ofi\_rxm} runs its own eager and rendezvous protocol on top of RC~\cite{fi_rxm}, so this configuration puts a protocol layer back on the hot path. Whether that costs more than the RDM endpoint's connection handling saves is one of the questions the matrix in Section~\ref{sec:exp} answers.
+
+\section{One harness, two libraries}
+
+\texttt{sv\_bench} is \texttt{sf\_bench.c} compiled against \texttt{libscuffedverbs}. Payload offsets, warmup, window, timing (\texttt{CLOCK\_MONOTONIC\_RAW}), percentile code and JSON schema are identical. The verbs library checks \texttt{wc.status} on every completion and treats error and flush completions as errors.
+
+That check is a correction carried into this update. The Python pool from Update 4 did not check completion status, so failed or flushed writes counted as fast completions. The 8\,$\mu$s cross-node figure reported earlier included 8\,MB writes that ``completed'' in about 8\,$\mu$s, which 10GbE cannot do. The pool now raises on a bad status, and notebook 01 re-runs that benchmark. Until then, that figure is withdrawn. The scuffedQuant ratio quoted as 4$\times$ against FP16 was against FP32. With bit-packed indices and a 256-bit QJL sketch at head\_dim 64 it is 2$\times$ against FP16.
+
+\section{Provider behavior found while building}
+
+These come from libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers in a two-core container. They shaped the library and the benchmark. Whether the verbs provider shares any of them is part of the cluster run.
+
+\begin{itemize}
+\item \textbf{\texttt{tcp} needs target-side CQ reads despite \texttt{FI\_PROGRESS\_AUTO}.} With the target not reading the cold endpoint's CQ, a 1\,MB write stream stalled after about three writes (socket buffers full). The benchmark server now runs a yielding progress thread on the cold endpoint for every provider. On verbs it polls an empty CQ.
+\item \textbf{Remote-write counters are not uniform.} \texttt{tcp} advertises \texttt{FI\_RMA\_EVENT} but did not increment an endpoint-bound \texttt{FI\_REMOTE\_WRITE} counter. Registering the MR with \texttt{FI\_RMA\_EVENT} was accepted, but \texttt{fi\_mr\_enable} returned \texttt{-FI\_ENOSYS}. \texttt{ofi\_rxm} does not offer the capability. \texttt{shm} counts through the endpoint. The library binds both ways, and the benchmark probes one write in each direction before trusting a counter.
+\item \textbf{Connection-request info drops optional caps.} On the passive side, the \texttt{fi\_info} delivered with \texttt{FI\_CONNREQ} lacked \texttt{FI\_RMA\_EVENT} even though the listener requested it. The library copies it back before creating the endpoint.
+\item \textbf{\texttt{ofi\_rxm} connects on first use.} The initiator's first write spins on \texttt{-FI\_EAGAIN} until the target makes progress. Posting is now bounded (60\,s), so an idle peer becomes an error instead of a hang.
+\item \textbf{\texttt{shm} does not advertise write-after-write ordering} for RMA, so the sentinel mechanism is skipped there.
+\item \textbf{With one endpoint the target cannot tell classes apart.} The single-endpoint baseline therefore measures exactly the coupling the dual pool removes. It is not a mode that could be made class-aware.
+\end{itemize}
+
+\section{Experiments}
+\label{sec:exp}
+
+All runs: Cerberus as client, Chimera as server, SoftRoCE on the 10GbE link, hot and cold threads pinned to separate cores away from the NIC interrupts. Repeat on Tower 1 and Tower 2 over ConnectX-4 for the hardware-RoCE column. Every number in the tables traces to a JSON file under \texttt{benchmarks/results/fabric/} that records the exact server and client command.
+
+\subsection{E1. Hot-path latency by stack}
+\texttt{sig -M cq}, one-way latency (RTT/2), 8\,B to 64\,KB. Notebook 03, section 1.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+& \multicolumn{2}{c}{64\,B} & \multicolumn{2}{c}{4\,KB} \\
+Stack & p50 ($\mu$s) & p99 ($\mu$s) & p50 ($\mu$s) & p99 ($\mu$s) \\
+\midrule
+libibverbs RC (native) & \pend & \pend & \pend & \pend \\
+libfabric verbs MSG & \pend & \pend & \pend & \pend \\
+libfabric verbs;ofi\_rxm RDM & \pend & \pend & \pend & \pend \\
+\bottomrule
+\end{tabular}
+\caption{Hot-path latency, SoftRoCE, Cerberus $\leftrightarrow$ Chimera.}
+\end{table}
+
+\subsection{E2. Cold bandwidth}
+\texttt{bw}, window 16, 4\,KB to 16\,MB, with and without a wait object on the cold CQ. Notebook 03, section 2.
+
+\subsection{E3. Head-of-line blocking, single vs dual endpoint}
+\texttt{hol}: hot 64\,B and 4\,KB ping-pong while the cold class streams 256\,KB, 1\,MB and 4\,MB writes, window 8. The thesis claim holds on a stack if dual-endpoint hot p99 under load stays near its unloaded p99 while single-endpoint p99 grows with cold message size. If both grow, the bottleneck sits below the queue pair (for SoftRoCE, the rxe kernel thread), which is itself a result. Notebook 01.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Stack, endpoints & hot p99, no cold & hot p99, 1\,MB cold & cold MB/s \\
+\midrule
+libibverbs, single QP & \pend & \pend & \pend \\
+libibverbs, dual QP & \pend & \pend & \pend \\
+libfabric verbs MSG, single EP & \pend & \pend & \pend \\
+libfabric verbs MSG, dual EP & \pend & \pend & \pend \\
+libfabric verbs;ofi\_rxm RDM, dual EP & \pend & \pend & \pend \\
+\bottomrule
+\end{tabular}
+\caption{Hot 64\,B round trip ($\mu$s) under a cold stream.}
+\end{table}
+
+\subsection{E4. libfabric configuration matrix}
+Under the same mixed load: MSG/MSG, RDM/RDM, hot RDM + cold MSG, hot completions through \texttt{fi\_cntr}, cold CQ with a wait object, and the single-endpoint baseline. Notebook 03, section 3.
+
+\subsection{E5. Completion signaling}
+CQ data, flag in payload, sentinel write, remote-write counter, and write followed by an 8\,B read (the GPFS flush pattern), each with user-space instructions retired per post, following Papadopoulou et al.'s per-operation accounting~\cite{papadopoulou2017}. Adopt a mechanism only if it moves p99. Notebook 02.
+
+\subsection{E6. Application level}
+\texttt{FabricBlobChannel} against \texttt{TcpBlobChannel} for 4\,KB to 32\,MB blobs, cross node, with an end-to-end acknowledgment per blob (\texttt{benchmarks/fabric/blob\_bench.py}). This is the transport under the vLLM connector, so it links the micro-benchmarks to the TTFT runs in notebook 06.
+
+\section{What the comparison can and cannot show}
+
+\begin{itemize}
+\item On SoftRoCE the verbs provider and native verbs reach the same rxe device, so their difference is libfabric's software path (dispatch, completion translation, and for RDM the \texttt{ofi\_rxm} protocol). It is not a NIC difference. The ConnectX-4 runs separate software cost from a hardware path that is no longer the bottleneck.
+\item rxe processes packets in a kernel thread. If that thread saturates, separate QPs share it, and dual-endpoint gains shrink regardless of library. E3 shows whether that happens.
+\item Provider versions matter. The cluster runs record \texttt{fi\_info --version} and the provider string per class in every JSON.
+\end{itemize}
+
+\section{Next steps}
+
+\begin{enumerate}
+\item Run notebooks 00 to 03 in cluster mode on Cerberus and Chimera, then on the two towers. Fill E1 to E5 from the JSON.
+\item Run the vLLM connector over \texttt{FabricBlobChannel} on the verbs provider and compare TTFT and ITL against NIXL (notebook 06).
+\item If hot-RDM plus cold-MSG wins E4, make it the default and route the cold class's NVMe and GPFS spill through the same libfabric domain.
+\item Feed the telemetry signal dumps from these runs into the learned WFA (notebook 04).
+\end{enumerate}
+
+\begin{thebibliography}{99}\small
+
+\bibitem{grun2015}
+P.~Grun, S.~Hefty, S.~Sur, D.~Goodell, R.~D.~Russell, H.~Pritchard, and J.~M.~Squyres, ``A Brief Introduction to the OpenFabrics Interfaces: A New Network API for Maximizing High Performance Application Efficiency,'' \emph{IEEE Hot Interconnects}, 2015.
+
+\bibitem{fi_endpoint}
+OpenFabrics Interfaces Working Group, \texttt{fi\_endpoint(3)}, \texttt{fi\_cq(3)}, \texttt{fi\_mr(3)} man pages, libfabric 1.17. \url{https://ofiwg.github.io/libfabric/}
+
+\bibitem{fi_cntr}
+OpenFabrics Interfaces Working Group, \texttt{fi\_cntr(3)} man page, libfabric. \url{https://ofiwg.github.io/libfabric/}
+
+\bibitem{fi_rxm}
+OpenFabrics Interfaces Working Group, \texttt{fi\_rxm(7)} and \texttt{fi\_verbs(7)} man pages, libfabric. \url{https://ofiwg.github.io/libfabric/}
+
+\bibitem{smith_mug23}
+B.~Smith, ``Omni-Path and the Open Fabrics Interfaces,'' Cornelis Networks, MVAPICH User Group (MUG) 2023.
+
+\bibitem{bareford2022}
+M.~Bareford, D.~Henty, W.~Lucas, and A.~Turner, ``OpenFabrics and UCX Performance on the ARCHER2 HPE Cray EX System,'' Cray User Group (CUG) 2022. Data: \url{https://github.com/ARCHER2-HPC/performance_ofi-ucx}
+
+\bibitem{papadopoulou2017}
+N.~Papadopoulou, L.~Oden, and P.~Balaji, ``A Performance Study of UCX over InfiniBand,'' \emph{Proc.\ IEEE/ACM CCGrid}, 2017.
+
+\bibitem{zambre2018}
+R.~Zambre, ``For the RDMA novice: libfabric, libibverbs, InfiniBand, OFED, MOFED?,'' 2018. \url{https://www.rohitzambre.com/blog/2018/2/9/for-the-rdma-novice-libfabric-libibverbs-infiniband-ofed-mofed}
+
+\end{thebibliography}
+\end{document}

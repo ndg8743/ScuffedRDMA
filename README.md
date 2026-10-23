@@ -8,9 +8,7 @@ MS Computer Science thesis, SUNY New Paltz. Author: Nathan Gopee. Advisors: Dr. 
 
 ## Problem
 
-Training and inference are structurally different workloads. Training is batch, long-running, checkpoint-driven; resource use is predictable and sustained. Inference is service-oriented, latency-sensitive, request-driven; resource use is bursty and per-request. Both share GPU hardware but share almost nothing in their scheduling, failure, or traffic profiles.
-
-Disaggregated prefill/decode vLLM serving sits on the inference side of this split. Every decode step reads a growing KV cache that must be transported across nodes when prefill and decode live on separate hardware. On commodity 10GbE, a single RDMA queue pair serializes latency-critical metadata with multi-megabyte bulk KV transfers, causing head-of-line blocking. This project prototypes a software path over SoftRoCE that splits the single queue pair into two priority classes.
+Disaggregated prefill/decode serving moves the KV cache across nodes: prefill writes it once in bulk, decode needs small, latency-critical pieces of it every step. On commodity 10GbE, one RDMA queue pair carries both, so a few-hundred-byte decode transfer waits behind multi-megabyte prefill blocks (head-of-line blocking). libscuffedrdma splits traffic into a hot and a cold class, each on its own queue pair or endpoint with its own completion handling, and decides per transfer which class it belongs to.
 
 ## Approach
 
@@ -19,117 +17,125 @@ Disaggregated prefill/decode vLLM serving sits on the inference side of this spl
 ```mermaid
 flowchart LR
     subgraph Cerberus["Cerberus · prefill · 2× RTX 5090"]
-        PF[vLLM prefill worker]
+        PF[vLLM prefill worker<br/>ScuffedRdmaConnector]
     end
     subgraph Mid["libscuffedrdma"]
         direction TB
-        WFA[WFA classifier<br/>size + phase → hot/cold]
-        PMP[PMP bang-bang controller<br/>S = α·q_H·C·μ_H − β·q_C·C·μ_C]
-        QNT[scuffedQuant<br/>Walsh-Hadamard + codebook + QJL]
-        subgraph Pool["Dual QP pool · one PD"]
+        TEL[telemetry<br/>signal vectors, p50/p99, Prometheus]
+        WFA[WFA classifier<br/>static or learned weights]
+        POL[Rule-Node Expression Tree<br/>policy]
+        PMP[PMP bang-bang controller<br/>+ storage-pressure arm]
+        QNT[scuffedQuant<br/>Hadamard + Lloyd-Max + 256-bit QJL]
+        subgraph Pool["Dual pool · one domain / PD"]
             direction LR
-            HOT[["Hot QP<br/>busy-poll CQ"]]
-            COLD[["Cold QP<br/>sleep-poll CQ"]]
+            HOT[["Hot endpoint / QP<br/>busy-poll CQ or fi_cntr"]]
+            COLD[["Cold endpoint / QP<br/>deep queue, wait object"]]
         end
-        WFA --> PMP
+        TEL --> WFA --> POL --> PMP
         PMP -->|hot| HOT
         PMP -->|cold| COLD
-        QNT -.->|compressed| COLD
+        QNT -.->|optional| COLD
     end
     subgraph Chimera["Chimera · decode · 3× RTX 3090"]
-        DC[vLLM decode worker]
+        DC[vLLM decode worker<br/>ScuffedRdmaConnector]
     end
-    PF -->|KV blocks| WFA
-    HOT ==>|RDMA write · 8 µs| DC
-    COLD ==>|RDMA write · bulk| DC
+    PF -->|KV blocks| TEL
+    HOT ==>|RDMA write + imm| DC
+    COLD ==>|RDMA write + imm| DC
 
     classDef pool fill:#fef3c7,stroke:#b45309,stroke-width:1px
     classDef ctrl fill:#dbeafe,stroke:#1d4ed8,stroke-width:1px
     classDef quant fill:#dcfce7,stroke:#15803d,stroke-width:1px
     class HOT,COLD pool
-    class WFA,PMP ctrl
+    class TEL,WFA,POL,PMP ctrl
     class QNT quant
 ```
 
-### Transfer lifecycle
+### Two implementations of the pool, one benchmark
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant P as Prefill worker
-    participant W as WFA classifier
-    participant M as PMP controller
-    participant H as Hot QP
-    participant C as Cold QP
-    participant Q as scuffedQuant
-    participant D as Decode worker
-
-    P->>W: post KV block (size, layer, phase)
-    W->>W: classify → {hot, cold}
-    W->>M: class + queue state
-    M->>M: switching function S
-    alt S > 0 (hot)
-        M->>H: ibv_post_send
-        H-->>D: RDMA write (8 µs p50)
-        H->>M: poll_cq → μ_H update
-    else S ≤ 0 (cold)
-        M->>Q: compress(block, 3-bit)
-        Q->>C: ibv_post_send (compressed)
-        C-->>D: RDMA write (bulk)
-        D->>Q: decompress (on-GPU)
-        C->>M: poll_cq → μ_C update
-    end
-    M-->>W: feedback: updated q, μ
+flowchart TB
+    B["sf_bench.c<br/>sig · bw · hol modes, JSON out"]
+    B --> F["libscuffedfabric<br/>libfabric: verbs MSG, verbs;ofi_rxm RDM,<br/>tcp, shm; per-class endpoint type"]
+    B --> V["libscuffedverbs<br/>raw libibverbs RC QPs"]
+    F --> NIC[(rxe0 / ConnectX-4)]
+    V --> NIC
 ```
+
+Both libraries export the same C API (`middleware/libscuffedfabric/scuffed_fabric.h`), so `sf_bench` and `sv_bench` are the same benchmark source linked against different transports. libfabric versus libibverbs differences come from the library, not the harness.
 
 ### scuffedQuant pipeline
 
 ```mermaid
 flowchart LR
-    IN["KV vector<br/>(n, d) fp32"] --> N1[normalize<br/>x / ‖x‖]
-    N1 --> PAD[pad d → next 2^k]
-    PAD --> ROT["randomized Hadamard<br/>H · diag(±1)"]
+    IN["KV vector<br/>(n, d)"] --> N1[normalize<br/>x / ‖x‖]
+    N1 --> ROT["randomized Hadamard<br/>H · diag(±1)"]
     ROT --> QZ["Lloyd-Max codebook<br/>3 bits / coord"]
-    QZ --> IDX[["indices<br/>uint8"]]
-    ROT --> RES[residual = x − x̂]
-    RES --> QJL["256-bit QJL sketch<br/>sign(S · r/‖r‖)"]
-    QJL --> SIG[["signs<br/>256 bits / vector"]]
-    IDX --> OUT[["CompressedKV<br/>≈ 4× at 3 bits"]]
-    SIG --> OUT
-    N1 --> NRM[["norms<br/>fp32"]]
-    NRM --> OUT
+    QZ --> RES[residual r = x − x̂]
+    RES --> QJL["256-bit QJL sketch<br/>sign(S · r)"]
+    QZ --> OUT[["bit-packed CompressedKV<br/>2× vs FP16 at head_dim 64"]]
+    QJL --> OUT
+    N1 --> OUT
 
     classDef stage fill:#f3e8ff,stroke:#7c3aed,stroke-width:1px
-    classDef art fill:#fef3c7,stroke:#b45309,stroke-width:1px
-    class N1,PAD,ROT,QZ,RES,QJL stage
-    class IDX,SIG,NRM,OUT art
+    class N1,ROT,QZ,RES,QJL stage
 ```
 
-Four components:
+TurboQuant-style rotate, quantize, and sketch the residual (Zandieh et al.); the sketch is QJL (Zandieh, Daliri, Han). Individual vectors are lossy; inner products are preserved. At head_dim 64 a vector packs to 64 bytes: 2× against FP16, 4× against FP32.
 
-- **Dual QP pool.** Two RC queue-pair pools on one protection domain. Hot pool: busy-poll CQ. Cold pool: sleep-poll. Splits hot and cold traffic onto independent work queues.
-- **WFA classifier.** Labels each transfer hot or cold from tensor size and prefill/decode phase. Logs the decision for every transfer.
-- **PMP controller.** Bang-bang bandwidth allocation via Pontryagin's Maximum Principle. Switching function: `S = α·q_H·C·μ_H − β·q_C·C·μ_C`. Inputs: observed queue depth and measured service rates.
-- **scuffedQuant.** Two-stage KV compression in the TurboQuant style. Stage 1: randomized Walsh-Hadamard rotation + Lloyd-Max codebook at 3 bits, no calibration. Stage 2: 256-bit QJL sign sketch (Zandieh et al.) of the quantization residual. Individual vectors are lossy; inner products are preserved.
+### Components
+
+| Component | Where | State |
+|---|---|---|
+| Dual pool on libfabric | `middleware/libscuffedfabric/` | built; tested here on tcp, tcp;ofi_rxm, shm; verbs provider runs on the cluster |
+| Dual QP pool on libibverbs (C) | `middleware/libscuffedverbs/` | built; compile-checked here, runs on SoftRoCE |
+| Dual QP pool (Python, pyverbs) | `middleware/rdma_tensor_cache/dual_qp_pool.py` | original MVP; completion status now checked |
+| Python binding + blob channel | `middleware/fabric/` | `FabricPool`, `FabricBlobChannel` over either C library |
+| Telemetry | `middleware/telemetry.py` | signal vectors, per-class histograms, QP error / reconnect / TCP-fallback events, Prometheus `/metrics` |
+| WFA classifier | `middleware/rdma_tensor_cache/wfa_classifier.py`, `wfa_learner.py` | static thresholds; learned transition weights (gradient descent) with synthetic validation |
+| Rule-Node Expression Trees | `middleware/policy/` | and/or/not/threshold/in/classifier nodes, priority rules, explanation traces |
+| PMP controller | `middleware/rdma_tensor_cache/pmp_controller.py` | bang-bang hot/cold; storage-pressure arm returns HOT/COLD/SPILL |
+| Storage tier | `middleware/rdma_tensor_cache/storage_tier.py` | NVMe spill/retrieve, coalescing, O_DIRECT, crc32 |
+| scuffedQuant | `middleware/rdma_tensor_cache/scuffed_quant.py` | bit-packed wire format, size reported from packed bytes |
+| vLLM connector | `middleware/vllm_plugin/` | `ScuffedRdmaConnector` on `KVConnectorBase_V1`, proxy, loopback check |
+| NCCL net plugin | `middleware/nccl_plugin/` | `ncclNetPlugin_v8`, hot/cold QPs split at 4 KB; builds, not yet run under NCCL |
 
 ---
+
+## Notebooks
+
+Each notebook has a parameter cell. `MODE = "local"` runs smoke sizes on any Linux box with libfabric (tcp / shm providers), results to `/tmp`. `MODE = "cluster"` runs on Cerberus and Chimera, results to `benchmarks/results/`, tagged with hostname and UTC time. Local numbers are smoke tests, not results.
+
+| Notebook | What it runs |
+|---|---|
+| [00_environment_check](notebooks/00_environment_check.ipynb) | RDMA devices, GID table, libfabric providers, pyverbs, builds all native code, full test suite |
+| [01_hol_blocking](notebooks/01_hol_blocking.ipynb) | hot RTT under a cold bulk stream, single vs dual endpoint, native verbs vs libfabric; re-run of the Update 4 pyverbs benchmark |
+| [02_completion_signaling](notebooks/02_completion_signaling.ipynb) | CQ data vs flag-in-payload vs sentinel vs remote-write counter vs trailing READ, instructions per post |
+| [03_libfabric_vs_libibverbs](notebooks/03_libfabric_vs_libibverbs.ipynb) | latency and bandwidth per stack, MSG / RDM / mixed endpoints, counters vs CQ, wait objects, blob channel vs TCP |
+| [04_wfa_and_policy](notebooks/04_wfa_and_policy.ipynb) | learned WFA vs static thresholds, policy tree decisions with explanations |
+| [05_scuffedquant](notebooks/05_scuffedquant.ipynb) | packed sizes, Granite 3.3-2B top-8 overlap per layer |
+| [06_vllm_disagg_ttft](notebooks/06_vllm_disagg_ttft.ipynb) | ScuffedRdmaConnector loopback, TTFT / ITL sweeps against NIXL and single-node baselines |
+| [07_storage_tier](notebooks/07_storage_tier.ipynb) | NVMe spill coalescing sweep, PMP storage arm |
 
 ## Repository
 
 | Path | Contents |
 |------|----------|
-| `middleware/` | Transport selector (TCP / SoftRoCE / TTPoe), RDMA bootstrap |
-| `middleware/rdma_tensor_cache/` | Dual QP pool, WFA, PMP, scuffedQuant, vLLM KV connector |
-| `middleware/tests/` | pytest suite for bootstrap and QP state machine |
-| `benchmarks/` | Dual QP, UCX comparison, scuffedQuant LLM/MLX scripts |
+| `middleware/` | Transports (TCP / SoftRoCE / TTPoe), RDMA bootstrap, telemetry, policy engine |
+| `middleware/libscuffedfabric/` | libfabric dual-endpoint pool, `sf_bench` |
+| `middleware/libscuffedverbs/` | libibverbs implementation of the same API, `sv_bench` |
+| `middleware/fabric/` | ctypes binding, `FabricBlobChannel`, `TcpBlobChannel` |
+| `middleware/rdma_tensor_cache/` | pyverbs dual QP pool, WFA (static + learned), PMP, scuffedQuant, storage tier |
+| `middleware/vllm_plugin/` | ScuffedRdmaConnector, disagg proxy, loopback |
+| `middleware/nccl_plugin/` | NCCL net plugin |
+| `notebooks/` | research notebooks (generated from `notebooks/_build/`) |
+| `tests/`, `middleware/tests/` | pytest suite (`pytest -q` from the repo root) |
+| `benchmarks/` | benchmark scripts, `fabric/runner.py`, `vllm_disagg/`, `test_arch/`, results |
 | `deployment/` | Docker/K8s for Chimera/Cerberus, FA3 Blackwell patch |
-| `Updates/` | Thesis updates 1–7 (LaTeX + PDF), proposal, rolling draft, backlog in `Drafts/updates-todo/` |
-| `scripts/` | SoftRoCE setup, cluster bring-up, benchmark sweep |
-| `ucx/` | Submodule: [openucx/ucx](https://github.com/openucx/ucx) (upstream PR target) |
-| `vllm/` | Submodule: [vllm-project/vllm](https://github.com/vllm-project/vllm) (reference) |
-| `uccl/` | Submodule: [uccl-project/uccl](https://github.com/uccl-project/uccl) (P2P RDMA collective comparison) |
-| `References/` | Saved papers, slides, and pages. `Bookmarks_10-22/RANKED_SOURCES.md` ranks every thesis source and RDMA bookmark (S/A/B/C) with a local copy or source link for each |
-| `REFERENCES.md` | Full annotated bibliography |
+| `Updates/` | Updates 1 through 7 and 5-2 (LaTeX + PDF), each with a README of the work and sources; Update 8 draft |
+| `References/` | saved papers and pages; `Bookmarks_10-22/RANKED_SOURCES.md` ranks every source |
+| `vllm/`, `uccl/` | submodules (reference / comparison) |
+| `REFERENCES.md` | annotated bibliography |
 
 ## Hardware
 
@@ -144,95 +150,95 @@ Four components:
 
 ## Results
 
+Only numbers with a results file in the repo.
+
 | Metric | Value | Source |
 |--------|-------|--------|
-| SoftRoCE loopback BW (Chimera) | 0.92 Gb/s | Update 4 |
-| Single-QP p50 latency, 64 B | 12.6 µs | `results/ucx_comparison.json` |
-| Dual QP overhead vs single QP | +0.6 µs | Update 4 |
-| Cross-node decode latency (SoftRoCE) | 8 µs | `results/dual_qp_remote_benchmark.json` |
-| UCX tag_bw cross-node | 111.86 MB/s | Update 4 |
-| scuffedQuant 3-bit + 256-bit QJL, top-8 overlap (Granite 3.3-2B, FP32) | 91.1% ± 3.3% (40 layers, min 82.8%) | `results/scuffed_quant_llm.json` |
-| scuffedQuant 3-bit top-8 (Granite 3.3-2B, MLX 4-bit) | 100.0% / 40 layers | `results/scuffed_quant_mlx.json` |
-| scuffedQuant compression vs FP16 KV | 4.0× | `results/scuffed_quant_llm.json` |
-| FA3 Blackwell patch, RTX 5090 | +15.5% throughput | `deployment/patches/` |
-| gpt-oss-120b TCP baseline (3× 3090, MXFP4) | 104.4 tok/s | `deployment/benchmarks/` |
+| scuffedQuant 3-bit + 256-bit QJL, top-8 attention overlap (Granite 3.3-2B, FP32 KV) | 91.1% ± 3.3% over 40 layers (min 82.8%) | `benchmarks/results/scuffed_quant_llm.json` |
+| scuffedQuant 3-bit top-8 (Granite 3.3-2B, MLX 4-bit) | 100.0% over 40 layers | `benchmarks/results/scuffed_quant_mlx.json` |
+| scuffedQuant packed size at head_dim 64 | 64 B per vector: 2× vs FP16, 4× vs FP32 | `tests/test_scuffed_quant.py`, notebook 05 |
+| NVMe spill, Chimera, coalesce 1 → 50 blocks of 1.5 MiB | write 662 → 827 MB/s; read peaks 2188 MB/s at 20, 1104 MB/s at 50 | `benchmarks/results/test_arch/chimera_storage_spill.json` |
+| Per-architecture scuffedQuant (Transformer, Mamba state, Granite 4 hybrid, MoE) on Chimera and Cerberus | see Update 5-2 | `benchmarks/results/test_arch/` |
 
-## Possible Upstream Contributions
+### Withdrawn, to be re-measured
 
-Six PRs against [openucx/ucx](https://github.com/openucx/ucx), reviewed in Update 5.
-
----
+- **Cross-node decode latency "8 µs"** (`dual_qp_remote_benchmark.json`). The pyverbs pool did not check `wc.status`, so error and flush completions counted as fast completions; 8 MB writes "finished" in about 8 µs, which 10GbE cannot do. Fixed in `dual_qp_pool.py` (`check_completion`); re-run in notebook 01.
+- **"4× vs FP16" compression.** The ratio was against FP32. Against FP16 it is 2× at head_dim 64. `kv_compressed_bytes` in `scuffed_quant_llm.json` divides FP16 bytes by the FP32 ratio and is understated by 2×.
+- **SoftRoCE bandwidth, single-QP p50, dual-QP overhead, FA3 Blackwell speedup, gpt-oss-120b tok/s.** Earlier README rows pointed at sources that do not hold them (backlog drafts, a different link speed, an Ollama run). Notebooks 01 to 03 re-measure the transport numbers on the current harness.
 
 ## Built
 
-- [x] Dual QP pool over SoftRoCE with WFA routing (loopback + cross-node; `benchmarks/results/dual_qp_benchmark.json`, `dual_qp_remote_benchmark.json`)
-- [x] PMP controller implementation (`middleware/rdma_tensor_cache/pmp_controller.py`)
-- [x] scuffedQuant: Hadamard rotation + Lloyd-Max + 256-bit QJL, run on Granite 3.3-2B KV cache (`benchmarks/results/scuffed_quant_llm.json`, `scuffed_quant_mlx.json`)
-- [x] UCX codebase analysis → six upstream PRs submitted (#11304–#11309; review status in Update 5)
-- [x] RDMA bootstrap: binary handshake, GID discovery, QP state machine with retry (`middleware/rdma_bootstrap.py`, `rdma_gid_discovery.py`, `rdma_qp_state_machine.py`)
-- [x] Security audit (Update 5): four middleware findings fixed, six UCX PRs reviewed clean
-- [x] Python MVP running on Chimera↔Cerberus 10GbE (Update 4)
-- [x] Standalone `RDMAKVCacheConnector` prototype with WFA heat classification (`middleware/rdma_tensor_cache/vllm_connector.py`)
-- [x] Storage-tier design for KV spill/retrieve over GPFS, sandook, WEKA (Update 6)
-- [x] Transport landscape: Ray Direct Transport, ROCm eRNIC, near-SoL collectives, libfabric / UCX / DOCA positioning, GPFS RDMA defect record (Update 7)
+- [x] libfabric dual-endpoint pool, per-class endpoint type (MSG / RDM), hot completions via CQ or `fi_cntr`, cold CQ with a wait object, one MR per domain
+- [x] Native libibverbs implementation of the same API; `sv_bench` and `sf_bench` share one source
+- [x] Benchmarks: completion-signaling mechanisms, bandwidth, mixed hot/cold head-of-line test, instructions per post, CPU pinning, JSON output
+- [x] Python binding and `FabricBlobChannel` (credit-based slots, notification and payload in one `fi_writedata`)
+- [x] Unified telemetry with Prometheus exporter
+- [x] Learned WFA transition weights and synthetic validation; Rule-Node Expression Tree policy engine
+- [x] PMP storage-pressure arm; NVMe storage tier with coalescing
+- [x] `ScuffedRdmaConnector` for vLLM V1 (pinned vLLM 620e8924), disagg proxy, TTFT runner
+- [x] NCCL net plugin builds and exports `ncclNetPlugin_v8`
+- [x] Dual QP pool over SoftRoCE with WFA routing; PMP controller; RDMA bootstrap (handshake, GID discovery, QP state machine with retry); security audit fixes (Updates 4 and 5)
+- [x] scuffedQuant on Granite 3.3-2B and per-architecture state (Updates 4 and 5-2)
 
 ## Planned
 
-- [ ] `ScuffedRdmaConnector`: wire the prototype into vLLM's KV connector API in place of `NixlConnector`
-- [ ] Multi-threaded cross-node benchmark with concurrent hot/cold traffic
-- [ ] TTFT measurement on gpt-oss-120b split across both nodes
-- [ ] Positional-encoding-aware WFA (route by predicted read frequency, not just size)
-- [ ] Fused gather→Hadamard→rescale Triton kernel for scuffedQuant decompression
-- [ ] Rust or C++ port of the hot-path data plane
-- [ ] GPUDirect RDMA on Tower 2 (ConnectX-4 passthrough pending)
-- [ ] NIXL + Ray RDT over SoftRoCE: view-count sweep on the 10GbE link, with and without competing hot traffic, to check for single-path HOL blocking (Update 7)
-- [ ] Completion-signaling microbenchmark on hot QPs: CQ vs flag-in-payload vs sentinel vs trailing READ, reported as instructions per op (Update 7)
-- [ ] Dual QP pool on libfabric's verbs provider vs the libibverbs pool, same payloads (Update 7)
-- [ ] Per-QP-class Prometheus counters incl. QP error/reconnect (Update 7)
-- [ ] KV spill/retrieve to NVMe gated by WFA; storage-pressure term in PMP (Update 6)
+- [ ] Cluster runs of notebooks 01 to 03 on Cerberus ↔ Chimera (SoftRoCE) and Tower 1 ↔ Tower 2 (ConnectX-4): the libfabric versus libibverbs comparison for Update 8
+- [ ] vLLM disaggregated serving with ScuffedRdmaConnector, TTFT / ITL against NIXL (notebook 06)
+- [ ] NIXL + Ray RDT view-count sweep over SoftRoCE with competing hot traffic (Update 7)
+- [ ] NCCL plugin under NCCL with vLLM tensor parallel; PMP-driven split instead of the fixed 4 KB threshold
+- [ ] Signal dumps from the transports into the learned WFA (notebook 04 cluster cell)
+- [ ] GPUDirect RDMA on Tower 2 (blocked on the PVE kernel's `CONFIG_INFINIBAND_PEER_MEM`)
 
 ---
 
 ## Usage
 
 ```bash
-# SoftRoCE cluster
-scripts/start_cluster.sh --transport roce
+# native code (needs libfabric-dev, libibverbs-dev / rdma-core)
+make -C middleware/libscuffedfabric && make -C middleware/libscuffedverbs && make -C middleware/nccl_plugin
 
-# Dual QP benchmarks
-python benchmarks/benchmark_dual_qp.py --iterations 1000
-python benchmarks/benchmark_dual_qp_remote.py --role server --port 19877   # Cerberus
-python benchmarks/benchmark_dual_qp_remote.py --role client --host cerberus --port 19877  # Chimera
+# tests
+python3 -m pytest -q
 
-# scuffedQuant on real LLM
-python benchmarks/benchmark_scuffed_quant_llm.py --device cuda
+# SoftRoCE on both nodes
+sudo modprobe rdma_rxe && sudo rdma link add rxe0 type rxe netdev <10GbE iface>
 
-# Aggregate → LaTeX
-python benchmarks/aggregate_results.py --results-dir benchmarks/results
+# hot-path latency, libfabric verbs provider (server first, then client)
+middleware/libscuffedfabric/sf_bench -r server -H <server ip> -p verbs -t msg -d rxe0 -m sig -M cq
+middleware/libscuffedfabric/sf_bench -r client -H <server ip> -p verbs -t msg -d rxe0 -m sig -M cq
+
+# same benchmark on native libibverbs
+middleware/libscuffedverbs/sv_bench -r server -H <server ip> -d rxe0 -m hol
+middleware/libscuffedverbs/sv_bench -r client -H <server ip> -d rxe0 -m hol
+
+# vLLM connector data path without vLLM
+python3 -m middleware.vllm_plugin.loopback --role both --transport fabric --provider tcp
 ```
+
+The notebooks wrap all of this; start with `notebooks/00_environment_check.ipynb` on each node.
 
 ## Timeline
 
 | Window | Milestone | Status |
 |--------|-----------|--------|
 | Jan–Feb 2026 | Hardware bring-up, Updates 1–3 | done |
-| Mar–Apr 2026 | Python MVP, UCX PRs, scuffedQuant | done |
-| May–Sep 2026 | Storage tier (Update 6), transport landscape (Update 7) | done |
-| Sep–Nov 2026 | vLLM connector integration, TTFT, transport microbenchmarks | in progress |
-| Oct–Nov 2026 | Full thesis draft (`Updates/Drafts/draft1.tex`) | in progress |
+| Mar–Apr 2026 | Python MVP, scuffedQuant, Updates 4, 5, 5-2, 6 | done |
+| Sep 2026 | Transport landscape (Update 7) | done |
+| Oct 2026 | libfabric pool, native verbs pool, connector, policy, telemetry, notebooks | built |
+| Oct–Nov 2026 | Cluster runs, Update 8 (libfabric), full thesis draft | in progress |
 | Dec 2026 | Defense | planned |
 
 ## Citations
 
-Full bibliography in [REFERENCES.md](REFERENCES.md); ranked source list in [References/Bookmarks_10-22/RANKED_SOURCES.md](References/Bookmarks_10-22/RANKED_SOURCES.md). Core references the design leans on:
+Full bibliography in [REFERENCES.md](REFERENCES.md); ranked source list in [References/Bookmarks_10-22/RANKED_SOURCES.md](References/Bookmarks_10-22/RANKED_SOURCES.md). Core references:
 
 - Kwon et al., *PagedAttention*, SOSP 2023. [arXiv:2309.06180](https://arxiv.org/abs/2309.06180)
-- Dao, *FlashAttention-2*. [arXiv:2307.08691](https://arxiv.org/abs/2307.08691)
 - Zandieh et al., *TurboQuant*. [arXiv:2504.19874](https://arxiv.org/abs/2504.19874)
 - Zandieh, Daliri, Han, *QJL: 1-Bit Quantized JL Transform for KV Cache Quantization*. [arXiv:2406.03482](https://arxiv.org/abs/2406.03482)
+- Grun et al., *A Brief Introduction to the OpenFabrics Interfaces*, HotI 2015. libfabric man pages: `fi_endpoint(3)`, `fi_cntr(3)`, `fi_mr(3)`, `fi_verbs(7)`, `fi_rxm(7)`
 - TransferEngine (closest system-level comparison). [arXiv:2510.27656](https://arxiv.org/abs/2510.27656)
 - Pontryagin et al., *The Mathematical Theory of Optimal Processes*, 1962.
 
 ## License
 
-[MIT](LICENSE). Author: Nathan Gopee 
+[MIT](LICENSE). Author: Nathan Gopee
