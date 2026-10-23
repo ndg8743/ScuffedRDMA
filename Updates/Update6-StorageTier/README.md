@@ -22,7 +22,7 @@ Commodity and vendor storage
 
 ## Work done
 
-- Measured NVMe spill on Chimera with `benchmarks/test_arch/stack-draft/bench_storage_spill.py` (`ad4443e`, 2026-04-16). Results in `benchmarks/results/test_arch/chimera_storage_spill.json`:
+- Measured NVMe spill on server 2 with `benchmarks/test_arch/stack-draft/bench_storage_spill.py` (`ad4443e`, 2026-04-16). Results in `benchmarks/results/test_arch/chimera_storage_spill.json`:
 
 | Coalesce | Payload | Write (MB/s) | Read (MB/s) |
 |---|---|---|---|
@@ -38,8 +38,8 @@ Commodity and vendor storage
 
 | Next step | Status | Evidence |
 |---|---|---|
-| 1. Two-node GPFS cluster on Chimera/Cerberus via the Ansible role, mount `/gpfs/scuffedrdma`, rerun spill vs 803 MB/s | open | No deployment record. |
-| 2. Build sandook (controller on Cerberus, ublk agent on Chimera), benchmark aggregated throughput and tail latency | open | |
+| 1. Two-node GPFS cluster on server 1 / server 2 via the Ansible role, mount `/gpfs/scuffedrdma`, rerun spill vs 803 MB/s | open | No deployment record. |
+| 2. Build sandook (controller on server 1, ublk agent on server 2), benchmark aggregated throughput and tail latency | open | |
 | 3. KV spill/retrieve in `middleware/rdma_tensor_cache/` with async I/O, gated by the WFA, routing a fraction of cold traffic to storage | built (Oct 2026), cluster run pending | `middleware/rdma_tensor_cache/storage_tier.py`, notebook 07. |
 | 4. Storage-pressure term in the PMP controller based on GPU memory headroom | built (Oct 2026), cluster run pending | `PMPController.pressure()` in `middleware/rdma_tensor_cache/pmp_controller.py`, `tests/test_pmp_controller.py`. |
 
@@ -52,8 +52,8 @@ Commodity and vendor storage
 
 - **Compression figures do not match the bytes written.** The text says scuffedQuant 3-bit is "~5x" (256 KB block to ~50 KB) and later "6.4x". The spill benchmark's own serialized block is 1,568 KB for an FP16 block of 2,048 KB (8,192 rows x 128 dims): `uint8` indices, one byte per QJL sign, no residual norms, so about 1.3x. Bit-packed at head_dim 128, 3 bits plus norms is about 2.9x vs FP16 with a 256-bit QJL sketch and 4x with a 64-bit one; "~5x" is only reachable vs FP32. Pick one serialization and quote its measured size.
 - **The GPFS alignment sentence is inconsistent.** "30 compressed blocks fit in 30 GPFS blocks, each below the subblock boundary": the measured blocks are 1.5 MB, larger than a 1 MB GPFS block and far above a 32 KB subblock.
-- **"Measured on Chimera's NVMe".** The benchmark writes into `tempfile.TemporaryDirectory()`, i.e. `/tmp`. Whether that is NVMe or tmpfs on Chimera was not recorded. The read drop at 50 blocks is attributed to page cache pressure without evidence.
-- **GDS dependency.** "GDS requires `nvidia-peermem`": GPUDirect Storage depends on the `nvidia-fs` driver (with MOFED for remote storage over RDMA); `nvidia-peermem` is the GPUDirect RDMA module. Neither works on SoftRoCE or GeForce cards, so the conclusion (Tower 2 only) stands.
-- "Chimera/Cerberus run Ubuntu 22 ... kernel 6.8" disagrees with Update 4's infrastructure table (Ubuntu 24.04 on Chimera).
+- **"Measured on server 2's NVMe".** The benchmark writes into `tempfile.TemporaryDirectory()`, i.e. `/tmp`. Whether that is NVMe or tmpfs on server 2 was not recorded. The read drop at 50 blocks is attributed to page cache pressure without evidence.
+- **GDS dependency.** "GDS requires `nvidia-peermem`": GPUDirect Storage depends on the `nvidia-fs` driver (with MOFED for remote storage over RDMA); `nvidia-peermem` is the GPUDirect RDMA module. Neither works on SoftRoCE or GeForce cards, so the conclusion (server 4 only) stands.
+- "server 1 / server 2 run Ubuntu 22 ... kernel 6.8" disagrees with Update 4's infrastructure table (Ubuntu 24.04 on server 2).
 - "Both have been confirmed to work on commodity hardware" means the upstream projects document it; neither path has been run on this testbed.
 - The introduction calls the UCX PRs "six upstream UCX patches". None were merged.

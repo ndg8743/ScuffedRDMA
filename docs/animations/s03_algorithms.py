@@ -199,25 +199,25 @@ class S09Policy(Captioned):
 
 # --------------------------------------------------------------------------------------------- 10
 class S10PMP(Captioned):
-    tag = "10 · PMP bang-bang controller with a storage arm"
+    tag = "10 · PMP bang-bang controller: hot, cold or spill"
 
     def construct(self):
         two = VGroup(
-            T("two arms (Update 4)", 17, MUTED, weight="BOLD"),
+            T("two choices, hot or cold (Update 4)", 17, MUTED, weight="BOLD"),
             M(r"S = \lambda_{q_H} C \mu_H - \lambda_{q_C} C \mu_C", 30),
-            T("S > 0: hot congested → cold      S < 0 → hot", 15, TEXT),
-        ).arrange(DOWN, buff=0.18, aligned_edge=LEFT).move_to(LEFT * 3.6 + UP * 2.0)
+            T("implemented: S > 0 → cold, S < 0 → hot (see write-up)", 15, TEXT),
+        ).arrange(DOWN, buff=0.18, aligned_edge=LEFT).move_to(UP * 2.0).to_edge(LEFT, buff=0.5)
         self.play(FadeIn(two[0]), Write(two[1]), FadeIn(two[2]), run_time=1.4)
-        self.caption("Pontryagin's maximum principle: the Hamiltonian is linear in the control, so the optimum is bang-bang.")
+        self.caption("Pontryagin's principle: the cost is linear in the routing choice, so the best choice is all-or-nothing (bang-bang).")
         three = VGroup(
-            T("three arms (Update 6): pick the smallest", 17, MUTED, weight="BOLD"),
+            T("three choices (Update 6): pick the smallest cost", 17, MUTED, weight="BOLD"),
             M(r"\sigma_H = \alpha\, q_H\, C\, \mu_H", 30, HOT),
             M(r"\sigma_C = \beta\, q_C\, C\, \mu_C", 30, COLD),
             M(r"\sigma_S = \delta\, q_S\, \mu_S - \gamma\, p", 30, SPILL),
             M(r"p = \frac{\max(0,\ u - u_0)}{1 - u_0}", 28, TEXT),
         ).arrange(DOWN, buff=0.16, aligned_edge=LEFT).next_to(two, DOWN, buff=0.4).align_to(two, LEFT)
         self.play(FadeIn(three[0]), LaggedStart(*[Write(m) for m in three[1:]], lag_ratio=0.25), run_time=2.0)
-        self.caption("Shadow prices are approximated by queue depth. GPU occupancy u above the watermark u0 makes spilling cheap.", 1.0)
+        self.caption("Each σ is the cost of sending the next transfer to that queue. GPU memory above the watermark u0 makes spilling cheap.", 1.0)
 
         # bars
         base_y = 0.1
@@ -272,13 +272,13 @@ class S10PMP(Captioned):
             self.play(Transform(cur, new), FadeIn(VGroup(sq, lt)), run_time=0.55)
             strip.add(VGroup(sq, lt))
             if t == 3:
-                self.caption("Below the watermark only H and C compete: traffic goes to whichever queue is cheaper.")
+                self.caption("Below the watermark only hot and cold compete: the transfer joins whichever queue costs less.")
             if t == 7:
-                self.caption("Past u0 the spill coefficient goes negative and wins: bulk goes to NVMe until pressure drops.")
+                self.caption("Past u0 the spill cost goes negative and is the smallest: bulk goes to NVMe until pressure drops.")
             self.wait(0.25)
         st = T("decision per step (illustrative values)", 13, MUTED).next_to(strip, UP, buff=0.08).align_to(strip, LEFT)
         self.play(FadeIn(st))
-        self.caption("A deadband keeps the last arm while it is within a margin of the best, so decisions don't chatter.", 2.4)
+        self.caption("A deadband keeps the last choice while it is within a margin of the best, so decisions don't flip-flop.", 2.4)
 
 
 # --------------------------------------------------------------------------------------------- 11
@@ -440,7 +440,7 @@ class S12Storage(Captioned):
         self.play(rb.animate.move_to(gauge.get_center()), FadeOut(chk), file[5].animate.set_fill(BG, 1), run_time=0.7)
         self.play(FadeOut(rb))
 
-        # measured coalescing sweep (Chimera)
+        # measured coalescing sweep (server 2)
         self.play(*[FadeOut(m) for m in (q, qt, file, dec, gauge, fill, gl)])
         data = [(1, 662, 1731), (10, 731, 2149), (20, 803, 2188), (50, 827, 1104)]
         ax = Axes(x_range=[0, 4, 1], y_range=[0, 2400, 600], x_length=7.5, y_length=3.6, tips=False,
@@ -462,7 +462,7 @@ class S12Storage(Captioned):
         leg = VGroup(VGroup(Square(0.18, fill_color=SPILL, fill_opacity=0.85, stroke_width=0), T("write", 14, TEXT)).arrange(RIGHT, buff=0.08),
                      VGroup(Square(0.18, fill_color=COLD, fill_opacity=0.85, stroke_width=0), T("read", 14, TEXT)).arrange(RIGHT, buff=0.08)
                      ).arrange(RIGHT, buff=0.3).next_to(ax, UP, buff=0.05).align_to(ax, RIGHT)
-        src = T("Chimera NVMe, 1.5 MiB KV blocks · benchmarks/results/test_arch/chimera_storage_spill.json", 13, MUTED)
+        src = T("Server 2 NVMe, 1.5 MiB KV blocks · measured, results file in benchmarks/results/test_arch/", 13, MUTED)
         src.next_to(ax, DOWN, buff=0.45)
         self.play(Create(ax), FadeIn(yl, ylab, leg))
         self.play(LaggedStart(*[FadeIn(b, shift=UP * 0.2) for b in bars], lag_ratio=0.08), FadeIn(src), run_time=1.8)

@@ -10,7 +10,7 @@ re-check the signatures below when the submodule moves.
     --kv-transfer-config '{"kv_connector":"ScuffedRdmaConnector",
         "kv_connector_module_path":"middleware.vllm_plugin.connector",
         "kv_role":"kv_producer",
-        "kv_connector_extra_config":{"peer":"chimera","port":14600,
+        "kv_connector_extra_config":{"peer":"server2","port":14600,
             "transport":"fabric","provider":"verbs","ep_type":"msg"}}'
 """
 

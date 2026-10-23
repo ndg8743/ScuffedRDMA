@@ -5,9 +5,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nbtools import build  # noqa: E402
 
-PARAMS = '''MODE = "local"            # "local": tests + loopback on this machine; "cluster": real vLLM on Cerberus/Chimera
-PREFILL_HOST = "cerberus"
-DECODE_HOST = "chimera"
+PARAMS = '''MODE = "local"            # "local": tests + loopback on this machine; "cluster": real vLLM on server 1 / server 2
+PREFILL_HOST = "server1"
+DECODE_HOST = "server2"
 MODEL = "ibm-granite/granite-3.3-2b-instruct"
 TRANSPORT = "fabric"       # fabric | tcp
 PROVIDER = "verbs"         # libfabric provider for TRANSPORT="fabric" (verbs on SoftRoCE; tcp/shm work anywhere)
@@ -27,7 +27,7 @@ N_PER_LEN = 20
 MAX_TOKENS = 64
 WAIT_FOR_SERVERS_S = 0      # >0: poll /health on every endpoint before sweeping'''
 
-INTRO = """KV cache transfer for disaggregated prefill (Cerberus) / decode (Chimera) through `ScuffedRdmaConnector`
+INTRO = """KV cache transfer for disaggregated prefill (server 1) / decode (server 2) through `ScuffedRdmaConnector`
 (`middleware/vllm_plugin/`), compared against vLLM's `NixlConnector` (UCX backend and LIBFABRIC backend), the same connector over TCP,
 and a single non-disaggregated server.
 
@@ -85,9 +85,9 @@ except ImportError:
     ("md", "## 3. Cluster: start the servers\n\nRun each block in a terminal on the named node (decode first). "
            "Each setup uses its own ports so they can stay up together if memory allows; otherwise run one "
            "setup at a time and edit `ENDPOINTS`.\n\nCross-node transport check without vLLM (run before the "
-           "servers):\n\n```\nchimera$  python -m middleware.vllm_plugin.loopback --role consumer --port 14600 "
-           "--transport fabric --provider verbs\ncerberus$ python -m middleware.vllm_plugin.loopback --role "
-           "producer --peer chimera --port 14600 --transport fabric --provider verbs\n```"),
+           "servers):\n\n```\nserver2$  python -m middleware.vllm_plugin.loopback --role consumer --port 14600 "
+           "--transport fabric --provider verbs\nserver1$ python -m middleware.vllm_plugin.loopback --role "
+           "producer --peer server2 --port 14600 --transport fabric --provider verbs\n```"),
     ("code", '''setups = {
     "scuffed-fabric-verbs": dict(CONNECTOR="scuffed", TRANSPORT=TRANSPORT, PROVIDER=PROVIDER, EP_TYPE=EP_TYPE,
                                  PROXY_PORT=8000, KV_PORT=KV_PORT),

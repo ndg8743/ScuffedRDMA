@@ -40,9 +40,9 @@ Update 2's plan is phased rather than a Next Steps list. Each deliverable:
 
 | Phase / deliverable | Status | Evidence |
 |---|---|---|
-| 1. RDMA ping-pong under 10 us RTT on SoftRoCE | partial | Best evidence is a one-way write completion, not an RTT: 12.6 us p50 for 64 B, loopback (`benchmarks/results/ucx_comparison.json`). `ib_write_lat` between Chimera and Cerberus measured about 190 us (backlog draft `Update8-InfrastructureRDMATesting`). The 8 us cross-node figure in `dual_qp_remote_benchmark.json` is suspect, see Update 4 README. |
+| 1. RDMA ping-pong under 10 us RTT on SoftRoCE | partial | Best evidence is a one-way write completion, not an RTT: 12.6 us p50 for 64 B, loopback (`benchmarks/results/ucx_comparison.json`). `ib_write_lat` between server 1 and server 2 measured about 190 us (backlog draft `Update8-InfrastructureRDMATesting`). The 8 us cross-node figure in `dual_qp_remote_benchmark.json` is suspect, see Update 4 README. |
 | 1. sockperf TCP baseline | open | No sockperf results in the repo. |
-| 1. NUMA-aware buffer pool (libnuma) | open | No NUMA code. Chimera and Cerberus are single-socket, so this has low value for the thesis. |
+| 1. NUMA-aware buffer pool (libnuma) | open | No NUMA code. Server 1 and server 2 are single-socket, so this has low value for the thesis. |
 | 2. Instrument vLLM `KVCacheManager` | open | |
 | 2. Unified telemetry (frequency, size distribution, queue depth, p50/p95/p99) | done (Oct 2026), not integrated | `middleware/telemetry.py`, `tests/test_telemetry.py`. Not yet fed from vLLM. |
 | 2. WFA classifier + phase detection | done | `wfa_classifier.py`. |
@@ -65,7 +65,7 @@ Update 2's plan is phased rather than a Next Steps list. Each deliverable:
 
 ## Corrections
 
-- "The V100s and RTX 5090s support GPUDirect RDMA": GeForce cards (5090, 5070 Ti, 3090) do not. Only the V100s on Tower 2 do.
+- "The V100s and RTX 5090s support GPUDirect RDMA": GeForce cards (5090, 5070 Ti, 3090) do not. Only the V100s on server 4 do.
 - "Home lab: 100GbE Mellanox ConnectX-4 with SoftRoCE": the ConnectX-4 does hardware RoCEv2; SoftRoCE is only needed on the X710 and AQC107.
-- Transport table latencies (SoftRoCE ~10 us, RoCEv2 ~4-5 us, TTPoe ~1-2 us) are typical figures, not testbed measurements. Measured SoftRoCE between Chimera and Cerberus was about 190 us RTT with `ib_write_lat`.
+- Transport table latencies (SoftRoCE ~10 us, RoCEv2 ~4-5 us, TTPoe ~1-2 us) are typical figures, not testbed measurements. Measured SoftRoCE between server 1 and server 2 was about 190 us RTT with `ib_write_lat`.
 - The tensor-parallel integration point (replace NCCL all-reduce in `parallel_state.py`) was never pursued; the thesis stayed on the KV connector path.

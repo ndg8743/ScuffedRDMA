@@ -1,6 +1,6 @@
 """
 GPU-resident paths. Skipped without CUDA; run on any one machine with an
-NVIDIA GPU (desktop under WSL2, Cerberus or Chimera alone) via notebook 08.
+NVIDIA GPU (desktop under WSL2, server 1 or server 2 alone) via notebook 08.
 """
 import os
 

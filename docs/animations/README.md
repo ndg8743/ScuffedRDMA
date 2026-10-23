@@ -23,13 +23,13 @@ Manim Community scenes behind the GIFs in the top-level README. One scene per th
 ## Render
 
 ```bash
-pip install manim            # Manim Community; needs cairo, pango, ffmpeg, LaTeX with dvisvgm
-bash docs/animations/render.sh                    # all scenes: 960x540 @ 15 fps -> 800 px, 12 fps GIF
+pip install manim            # Manim Community; needs cairo, pango, ffmpeg, gifsicle, LaTeX with dvisvgm
+bash docs/animations/render.sh                    # all scenes: 1280x720 @ 30 fps -> 1280 px, 20 fps GIF, 1.35x speed
 bash docs/animations/render.sh S10PMP             # one scene
 QUALITY=preview bash docs/animations/render.sh    # fast low-res check, no GIFs
 ```
 
-Text uses the Inter font when installed. Build output goes to `docs/animations/build/` (ignored by git).
+Text uses the Inter font when installed. `SPEED`, `GIF_W` and `GIF_FPS` override playback speed and GIF size. The longer explanations behind each scene are in [`docs/explained/`](../explained/). Build output goes to `docs/animations/build/` (ignored by git).
 
 ## What the numbers are
 

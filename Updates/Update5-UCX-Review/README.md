@@ -35,13 +35,13 @@ Contrasting designs
 | 4. Confirm PR #11307 on a real direct-connect RoCE ring | open | No ConnectX ring available. Moot unless the PR moves. |
 | 5. Decide whether to reopen PR #11304 | open, undecided | Still closed as of 2026-10-22. |
 | 6. Decide whether to disclose the `mesh_mpi_pt2pt.c` bug to libmesh-rdma | open | No record of disclosure in the repo. |
-| 7. Full `QueuePair` RTR loopback test on ConnectX | open | Tower 2 has ConnectX-4; the test still skips on rxe. |
+| 7. Full `QueuePair` RTR loopback test on ConnectX | open | Server 4 has ConnectX-4; the test still skips on rxe. |
 
 Upstream status: none of the six UCX PRs were merged. As of 2026-10-22, #11305 (adaptive TX CQ moderation), #11306 (eager inline with CUDA MDs present), #11307 (TCP as fallback wireup for RC/DC), #11308 (bandwidth estimate in `ucp_ep_query`) and #11309 (symmetric traffic class in the IB address) are open with review required; #11304 (calculated rndv threshold for `ucp_tag_send_nbr`) is closed. The PR review in this update documents the patches; it is not evidence that upstream UCX behaves differently.
 
 ## Run it
 
-- [`notebooks/00_environment_check.ipynb`](../../notebooks/00_environment_check.ipynb): runs `middleware/tests/test_rdma_bootstrap.py` with the rxe0 smoke test enabled on Chimera/Cerberus.
+- [`notebooks/00_environment_check.ipynb`](../../notebooks/00_environment_check.ipynb): runs `middleware/tests/test_rdma_bootstrap.py` with the rxe0 smoke test enabled on server 1 / server 2.
 - The C pools use the same switchless pattern (GID from the table, RC QP to RTR with the GRH set directly): `middleware/libscuffedverbs/`. The libfabric pool in `middleware/libscuffedfabric/` uses provider address exchange instead.
 
 ## Corrections

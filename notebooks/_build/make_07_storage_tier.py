@@ -17,7 +17,7 @@ CELLS = [
 `middleware/rdma_tensor_cache/storage_tier.py`: KV spill / retrieve to local NVMe through one backing file, with coalesced writes (one `pwrite` + `fdatasync` per batch of `coalesce` blocks), contiguous batched reads, crc32 on every read, a free list, and optional O_DIRECT.
 
 1. Functional check: spill, retrieve, corruption detection, free-list reuse.
-2. PMP storage arm and the default policy deciding what to spill.
+2. PMP spill choice and the default policy deciding what to spill.
 3. Coalescing sweep. Same JSON shape as the Update 6 run (`benchmarks/results/test_arch/chimera_storage_spill.json`), which used one file per write; this one goes through `StorageTier`.
 
 Local mode writes small blocks under /tmp; those numbers say nothing about NVMe. Cluster mode: set `SPILL_DIR` to a directory on the drive under test."""),
@@ -49,7 +49,7 @@ print("reused freed slot:", t.extent("small").offset == off)
 print(t.stats())
 print("telemetry storage:", {k: v for k, v in tel.snapshot()["classes"]["storage"].items() if k in ("ops", "bytes", "p50_us", "p99_us")})
 t.close(remove=True)"""),
-("md", "### 2. Who decides to spill\n\nPMP storage arm: above the GPU-memory watermark `u0`, spill competes with the hot and cold queues through `sigma_S = delta * q_S * mu_S - gamma * p`. Below it, the two-arm decision is unchanged."),
+("md", "### 2. Who decides to spill\n\nPMP spill choice: above the GPU-memory watermark `u0`, spill competes with the hot and cold queues through `sigma_S = delta * q_S * mu_S - gamma * p`. Below it, the two-queue decision is unchanged."),
 ("code", """pmp = PMPController(u0=0.85)
 grid_u = np.linspace(0.5, 1.0, 51)
 grid_qs = [0, 50, 100, 200]
@@ -82,8 +82,8 @@ prev_path = ROOT / "benchmarks" / "results" / "test_arch" / "chimera_storage_spi
 if prev_path.exists():
     prev = json.loads(prev_path.read_text())
     pc = [r["coalesce"] for r in prev["coalesce_results"]]
-    axes[0].plot(pc, [r["write_mbps"] for r in prev["coalesce_results"]], "k--", marker="x", label="Update 6 chimera (file per write)")
-    axes[1].plot(pc, [r["read_mbps"] for r in prev["coalesce_results"]], "k--", marker="x", label="Update 6 chimera (file per write)")
+    axes[0].plot(pc, [r["write_mbps"] for r in prev["coalesce_results"]], "k--", marker="x", label="Update 6, server 2 (file per write)")
+    axes[1].plot(pc, [r["read_mbps"] for r in prev["coalesce_results"]], "k--", marker="x", label="Update 6, server 2 (file per write)")
 for ax, t_ in zip(axes, ("write (pwrite + fdatasync)", "read (one pread per batch)")):
     ax.set_xscale("log"); ax.set_xlabel("coalesce depth"); ax.set_ylabel("MB/s"); ax.set_title(t_); ax.legend(fontsize=7)
 plt.suptitle(f"{HOST} ({MODE})"); plt.tight_layout(); plt.show()"""),
@@ -92,5 +92,5 @@ plt.suptitle(f"{HOST} ({MODE})"); plt.tight_layout(); plt.show()"""),
 
 if __name__ == "__main__":
     print(build("07_storage_tier.ipynb", "07 · Storage tier: KV spill and retrieve",
-                "Coalesced NVMe spill through StorageTier, the PMP storage arm, and the policy rule that triggers spills.",
+                "Coalesced NVMe spill through StorageTier, the PMP spill choice, and the policy rule that triggers spills.",
                 PARAMS, CELLS))

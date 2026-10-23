@@ -19,7 +19,7 @@ Two earlier figures are withdrawn and get re-measured in notebook 01: the 8 µs 
 | [Update 4](Update4-UCX/README.md) | UCX analysis, PMP/WFA theory, scuffedQuant, Python MVP | the UCX PRs were not merged |
 | [Update 5](Update5-UCX-Review/README.md) | PR review, security audit, middleware hardening | |
 | [Update 5-2](Update5-2-Architectures/README.md) | per-architecture scuffedQuant, test_arch harness | two drafts: canonical and `stack-draft/` |
-| [Update 6](Update6-StorageTier/README.md) | storage tier for KV offload | spill, coalescing, PMP storage arm now built |
+| [Update 6](Update6-StorageTier/README.md) | storage tier for KV offload | spill, coalescing, PMP spill choice now built |
 | [Update 7](Update7-TransportLandscape/README.md) | RDT, eRNIC, SoL collectives, libfabric / UCX / DOCA | |
 | [Update 8 (draft)](Update8-Libfabric/README.md) | libfabric under the stack, from queue pairs to vLLM | provider behavior; NIXL's libfabric backend as baseline; E1 to E6 transport, E7 one GPU, E8 cross-node TTFT |
 | [Drafts/updates-todo](Drafts/updates-todo/README.md) | backlog drafts | keep / merge / drop per draft |
@@ -28,7 +28,7 @@ Two earlier figures are withdrawn and get re-measured in notebook 01: the 8 µs 
 
 ## Running the work
 
-Every update's README ends with a "Run it" section pointing at the notebook and tests that cover it. The notebooks live in `../notebooks/` and run in `MODE="local"` (smoke) or `MODE="cluster"` (Cerberus and Chimera); notebook 08 also has `MODE="gpu"` for one GPU machine.
+Every update's README ends with a "Run it" section pointing at the notebook and tests that cover it. The notebooks live in `../notebooks/` and run in `MODE="local"` (smoke) or `MODE="cluster"` (server 1 and server 2); notebook 08 also has `MODE="gpu"` for one GPU machine.
 
 ## Notes
 

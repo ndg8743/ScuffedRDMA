@@ -2,11 +2,11 @@
 
 Status of every next step from the proposal through Update 8, checked against the code, results and tests in this repo (22 Oct 2026). Per-update detail and evidence: `Updates/*/README.md`.
 
-**Legend.** built: code and tests in the repo, runs here. cluster: built, needs a run on Cerberus / Chimera (or the towers) to produce thesis numbers. gpu: built, needs one machine with an NVIDIA GPU (notebook 08). open: not built. deferred / dropped: out of the current plan.
+**Legend.** built: code and tests in the repo, runs here. cluster: built, needs a run on server 1 / server 2 (or servers 3 and 4) to produce thesis numbers. gpu: built, needs one machine with an NVIDIA GPU (notebook 08). open: not built. deferred / dropped: out of the current plan.
 
 ## Critical path to the defense
 
-1. **Cluster runs of notebooks 00 to 03** (Cerberus client, Chimera server, SoftRoCE; then Tower 1 and Tower 2 over ConnectX-4). Fills Update 8 E1 to E5 and replaces the withdrawn 8 µs figure. *cluster*
+1. **Cluster runs of notebooks 00 to 03** (server 1 client, server 2 server, SoftRoCE; then server 3 and server 4 over ConnectX-4). Fills Update 8 E1 to E5 and replaces the withdrawn 8 µs figure. *cluster*
 2. **Single-GPU end-to-end run** (notebook 08 on the desktop GPU after `scripts/local_gpu/setup_gpu_env.sh`): vLLM prefill + decode with the connector on one card, greedy match, TTFT / ITL. Fills Update 8 E7. *gpu*
 3. **vLLM disaggregated serving with ScuffedRdmaConnector over FabricBlobChannel, TTFT / ITL against NIXL on UCX and on its LIBFABRIC backend** (notebook 06). Update 8 E8. *cluster*
 4. **Update 8 tables** from the JSON (draft text done), then the related-work chapter in `Updates/Drafts/draft1.tex` (RDT, eRNIC, SoL, the libfabric / UCX / DOCA taxonomy, NIXL's libfabric backend, fabric-lib, and the libfabric results). *open*
@@ -28,7 +28,7 @@ Status of every next step from the proposal through Update 8, checked against th
 | NVSHMEM + OpenMPI GPU-initiated puts | U5-2 | open | |
 | NUMA-aware buffer pool | U2 | open (both lab nodes are single-socket) | |
 | perftest / sockperf baseline | U2 | open | |
-| GPUDirect RDMA on Tower 2 | U1 | open (PVE kernel lacks `CONFIG_INFINIBAND_PEER_MEM`) | |
+| GPUDirect RDMA on server 4 | U1 | open (PVE kernel lacks `CONFIG_INFINIBAND_PEER_MEM`) | |
 
 ## Routing and control
 
@@ -38,7 +38,7 @@ Status of every next step from the proposal through Update 8, checked against th
 | WFA with learned transition weights, synthetic validation | U2, proposal | built; real-trace training is cluster | `wfa_learner.py`, notebook 04 |
 | Rule-Node Expression Tree policy engine | proposal | built | `middleware/policy/` |
 | PMP bang-bang controller | U4 | built | `pmp_controller.py` |
-| PMP storage-pressure arm | U6 step 3 | built | `pmp_controller.py`, notebook 07 |
+| PMP spill choice under GPU memory pressure | U6 step 3 | built | `pmp_controller.py`, notebook 07 |
 
 ## Compression and storage
 

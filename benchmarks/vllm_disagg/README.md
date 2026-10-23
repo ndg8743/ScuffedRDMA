@@ -1,6 +1,6 @@
 # vLLM disaggregated prefill/decode: TTFT and ITL
 
-Measures time to first token and inter-token latency for Granite 3.3-2B served disaggregated (prefill on Cerberus, decode on Chimera) with:
+Measures time to first token and inter-token latency for Granite 3.3-2B served disaggregated (prefill on server 1, decode on server 2) with:
 
 | Label | Setup |
 |---|---|
@@ -15,8 +15,8 @@ No results are checked in from this folder until they come from the cluster.
 
 ```bash
 ./launch.sh print                                                   # every command for the current env
-CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh decode   # chimera, first
-CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh prefill  # cerberus
+CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh decode   # server 2, first
+CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh prefill  # server 1
 CONNECTOR=scuffed ./launch.sh proxy
 
 python run_ttft_sweep.py --url http://localhost:8000 --label scuffed-fabric-verbs \

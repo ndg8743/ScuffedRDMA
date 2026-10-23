@@ -1,8 +1,8 @@
 # Update 8: libfabric Under the Stack, From Queue Pairs to vLLM
 
-Dated October 2026; draft. Text and build are done. The tables fill from notebooks 01 to 03 and 06 on Cerberus and Chimera, and notebook 08 on one GPU.
+Dated October 2026; draft. Text and build are done. The tables fill from notebooks 01 to 03 and 06 on server 1 and server 2, and notebook 08 on one GPU.
 
-The update moves the dual pool onto libfabric and carries it up to vLLM. `libscuffedfabric` gives each traffic class its own endpoint, CQs and, optionally, its own provider and endpoint type. `libscuffedverbs` implements the same C API on raw RC queue pairs, so both stacks run one benchmark source. `FabricBlobChannel` puts a credit-based blob protocol on the pool, and `ScuffedRdmaConnector` moves disaggregated-prefill KV through it inside vLLM. The baseline is the stock stack's own libfabric path, NIXL's `LIBFABRIC` backend. Reading its source shows it selects cxi, efa, tcp or sockets (not verbs) and requires GPUDirect RDMA, so on SoftRoCE and the ConnectX-4 towers it can run over libfabric `tcp` at best. The rest of the October work (telemetry, learned WFA, policy trees, PMP storage arm, NVMe tier, scuffedQuant packing) is summarized around the transport. Experiments E1 to E6 are transport-level, E7 is vLLM prefill and decode on one GPU, E8 is the cross-node TTFT comparison.
+The update moves the dual pool onto libfabric and carries it up to vLLM. `libscuffedfabric` gives each traffic class its own endpoint, CQs and, optionally, its own provider and endpoint type. `libscuffedverbs` implements the same C API on raw RC queue pairs, so both stacks run one benchmark source. `FabricBlobChannel` puts a credit-based blob protocol on the pool, and `ScuffedRdmaConnector` moves disaggregated-prefill KV through it inside vLLM. The baseline is the stock stack's own libfabric path, NIXL's `LIBFABRIC` backend. Reading its source shows it selects cxi, efa, tcp or sockets (not verbs) and requires GPUDirect RDMA, so on SoftRoCE and the ConnectX-4 pair (servers 3 and 4) it can run over libfabric `tcp` at best. The rest of the October work (telemetry, learned WFA, policy trees, PMP spill choice, NVMe tier, scuffedQuant packing) is summarized around the transport. Experiments E1 to E6 are transport-level, E7 is vLLM prefill and decode on one GPU, E8 is the cross-node TTFT comparison.
 
 ## Research
 
@@ -38,14 +38,14 @@ vLLM install for the GPU run
 | Notebook 06: adds the NIXL `LIBFABRIC` setup | `notebooks/06_vllm_disagg_ttft.ipynb` | runs clean in local mode |
 | Text | `update8.tex`, `update8.pdf` | |
 
-Telemetry, learned WFA, policy trees, PMP storage arm, NVMe tier and the scuffedQuant packing fix are tracked in the READMEs of the updates that proposed them (2, 4, 6, 7) and summarized in Section 6 of the tex.
+Telemetry, learned WFA, policy trees, PMP spill choice, NVMe tier and the scuffedQuant packing fix are tracked in the READMEs of the updates that proposed them (2, 4, 6, 7) and summarized in Section 6 of the tex.
 
 ## Next steps as written, status today
 
 | Next step | Status |
 |---|---|
 | 1. Notebook 08 on the desktop GPU, fill E7 | gpu: run `setup_gpu_env.sh`, then the notebook with `MODE = "gpu"` |
-| 2. Notebooks 00 to 03 on Cerberus and Chimera, then the towers; fill E1 to E5 | cluster |
+| 2. Notebooks 00 to 03 on server 1 and server 2, then servers 3 and 4; fill E1 to E5 | cluster |
 | 3. Notebook 06 across nodes for E8, including the NIXL `LIBFABRIC` row | cluster |
 | 4. Make hot RDM + cold MSG the default if it wins E4; route NVMe and GPFS spill through the same domain | open, depends on E4 |
 | 5. Train the learned WFA on telemetry dumps labeled by measured latency | open, depends on 2 and 3 |

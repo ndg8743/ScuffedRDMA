@@ -1,10 +1,10 @@
 # ScuffedRdmaConnector (vLLM KV connector)
 
-Out-of-tree vLLM V1 KV connector for disaggregated prefill (Cerberus, 2x RTX 5090) and decode (Chimera, 3x RTX 3090). Replaces `NixlConnector` / `P2pNcclConnector`: KV moves through the `BlobChannel` interface (`middleware/fabric/channel.py`), so the same connector runs over the libfabric hot/cold pool (`transport: fabric`) or plain TCP (`transport: tcp`).
+Out-of-tree vLLM V1 KV connector for disaggregated prefill (server 1, 2x RTX 5090) and decode (server 2, 3x RTX 3090). Replaces `NixlConnector` / `P2pNcclConnector`: KV moves through the `BlobChannel` interface (`middleware/fabric/channel.py`), so the same connector runs over the libfabric hot/cold pool (`transport: fabric`) or plain TCP (`transport: tcp`).
 
 Written against vLLM `620e8924` (2026-04-12), the commit pinned by the `vllm/` submodule. `KVConnectorBase_V1` is marked experimental upstream; `tests/test_vllm_connector.py::test_signatures_match_vllm_source` re-checks our method signatures against whatever vLLM source is on disk (`VLLM_SRC=/path/to/vllm`). The suite also passes against vLLM 0.24.0 (what `uv pip install vllm` resolves on 2026-10-22): signatures, import and subclass check, and the producer to consumer run through vLLM's own `KVConnectorBase_V1`.
 
-Baselines in `benchmarks/vllm_disagg/launch.sh`: `CONNECTOR=nixl` (NixlConnector, UCX) and `CONNECTOR=nixl-libfabric` (NixlConnector with `"backends": ["LIBFABRIC"]`). NIXL's libfabric plugin picks cxi, efa, tcp or sockets and lists GPUDirect RDMA as required, so on SoftRoCE and the ConnectX-4 towers it runs over libfabric `tcp` at best. This connector stages KV through host memory and runs on the verbs provider.
+Baselines in `benchmarks/vllm_disagg/launch.sh`: `CONNECTOR=nixl` (NixlConnector, UCX) and `CONNECTOR=nixl-libfabric` (NixlConnector with `"backends": ["LIBFABRIC"]`). NIXL's libfabric plugin picks cxi, efa, tcp or sockets and lists GPUDirect RDMA as required, so on SoftRoCE and the ConnectX-4 pair (servers 3 and 4) it runs over libfabric `tcp` at best. This connector stages KV through host memory and runs on the verbs provider.
 
 ## Files
 
@@ -46,7 +46,7 @@ Loads are synchronous (as in `P2pNcclConnector`). Pushes are asynchronous: `save
 | `layout` | auto | Force `flash`, `flashinfer`, or `mla` block axis. |
 | `metrics_port` | unset | Serve Prometheus `/metrics` on `metrics_port + rank`. |
 
-## Launch (Chimera decode, Cerberus prefill)
+## Launch (server 2 decode, server 1 prefill)
 
 `benchmarks/vllm_disagg/launch.sh print` prints every command with current env settings. By hand:
 
@@ -54,27 +54,27 @@ Loads are synchronous (as in `P2pNcclConnector`). Pushes are asynchronous: `save
 # both nodes, repo root
 export PYTHONPATH=$PWD
 
-# chimera (decode, start first)
+# Server 2 (decode, start first)
 vllm serve ibm-granite/granite-3.3-2b-instruct --port 8200 --no-enable-prefix-caching \
   --kv-transfer-config '{"kv_connector":"ScuffedRdmaConnector","kv_connector_module_path":"middleware.vllm_plugin.connector","kv_role":"kv_consumer","kv_connector_extra_config":{"port":14600,"transport":"fabric","provider":"verbs","ep_type":"msg"}}'
 
-# cerberus (prefill)
+# Server 1 (prefill)
 vllm serve ibm-granite/granite-3.3-2b-instruct --port 8100 --no-enable-prefix-caching \
-  --kv-transfer-config '{"kv_connector":"ScuffedRdmaConnector","kv_connector_module_path":"middleware.vllm_plugin.connector","kv_role":"kv_producer","kv_connector_extra_config":{"peer":"chimera","port":14600,"transport":"fabric","provider":"verbs","ep_type":"msg"}}'
+  --kv-transfer-config '{"kv_connector":"ScuffedRdmaConnector","kv_connector_module_path":"middleware.vllm_plugin.connector","kv_role":"kv_producer","kv_connector_extra_config":{"peer":"server2","port":14600,"transport":"fabric","provider":"verbs","ep_type":"msg"}}'
 
 # proxy
-python -m middleware.vllm_plugin.proxy --prefill http://cerberus:8100 --decode http://chimera:8200 --port 8000
+python -m middleware.vllm_plugin.proxy --prefill http://server1:8100 --decode http://server2:8200 --port 8000
 ```
 
 `transport: tcp` gives the same connector over a TCP socket, the control for the transport comparison. The NIXL baseline is `CONNECTOR=nixl ./launch.sh ...` with `--mode nixl` on the proxy.
 
-Cerberus (SM_120) and Chimera (SM_86) run different attention kernels; the connector only requires that both sides use the same KV cache layout, block size, and dtype. If the backends differ in layout, force one with `layout`, or pick the same attention backend on both (`VLLM_ATTENTION_BACKEND`).
+Server 1 (SM_120) and server 2 (SM_86) run different attention kernels; the connector only requires that both sides use the same KV cache layout, block size, and dtype. If the backends differ in layout, force one with `layout`, or pick the same attention backend on both (`VLLM_ATTENTION_BACKEND`).
 
 ## Transport check without vLLM
 
 ```bash
-chimera$  python -m middleware.vllm_plugin.loopback --role consumer --port 14600 --transport fabric --provider verbs
-cerberus$ python -m middleware.vllm_plugin.loopback --role producer --peer chimera --port 14600 --transport fabric --provider verbs
+server2$  python -m middleware.vllm_plugin.loopback --role consumer --port 14600 --transport fabric --provider verbs
+server1$ python -m middleware.vllm_plugin.loopback --role producer --peer server2 --port 14600 --transport fabric --provider verbs
 ```
 
 Granite 3.3-2B shaped cache (40 layers, 8 KV heads, head_dim 64, bfloat16). Both sides print a SHA-256 per request; they must match.

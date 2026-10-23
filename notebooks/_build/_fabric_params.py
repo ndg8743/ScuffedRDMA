@@ -2,7 +2,7 @@
 
 PARAMS = '''MODE = "local"            # "local": smoke runs on this machine (tcp / tcp;ofi_rxm / shm providers)
                           # "cluster": this host is the client, the server runs on PEER over ssh
-PEER = "cerberus"         # ssh host for the server side (cluster mode)
+PEER = "server1"         # ssh host for the server side (cluster mode)
 PEER_IP = "192.168.1.242" # server address on the RDMA netdev; default taken from benchmark_dual_qp_remote.py, check it
 REMOTE_REPO = None        # repo path on PEER if it differs from this host
 DOMAIN = "rxe0"           # RDMA device / libfabric domain on both nodes

@@ -13,8 +13,8 @@ Per request:
 Adds response header X-Scuffed-Prefill-Ms (proxy-side prefill round trip) so
 TTFT can be split into prefill vs. transfer+decode.
 
-    python -m middleware.vllm_plugin.proxy --prefill http://cerberus:8100 \
-        --decode http://chimera:8200 --port 8000 --mode scuffed
+    python -m middleware.vllm_plugin.proxy --prefill http://server1:8100 \
+        --decode http://server2:8200 --port 8000 --mode scuffed
 
 Needs fastapi, uvicorn, httpx (installed with vLLM).
 """

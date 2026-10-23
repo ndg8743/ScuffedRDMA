@@ -5,7 +5,7 @@ diffable. Each make_*.py builds one notebook with nbformat.
 Conventions every notebook follows:
   - First code cell is the parameter cell (tagged "parameters" for papermill):
       MODE = "local"   # "local": smoke sizes on any Linux box, results to /tmp
-                       # "cluster": real runs on Chimera/Cerberus, results to benchmarks/results/
+                       # "cluster": real runs on server 1 / server 2, results to benchmarks/results/
   - A setup cell finds the repo root and puts it on sys.path.
   - Cluster-mode results are JSON tagged with hostname and UTC timestamp.
   - Local-mode numbers are smoke tests, never thesis results.

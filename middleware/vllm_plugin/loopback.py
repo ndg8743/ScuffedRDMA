@@ -10,8 +10,8 @@ Single machine (two processes):
     python -m middleware.vllm_plugin.loopback --role both --transport tcp
 
 Across nodes (start the consumer first):
-    chimera$  python -m middleware.vllm_plugin.loopback --role consumer --port 14600 --transport fabric --provider verbs
-    cerberus$ python -m middleware.vllm_plugin.loopback --role producer --peer chimera --port 14600 --transport fabric --provider verbs
+    server2$  python -m middleware.vllm_plugin.loopback --role consumer --port 14600 --transport fabric --provider verbs
+    server1$ python -m middleware.vllm_plugin.loopback --role producer --peer server2 --port 14600 --transport fabric --provider verbs
 
 A 16-token warmup request goes first (connection setup) and is not reported;
 load_ms on the consumer is the wait for each request's layers to arrive, so

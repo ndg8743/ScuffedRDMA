@@ -26,11 +26,11 @@ What exists now:
 \item \texttt{libscuffedverbs}: the same C API on raw libibverbs RC queue pairs, so both stacks run one benchmark source.
 \item \texttt{FabricBlobChannel}: a Python blob channel over the pool, and \texttt{ScuffedRdmaConnector}, a vLLM V1 KV connector that moves disaggregated-prefill KV through it.
 \item A baseline path through vLLM's \texttt{NixlConnector} with NIXL's own \texttt{LIBFABRIC} backend, next to the usual UCX one.
-\item Around the transport: unified telemetry, a WFA with learned weights, the rule-tree policy engine, the PMP storage arm and an NVMe tier (Section~\ref{sec:stack}).
+\item Around the transport: unified telemetry, a WFA with learned weights, the rule-tree policy engine, the PMP spill choice and an NVMe tier (Section~\ref{sec:stack}).
 \item Nine Jupyter notebooks. Each runs in a local mode (smoke tests on any machine) and a cluster or GPU mode that produces the numbers.
 \end{itemize}
 
-Everything below was built and run end to end on libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers, and the connector passes its tests against vLLM 0.24.0's own base class. None of those runs are results. The tables are filled by notebooks 01 to 03 and 06 on Cerberus and Chimera, and by notebook 08 on a single desktop GPU.
+Everything below was built and run end to end on libfabric 1.17's \texttt{tcp}, \texttt{tcp;ofi\_rxm} and \texttt{shm} providers, and the connector passes its tests against vLLM 0.24.0's own base class. None of those runs are results. The tables are filled by notebooks 01 to 03 and 06 on server 1 and server 2, and by notebook 08 on a single desktop GPU.
 
 \section{Why libfabric}
 
@@ -90,7 +90,7 @@ The connector needs ``send this named blob, receive named blobs'', not raw write
 \subsection{ScuffedRdmaConnector}
 An out-of-tree \texttt{KVConnectorBase\_V1} loaded through \texttt{kv\_connector\_module\_path}. The proxy sends the prompt to prefill with \texttt{max\_tokens=1} and a transfer id. Each attention layer's \texttt{save\_kv\_layer} gathers that request's paged blocks, copies them to host memory, encodes them (raw bfloat16, or scuffedQuant for the cold path) and queues one blob per layer. The WFA tags each blob hot or cold. Decode reports the prompt as externally matched, waits per layer, and scatters into its own paged cache. Layers that never arrive go back to vLLM through \texttt{get\_block\_ids\_with\_load\_errors} and are recomputed. If the libfabric channel cannot open, the connector falls back to TCP and records a \texttt{tcp\_fallback} telemetry event.
 
-Staging through host memory is a deliberate choice for this hardware: Tower 2's Proxmox kernel lacks \texttt{CONFIG\_INFINIBAND\_PEER\_MEM}, SoftRoCE has no GPUDirect path, and neither does a desktop GPU under WSL2. It costs a device-to-host copy per layer. E7 and E8 show how much of TTFT that is.
+Staging through host memory is a deliberate choice for this hardware: server 4's Proxmox kernel lacks \texttt{CONFIG\_INFINIBAND\_PEER\_MEM}, SoftRoCE has no GPUDirect path, and neither does a desktop GPU under WSL2. It costs a device-to-host copy per layer. E7 and E8 show how much of TTFT that is.
 
 The connector was written against vLLM \texttt{620e8924} (April 2026). Its tests now also pass against vLLM 0.24.0, the version a fresh install resolves today: method signatures against the 0.24.0 source, import and subclass check against the installed package, and a producer to consumer run through vLLM's own \texttt{KVConnectorBase\_V1} (CPU, no model).
 
@@ -102,7 +102,7 @@ Reading the plugin at NIXL commit \texttt{d642316} (22 Oct 2026)~\cite{nixl_lf}:
 \item Provider discovery asks for \texttt{FI\_EP\_RDM} with \texttt{FI\_MSG}\,\textbar\,\texttt{FI\_RMA} and takes \texttt{cxi}, then \texttt{efa}, then \texttt{tcp}, then \texttt{sockets}. \texttt{verbs} is not in that list.
 \item Its README lists libfabric 1.21 or newer and GPUDirect RDMA as requirements, and AWS EFA as the only validated hardware.
 \end{itemize}
-So on Cerberus and Chimera (SoftRoCE) and on the towers (ConnectX-4 without peer memory), NIXL's libfabric backend can at most run over libfabric \texttt{tcp}, and may not start at all. If it does not start, the error is the result and goes in the table as such. The contrast is the point: the libfabric path the serving stack ships is shaped around EFA and Slingshot with GPUDirect, while this pool targets verbs on commodity RoCE with host staging.
+So on server 1 and server 2 (SoftRoCE) and on servers 3 and 4 (ConnectX-4 without peer memory), NIXL's libfabric backend can at most run over libfabric \texttt{tcp}, and may not start at all. If it does not start, the error is the result and goes in the table as such. The contrast is the point: the libfabric path the serving stack ships is shaped around EFA and Slingshot with GPUDirect, while this pool targets verbs on commodity RoCE with host staging.
 
 \section{The rest of the stack}
 \label{sec:stack}
@@ -113,7 +113,7 @@ Built this month, around the transport. All of it has tests and a notebook.
 \item \textbf{Telemetry} (\texttt{middleware/telemetry.py}). One \texttt{SignalVector} per transfer (size, role, phase, QP class, queue depth, completion latency, inter-arrival), per-class counters including QP errors, reconnects and TCP fallbacks, log-bucketed latency histograms, and Prometheus export. The pyverbs pool, the libfabric pool and the connector all report into it, so the classifier, the policy engine and the evaluation read the same numbers.
 \item \textbf{Learned WFA} (\texttt{wfa\_learner.py}, notebook 04). Transition weights fit by gradient descent on \texttt{SignalVector} features, with phase-by-size terms so each phase can have its own size cutoff. On synthetic traces the static threshold classifier routes most decode KV deltas cold: they fall in its 4\,KB to 256\,KB band, where it routes by access count, and most have not been seen often enough to go hot. The learned weights recover the labeling rule. That is a synthetic result and partly by construction, since the oracle defines decode deltas as hot. The real test is training on telemetry dumps from the cluster runs, labeled by measured completion latency.
 \item \textbf{Rule-Node Expression Trees} (\texttt{middleware/policy/}). Boolean trees over signals and context (GPU memory, link utilization), tried in priority order, deciding route (hot, cold, spill) and compression. Classifiers plug in as leaves, so the WFA is one input to the policy, not the policy.
-\item \textbf{PMP storage arm} (\texttt{pmp\_controller.py}, notebook 07). A third bang-bang arm for spill that activates above a GPU-memory watermark, with hysteresis. Below the watermark the two-arm controller from Update 4 is unchanged.
+\item \textbf{PMP spill choice} (\texttt{pmp\_controller.py}, notebook 07). A third bang-bang choice, spill, that becomes available above a GPU-memory watermark, with hysteresis. Below the watermark the two-queue controller from Update 4 is unchanged.
 \item \textbf{NVMe tier} (\texttt{storage\_tier.py}, notebook 07). Spill and retrieve with coalesced \texttt{pwrite}, CRC-checked reads, extent reuse, optional \texttt{O\_DIRECT}, gated by the policy or PMP decision.
 \item \textbf{scuffedQuant wire format.} Indices are now bit-packed and \texttt{CompressedKV.nbytes} reports packed bytes. At head\_dim 64, 3 bits and a 256-bit QJL sketch, that is 2$\times$ against FP16.
 \item \textbf{NCCL net plugin} (\texttt{middleware/nccl\_plugin/}) builds. An NCCL and vLLM run on it is still open.
@@ -125,12 +125,13 @@ Built this month, around the transport. All of it has tests and a notebook.
 \item The 8\,$\mu$s cross-node figure is withdrawn. The Python pool from Update 4 did not check completion status, so failed or flushed writes counted as fast completions, including 8\,MB writes that ``completed'' in about 8\,$\mu$s, which 10GbE cannot do. The pool now raises on a bad status and notebook 01 re-runs it.
 \item The scuffedQuant ratio quoted as 4$\times$ against FP16 was against FP32. It is 2$\times$ against FP16 (above).
 \item Several README rows (SoftRoCE bandwidth, single-QP p50, dual-QP overhead, FA3 speedup) cited sources that do not hold them. They are removed and re-measured where they matter.
+\item The PMP switching function $S = \alpha q_H C\mu_H - \beta q_C C\mu_C$ was derived in Update 4 for a model where the control shares the link between queues; under that model $S > 0$ means serve hot. The code uses the decision to route a new transfer and sends it cold when $S > 0$. For routing, the same derivation gives a rule in which the drain rates divide instead of multiply ($\alpha q_H/\mu_H$ vs $\beta q_C/\mu_C$). The bang-bang structure stands; the switching rule will be fixed before any PMP result is reported. Derivation: \nolinkurl{docs/explained/10-pmp-controller.md}.
 \end{itemize}
 
 \section{Experiments}
 \label{sec:exp}
 
-E1 to E6 and E8: Cerberus as client or prefill, Chimera as server or decode, SoftRoCE on 10GbE, hot and cold threads pinned away from the NIC interrupts. Repeat E1 to E5 on Tower 1 and Tower 2 over ConnectX-4. Every number traces to a JSON file that records the exact commands, \texttt{fi\_info --version} and the provider string per class.
+E1 to E6 and E8: server 1 as client or prefill, server 2 as benchmark target or decode, SoftRoCE on 10GbE, hot and cold threads pinned away from the NIC interrupts. Repeat E1 to E5 on server 3 and server 4 over ConnectX-4. Every number traces to a JSON file that records the exact commands, \texttt{fi\_info --version} and the provider string per class.
 
 \subsection{E1. Hot-path latency by stack}
 \texttt{sig -M cq}, one-way latency (RTT/2), 8\,B to 64\,KB. Notebook 03.
@@ -147,7 +148,7 @@ libfabric verbs MSG & \pend & \pend & \pend & \pend \\
 libfabric verbs;ofi\_rxm RDM & \pend & \pend & \pend & \pend \\
 \bottomrule
 \end{tabular}
-\caption{Hot-path latency, SoftRoCE, Cerberus $\leftrightarrow$ Chimera.}
+\caption{Hot-path latency, SoftRoCE, server 1 $\leftrightarrow$ server 2.}
 \end{table}
 
 \subsection{E2. Cold bandwidth}
@@ -207,7 +208,7 @@ NixlConnector, LIBFABRIC & \pend & \pend & \pend \\
 \end{table}
 
 \subsection{E8. vLLM disaggregated serving across nodes}
-Notebook 06. Prefill on Cerberus, decode on Chimera, the same TTFT/ITL sweep (128 to 4096 prompt tokens) against five setups: single node, \texttt{ScuffedRdmaConnector} on libfabric verbs, the same connector on TCP, \texttt{NixlConnector} on UCX, and \texttt{NixlConnector} on its \texttt{LIBFABRIC} backend over \texttt{tcp}. This is the experiment the thesis question is asked at.
+Notebook 06. Prefill on server 1, decode on server 2, the same TTFT/ITL sweep (128 to 4096 prompt tokens) against five setups: single node, \texttt{ScuffedRdmaConnector} on libfabric verbs, the same connector on TCP, \texttt{NixlConnector} on UCX, and \texttt{NixlConnector} on its \texttt{LIBFABRIC} backend over \texttt{tcp}. This is the experiment the thesis question is asked at.
 
 \section{What the comparison can and cannot show}
 
@@ -222,7 +223,7 @@ Notebook 06. Prefill on Cerberus, decode on Chimera, the same TTFT/ITL sweep (12
 
 \begin{enumerate}
 \item Run notebook 08 on the desktop GPU and fill E7.
-\item Run notebooks 00 to 03 on Cerberus and Chimera, then the towers. Fill E1 to E5.
+\item Run notebooks 00 to 03 on server 1 and server 2, then servers 3 and 4. Fill E1 to E5.
 \item Run notebook 06 across nodes for E8, including the NIXL \texttt{LIBFABRIC} row.
 \item If hot RDM + cold MSG wins E4, make it the default and route NVMe and GPFS spill through the same libfabric domain.
 \item Train the learned WFA on the telemetry dumps from these runs, labeled by measured latency, and compare against the static classifier on real traces.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Launch helpers for disaggregated prefill (Cerberus) / decode (Chimera).
+# Launch helpers for disaggregated prefill (server 1) / decode (server 2).
 #
-#   CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh decode    # on chimera, start first
-#   CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh prefill   # on cerberus
+#   CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh decode    # on server 2, start first
+#   CONNECTOR=scuffed TRANSPORT=fabric PROVIDER=verbs ./launch.sh prefill   # on server 1
 #   CONNECTOR=scuffed ./launch.sh proxy                                     # anywhere
 #   ./launch.sh single                                                      # no-disagg baseline, one node
 #   ./launch.sh print                                                       # show every command, run nothing
@@ -19,8 +19,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 
 MODEL="${MODEL:-ibm-granite/granite-3.3-2b-instruct}"
-PREFILL_HOST="${PREFILL_HOST:-cerberus}"
-DECODE_HOST="${DECODE_HOST:-chimera}"
+PREFILL_HOST="${PREFILL_HOST:-server1}"
+DECODE_HOST="${DECODE_HOST:-server2}"
 PREFILL_PORT="${PREFILL_PORT:-8100}"
 DECODE_PORT="${DECODE_PORT:-8200}"
 PROXY_PORT="${PROXY_PORT:-8000}"
@@ -61,7 +61,7 @@ serve_cmd() {     # $1 = prefill | decode
         # NIXL's own libfabric backend, the direct baseline for ScuffedRdmaConnector over libfabric.
         # Its provider discovery (src/utils/libfabric/libfabric_common.cpp, nixl d642316) asks for
         # FI_EP_RDM + FI_MSG|FI_RMA and takes cxi, then efa, then tcp, then sockets. verbs is not in
-        # that list, so on Cerberus / Chimera and the towers it can only run over tcp. The plugin
+        # that list, so on server 1 / server 2 and servers 3 and 4 it can only run over tcp. The plugin
         # README also lists libfabric >= 1.21 and GPUDirect RDMA as requirements.
         cfg='{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
         env="VLLM_NIXL_SIDE_CHANNEL_HOST=$host VLLM_NIXL_SIDE_CHANNEL_PORT=$sport FI_PROVIDER=${NIXL_FI_PROVIDER:-tcp} "

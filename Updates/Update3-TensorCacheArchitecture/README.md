@@ -2,7 +2,7 @@
 
 Dated February 2026 in the tex. The folder was swapped with the old "Update 8" during the 2026-03-12 reorganization (`1c4aba2`), which is why the bibliography is still named `update8.bib`. The tex was edited across `7841ac0`, `e313564` (2026-02-14, Neumann replaced by the tensor database) and `a0d82ce` (2026-03-11, ScuffedKernels added).
 
-This update is about the home towers, not the lab pair. It argues that a V100 (FP16 Tensor Cores, GPUDirect RDMA, no BF16) and a 5070 Ti (BF16, no RDMA stack on Windows) need a centralized FP32 master-weight cache with stochastic rounding per device, and that MLA/MQA models duplicate the KV cache on every tensor-parallel rank, so the KV cache should live in an external tensor database reached over one-sided RDMA reads through a vLLM V1 KV connector. It also surveys the NVIDIA communication stack, TP vs PP for the two-tower cluster, Amdahl and Gustafson applied to kernel work, CUDA vs Triton, NVSHMEM, AMD IRIS, the vLLM Semantic Router, and sketches two side projects (ScuffedKernels, ScuffedSearch) and SAE feature steering. All experiments are marked planned and untested in the tex.
+This update is about the servers 3 and 4, not the lab pair. It argues that a V100 (FP16 Tensor Cores, GPUDirect RDMA, no BF16) and a 5070 Ti (BF16, no RDMA stack on Windows) need a centralized FP32 master-weight cache with stochastic rounding per device, and that MLA/MQA models duplicate the KV cache on every tensor-parallel rank, so the KV cache should live in an external tensor database reached over one-sided RDMA reads through a vLLM V1 KV connector. It also surveys the NVIDIA communication stack, TP vs PP for the two-tower cluster, Amdahl and Gustafson applied to kernel work, CUDA vs Triton, NVSHMEM, AMD IRIS, the vLLM Semantic Router, and sketches two side projects (ScuffedKernels, ScuffedSearch) and SAE feature steering. All experiments are marked planned and untested in the tex.
 
 ## Research
 
@@ -57,7 +57,7 @@ Update 3 has no Next Steps list. The experimental pillars and side projects are 
 | Pillar 2: prefetch effectiveness (hit rate, wasted prefetch) | open | Code in `prefetch.py`; no result. |
 | Pillar 3: MXFP4 adaptive quantization | dropped | Superseded by scuffedQuant (Update 4). |
 | Centralized KV cache via vLLM V1 connector | partial | `ScuffedRdmaConnector` in `middleware/vllm_plugin/` (built Oct 2026); cluster run pending. |
-| SoftRoCEv2 vs hardware RoCE baseline on Tower 2 | partial | Table 6 is published specs, flagged "not our measurements". Hardware RoCEv2 was measured later (50.62 Gb/s, 0.71 us loopback on ConnectX-4) in backlog draft `Update8-InfrastructureRDMATesting`. |
+| SoftRoCEv2 vs hardware RoCE baseline on server 4 | partial | Table 6 is published specs, flagged "not our measurements". Hardware RoCEv2 was measured later (50.62 Gb/s, 0.71 us loopback on ConnectX-4) in backlog draft `Update8-InfrastructureRDMATesting`. |
 | UCX/UCC integration path | dropped | Updates 4 and 7 moved the data path off UCX. |
 | ScuffedKernels, ScuffedSearch | dropped | Deleted in `022b895`. The fused gather-Hadamard-rescale kernel idea resurfaces in Update 5-2. |
 | SAE feature steering | partial | `sae_steering.py` exists and was hardened in Update 5; no steering results. |
@@ -66,12 +66,12 @@ Update 3 has no Next Steps list. The experimental pillars and side projects are 
 ## Run it
 
 - [`notebooks/05_scuffedquant.ipynb`](../../notebooks/05_scuffedquant.ipynb) covers what replaced Pillar 3.
-- [`notebooks/03_libfabric_vs_libibverbs.ipynb`](../../notebooks/03_libfabric_vs_libibverbs.ipynb) on Tower 2 gives the measured SoftRoCE vs hardware RoCE comparison Table 6 projected.
+- [`notebooks/03_libfabric_vs_libibverbs.ipynb`](../../notebooks/03_libfabric_vs_libibverbs.ipynb) on server 4 gives the measured SoftRoCE vs hardware RoCE comparison Table 6 projected.
 - Pillars 1 and 2 have no notebook. If they stay in the thesis they need one; otherwise move them to future work.
 
 ## Corrections
 
-- Table 6 lists SoftRoCE latency as ~190 us "typical". That number is the testbed's own `ib_write_lat` RTT between Chimera and Cerberus (backlog draft `Update8-InfrastructureRDMATesting`), not a published typical value.
+- Table 6 lists SoftRoCE latency as ~190 us "typical". That number is the testbed's own `ib_write_lat` RTT between server 1 and server 2 (backlog draft `Update8-InfrastructureRDMATesting`), not a published typical value.
 - The RTX 5070 Ti is listed as compute capability 12.0 (correct, SM_120). Note SM_120 lacks `tcgen05` and `wgmma`, so Blackwell-datacenter kernels (SM_100) do not apply to it.
 - The module-mapping table points at Rust files that are not in this repo; cite the Python modules above instead.
-- "GPUDirect RDMA: V100 GPU memory via `cuda_copy,gdr_copy`": in UCX those are the CUDA copy transports; GPUDirect RDMA itself goes through the RC transport with `nvidia-peermem`, which is still blocked on Tower 2's kernel.
+- "GPUDirect RDMA: V100 GPU memory via `cuda_copy,gdr_copy`": in UCX those are the CUDA copy transports; GPUDirect RDMA itself goes through the RC transport with `nvidia-peermem`, which is still blocked on server 4's kernel.

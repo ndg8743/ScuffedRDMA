@@ -57,3 +57,4 @@ middleware/nccl_plugin/libscuffed_nccl_net.so
 .ipynb_checkpoints/
 docs/animations/build/
 docs/animations/__pycache__/
+docs/animations/build2/

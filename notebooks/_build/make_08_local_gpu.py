@@ -1,6 +1,6 @@
 from nbtools import build
 
-params = '''MODE = "local"            # "gpu": one machine with an NVIDIA GPU (desktop under WSL2, or Cerberus / Chimera alone)
+params = '''MODE = "local"            # "gpu": one machine with an NVIDIA GPU (desktop under WSL2, or server 1 / server 2 alone)
                           # "local": no GPU; every GPU cell reports what it would run and skips
 RESULTS_SUBDIR = "local_gpu"
 MODEL = "ibm-granite/granite-3.3-2b-instruct"
@@ -8,7 +8,7 @@ GPU_UTIL_EACH = 0.40      # two vLLM instances share one GPU (prefill + decode);
 MAX_MODEL_LEN = 4096
 VLLM_EXTRA = "--enforce-eager"   # no CUDA graphs: less memory, slower; drop it on a 24 GB+ card
 PROVIDER = "shm"          # both instances on one host: shm (RDM). "tcp" with EP_TYPE="msg" also works;
-                          # on a node with an RDMA NIC (Tower 1's ConnectX-4) "verbs" + "msg" loops back through the NIC (untested)
+                          # on a node with an RDMA NIC (server 3's ConnectX-4) "verbs" + "msg" loops back through the NIC (untested)
 EP_TYPE = "rdm"
 PROMPT_LENS = "128,512,1024,2048,3072"
 N_REQ = 10                # requests per prompt length in the TTFT sweep
@@ -20,7 +20,7 @@ STARTUP_TIMEOUT_S = 900'''
 cells = [
 ("md", """Everything in the thesis stack that a single GPU can exercise, on one machine. No RDMA device is needed:
 the two vLLM instances talk through libfabric's `shm` (or `tcp`) provider, which is the same
-`FabricBlobChannel` code path the verbs provider uses between Cerberus and Chimera.
+`FabricBlobChannel` code path the verbs provider uses between server 1 and server 2.
 
 What it checks, in order:
 1. GPU, torch, vLLM versions; native builds; the full test suite including the `gpu`-marked tests.

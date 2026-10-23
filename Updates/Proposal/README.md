@@ -40,7 +40,7 @@ The proposal itself produced no code. What came after it, by component:
 
 | Proposed deliverable | Status | Evidence |
 |---|---|---|
-| RoCE/iWARP config, vLLM distributed setup, baselines | partial | SoftRoCE runs on Chimera/Cerberus; hardware RoCEv2 on the ConnectX-4 towers (backlog draft `Update8-InfrastructureRDMATesting`). iWARP never configured: the X710 has no iWARP. |
+| RoCE/iWARP config, vLLM distributed setup, baselines | partial | SoftRoCE runs on server 1 / server 2; hardware RoCEv2 on the ConnectX-4 pair (servers 3 and 4) (backlog draft `Update8-InfrastructureRDMATesting`). iWARP never configured: the X710 has no iWARP. |
 | Zero-copy library, CUDA Top-K kernels, multi-QP | partial | Multi-QP pool exists (Python, then C in `middleware/libscuffedverbs/` and `middleware/libscuffedfabric/`). Top-K kernels dropped for scuffedQuant. |
 | Access tracking, classifier, monitoring | partial | Classifier and telemetry exist; access tracking inside vLLM does not. |
 | Multi-queue scheduler, end-to-end vLLM integration | partial | PMP controller exists; vLLM connector in `middleware/vllm_plugin/` is new and not yet measured end to end. |
@@ -56,7 +56,7 @@ The proposal itself produced no code. What came after it, by component:
 
 ## Corrections
 
-- "Cerberus: Intel X710 10GbE with hardware iWARP": the X710 does not support iWARP (only the X722 does). Cerberus runs SoftRoCE.
-- "Chimera: potential Mellanox ConnectX-6 100GbE upgrade": never happened. Chimera runs SoftRoCE on the Aquantia AQC107.
+- "server 1: Intel X710 10GbE with hardware iWARP": the X710 does not support iWARP (only the X722 does). Server 1 runs SoftRoCE.
+- "server 2: potential Mellanox ConnectX-6 100GbE upgrade": never happened. Server 2 runs SoftRoCE on the Aquantia AQC107.
 - "Hot tensors send via dedicated UD queue pairs": UD supports only SEND up to path MTU, no RDMA WRITE or WRITE_WITH_IMM. The built design uses RC for both classes.
 - "sub-10 microsecond latency versus 50-100 microseconds with TCP": a hardware RoCE figure. SoftRoCE on this testbed measured about 190 us round trip with `ib_write_lat` (backlog draft `Update8-InfrastructureRDMATesting`).

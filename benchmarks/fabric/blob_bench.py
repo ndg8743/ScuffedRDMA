@@ -3,8 +3,8 @@
 Cross-node blob throughput: FabricBlobChannel (libfabric dual endpoint) vs
 TcpBlobChannel, KV-sized blobs, as the vLLM connector uses them.
 
-    server (e.g. chimera):  python3 benchmarks/fabric/blob_bench.py --role server --transport fabric --provider verbs --port 31700
-    client (e.g. cerberus): python3 benchmarks/fabric/blob_bench.py --role client --host <server ip> --transport fabric --provider verbs --port 31700 --out r.json
+    server (e.g. server 2):  python3 benchmarks/fabric/blob_bench.py --role server --transport fabric --provider verbs --port 31700
+    client (e.g. server 1): python3 benchmarks/fabric/blob_bench.py --role client --host <server ip> --transport fabric --provider verbs --port 31700 --out r.json
 
 The server echoes one 8-byte ack per blob so the client measures end-to-end
 delivery, not just local posting.

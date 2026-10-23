@@ -45,7 +45,7 @@ Stack draft (`4bc0a38`, `ad4443e`, `be2dc3f`):
 
 Results (canonical, both nodes, `benchmarks/results/test_arch/`, aggregated in `test_arch_comparison.tex`):
 
-| Architecture (model in the JSON) | bits | ratio | top-8 overlap, cerberus / chimera |
+| Architecture (model in the JSON) | bits | ratio | top-8 overlap, server 1 / server 2 |
 |---|---|---|---|
 | transformer (`granite-3.3-2b-instruct`, 4-layer subset) | 3 | 4.00x | 83.59% / 82.42% |
 | granite4_hybrid (`granite-4.0-h-micro`) | 3 | 5.64x | 96.25% / 95.94% |
@@ -62,7 +62,7 @@ Canonical:
 
 | Next step | Status | Evidence |
 |---|---|---|
-| Run `test_arch/run_all.sh` on Chimera and Cerberus | done | Both hosts' JSONs exist; `test_arch_comparison.tex` is filled. |
+| Run `test_arch/run_all.sh` on server 1 and server 2 | done | Both hosts' JSONs exist; `test_arch_comparison.tex` is filled. |
 | Wire `test_arch` into the KV connector with Mamba/MoE branches | open | `middleware/vllm_plugin/` targets Transformer KV first. |
 | Long-context (128k) streaming prefill | open | |
 | Mamba-3 weights | open | All "mamba3" rows use `mamba-130m-hf`. |
@@ -93,6 +93,6 @@ Stack draft:
 - **Decompression prose vs table.** The text says the 4k-row speedup "widens to 1.8-2.0x"; `gpu_decompress_comparison.tex` shows 3.20x (3-bit), 3.70x (4-bit) and 1.64x (8-bit) at 4,096 rows.
 - **"PolarQuant (Walsh-Hadamard + per-coordinate codebook)".** That stage is TurboQuant's rotation plus Lloyd-Max quantization; PolarQuant (arXiv:2502.02617) is a different, polar-coordinate method. The QJL residual is a 256-bit sign sketch per vector in Update 4's runs.
 - **NCCL plugin description (stack draft).** The text describes `ncclNet_v9` and a PMP background thread that moves the threshold. The code implements `ncclNet_v8_t` with a fixed 4 KB size split and no controller thread.
-- **Storage spill block size (stack draft).** The "1.5 MB compressed block" (1,568 KB in the JSON) is 8,192 rows x 128 dims serialized with `uint8` indices and one byte per QJL sign (default `qjl_dim` 64) and omits residual norms, so it is only about 1.3x smaller than the 2 MB FP16 block it represents. The "6.4x compression" quoted next to it does not match the bytes written. The benchmark writes to `tempfile.TemporaryDirectory()`, so whether it hit NVMe or tmpfs depends on Chimera's `/tmp`, which is not recorded.
-- **OS versions disagree.** The stack draft says Ubuntu 22.04, CUDA 12.8, rdma-core 55; Update 4's infrastructure table says Ubuntu 24.04, CUDA 12.4, pyverbs 50.0 on Chimera. Notebook 00 now records versions per run.
+- **Storage spill block size (stack draft).** The "1.5 MB compressed block" (1,568 KB in the JSON) is 8,192 rows x 128 dims serialized with `uint8` indices and one byte per QJL sign (default `qjl_dim` 64) and omits residual norms, so it is only about 1.3x smaller than the 2 MB FP16 block it represents. The "6.4x compression" quoted next to it does not match the bytes written. The benchmark writes to `tempfile.TemporaryDirectory()`, so whether it hit NVMe or tmpfs depends on server 2's `/tmp`, which is not recorded.
+- **OS versions disagree.** The stack draft says Ubuntu 22.04, CUDA 12.8, rdma-core 55; Update 4's infrastructure table says Ubuntu 24.04, CUDA 12.4, pyverbs 50.0 on server 2. Notebook 00 now records versions per run.
 - Both versions call the six UCX PRs "upstream UCX patches"; none were merged (see the Update 5 README).

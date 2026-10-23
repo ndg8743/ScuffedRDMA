@@ -2,7 +2,7 @@
 
 Dated 2026-03-31. The code landed first (`8e01509`, 2026-03-31: libscuffedrdma MVP with dual QP pools, WFA classifier, PMP controller, benchmarks), then a week of tex revisions (`f69f942` through `e51e2ee`, 2026-04-02 to 2026-04-05), with scuffedQuant added in `075cdc6` / `63da0b5` / `4bc79ff` and the cross-node run in `09946e6` (2026-04-03). A one-line footnote pointing at Update 5-2 was added in `4cc8a1f`.
 
-The update makes the thesis concrete. libscuffedrdma is middleware between vLLM's KV connector interface and raw libibverbs: a WFA classifier labels each transfer, a PMP bang-bang controller allocates the link between a hot RC QP pool (inline data, busy-poll CQ) and a cold RC QP pool (deep SQ, event-driven CQ). The theory section uses the Scaling Book decode-latency model and Pontryagin's Maximum Principle: with a Hamiltonian linear in the control and fixed link capacity, the optimal allocation is bang-bang, driven by a switching function `S = a*q_H*C*mu_H - b*q_C*C*mu_C`. It maps five deployment configurations (one user one GPU, through multi-model multi-machine) to QP and verbs usage, catalogs UCX issues that motivate bypassing UCX, describes the KV compression pipeline (LoRC, KVTC, TurboQuant) and scuffedQuant, and reports the first benchmarks on Chimera's SoftRoCE.
+The update makes the thesis concrete. libscuffedrdma is middleware between vLLM's KV connector interface and raw libibverbs: a WFA classifier labels each transfer, a PMP bang-bang controller allocates the link between a hot RC QP pool (inline data, busy-poll CQ) and a cold RC QP pool (deep SQ, event-driven CQ). The theory section uses the Scaling Book decode-latency model and Pontryagin's Maximum Principle: with a Hamiltonian linear in the control and fixed link capacity, the optimal allocation is bang-bang, driven by a switching function `S = a*q_H*C*mu_H - b*q_C*C*mu_C`. It maps five deployment configurations (one user one GPU, through multi-model multi-machine) to QP and verbs usage, catalogs UCX issues that motivate bypassing UCX, describes the KV compression pipeline (LoRC, KVTC, TurboQuant) and scuffedQuant, and reports the first benchmarks on server 2's SoftRoCE.
 
 ## Research
 
@@ -37,7 +37,7 @@ Code (all `8e01509` unless noted):
 - `middleware/rdma_tensor_cache/scuffed_quant.py` (`075cdc6`, QJL scaling fix `4bc79ff`).
 - `benchmarks/benchmark_dual_qp.py`, `benchmark_dual_qp_remote.py`, `benchmark_ucx_comparison.py`, `benchmark_scuffed_quant_llm.py`, `benchmark_scuffed_quant_mlx.py`, `aggregate_results.py`.
 
-Results, Chimera, SoftRoCE (rxe0 on the AQC107), pyverbs 50.0:
+Results, server 2, SoftRoCE (rxe0 on the AQC107), pyverbs 50.0:
 
 | Measurement | Value | Source |
 |---|---|---|
@@ -57,7 +57,7 @@ The loopback dual-QP numbers are slower than single QP, and the tex explains why
 | Next step | Status | Evidence |
 |---|---|---|
 | 1. Multi-threaded concurrent workload to show HOL blocking removed | built (Oct 2026), cluster run pending | Carried into Update 5 unchanged. Now built as concurrent mixed-traffic benchmarks in C: `middleware/libscuffedverbs/` and `middleware/libscuffedfabric/`, driven by notebook 01. No testbed result yet. |
-| 2. vLLM KvConnector integration, prefill on Cerberus, decode on Chimera, scuffedQuant in the path | built (Oct 2026), cluster run pending | `middleware/vllm_plugin/` (ScuffedRdmaConnector), notebook 06. No TTFT result yet. |
+| 2. vLLM KvConnector integration, prefill on server 1, decode on server 2, scuffedQuant in the path | built (Oct 2026), cluster run pending | `middleware/vllm_plugin/` (ScuffedRdmaConnector), notebook 06. No TTFT result yet. |
 | 3. Port the data path from pyverbs to Rust or C++ | partial | C, not C++/Rust: NCCL net plugin `middleware/nccl_plugin/` (`4bc0a38`, 2026-04-16, built Oct 2026), libibverbs and libfabric pools in `middleware/libscuffedverbs/` and `middleware/libscuffedfabric/` (Oct 2026). |
 
 Upstream UCX pull requests: the tex says "I submitted six pull requests ... that fix the underlying issues directly" and Table 3 is titled "Upstream UCX Contributions". None were merged. As of 2026-10-22, #11305, #11306, #11307, #11308 and #11309 are open with review required, and #11304 is closed. They are submissions, not contributions, and the thesis should not count them as results.

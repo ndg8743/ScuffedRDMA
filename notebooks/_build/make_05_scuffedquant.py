@@ -4,7 +4,7 @@ from nbtools import build
 PARAMS = '''MODE = "local"            # "local" | "cluster"
 RESULTS_SUBDIR = "scuffedquant"
 MODEL = "ibm-granite/granite-3.3-2b-instruct"
-DEVICE = "cuda"            # cluster: cuda on Chimera / Cerberus
+DEVICE = "cuda"            # cluster: cuda on server 1 / server 2
 BITS = 3
 QJL_DIM = 256
 TOPK = 8

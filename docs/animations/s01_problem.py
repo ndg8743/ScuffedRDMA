@@ -98,10 +98,10 @@ class S01Traffic(Captioned):
 
     def construct(self):
         pre = box(4.0, 4.3).move_to(LEFT * 4.65 + UP * 0.35)
-        pre_h = T("Cerberus · prefill", 22, TEXT, weight="BOLD").next_to(pre.get_top(), DOWN, buff=0.15)
+        pre_h = T("Server 1 · prefill", 22, TEXT, weight="BOLD").next_to(pre.get_top(), DOWN, buff=0.15)
         pre_s = T("2× RTX 5090", 15, MUTED).next_to(pre_h, DOWN, buff=0.06)
         dec = box(4.0, 4.3).move_to(RIGHT * 4.65 + UP * 0.35)
-        dec_h = T("Chimera · decode", 22, TEXT, weight="BOLD").next_to(dec.get_top(), DOWN, buff=0.15)
+        dec_h = T("Server 2 · decode", 22, TEXT, weight="BOLD").next_to(dec.get_top(), DOWN, buff=0.15)
         dec_s = T("3× RTX 3090", 15, MUTED).next_to(dec_h, DOWN, buff=0.06)
         link = Line(LEFT * 2.6 + UP * 0.6, RIGHT * 2.6 + UP * 0.6, color=EDGE, stroke_width=14)
         link_t = T("10 GbE · SoftRoCE", 16, MUTED).next_to(link, UP, buff=0.1)
