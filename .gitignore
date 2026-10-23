@@ -55,3 +55,5 @@ middleware/libscuffedverbs/sv_bench
 middleware/nccl_plugin/libscuffed_nccl_net.so
 # notebook checkpoints
 .ipynb_checkpoints/
+docs/animations/build/
+docs/animations/__pycache__/
