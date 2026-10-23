@@ -46,3 +46,12 @@ Desktop.ini
 
 # Temp/null files
 nul
+
+# native build outputs
+middleware/libscuffedfabric/libscuffedfabric.so
+middleware/libscuffedfabric/sf_bench
+middleware/libscuffedverbs/libscuffedverbs.so
+middleware/libscuffedverbs/sv_bench
+middleware/nccl_plugin/libscuffed_nccl_net.so
+# notebook checkpoints
+.ipynb_checkpoints/
