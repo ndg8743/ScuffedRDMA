@@ -369,6 +369,11 @@ Comprehensive bibliography for the ScuffedRDMA thesis project.
 - File: `Distributed_GEMM_CUTLASS_Tensor_Parallelism_-_SHI_Labs.md` (stub - manual download needed)
 - https://blog.shi-labs.com/distributed-gemm-88be6a481e2b
 
+[B50a] Gugger, S., Feldmann, A., Liu, Y., & Samsi, S. (2026). **Accelerating Mamba-2 with High-Performance Forward Pass Kernels in NVIDIA CUDA Tile**. NVIDIA Technical Blog, Oct. 19, 2026.
+- File: `References/Bookmarks_10-22/NVIDIA_cuTile_Mamba2_Forward_Kernels.md`
+- cuTile Mamba-2 forward pass (chunk_cumsum, fwd_pass_state, compute_out); fixed-size fp32 state per head carried as init_state / final_state at inference; 1.14x to 1.82x kernel speedup over mamba_ssm Triton on B300. Relevant to SSM state transfer (Update 5-2).
+- https://developer.nvidia.com/blog/accelerating-mamba-2-with-high-performance-forward-pass-kernels-in-nvidia-cuda-tile/
+
 ### GPU Architecture & Hardware
 
 [B51] NVIDIA. (2025). **Inside the NVIDIA Rubin Platform: Six New Chips, One AI Supercomputer**.
