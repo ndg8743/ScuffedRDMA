@@ -41,6 +41,45 @@ except ImportError:
     pass
 
 
+IBV_WC_SUCCESS = 0  # enum ibv_wc_status, same value in every rdma-core release
+
+
+class RDMACompletionError(RuntimeError):
+    """A work request completed with a non-success status (error or flush)."""
+
+    def __init__(self, status: int, label: str, vendor_err: int = 0, wr_id: int = 0):
+        self.status, self.label, self.vendor_err, self.wr_id = status, label, vendor_err, wr_id
+        name = _WC_STATUS_NAMES.get(status, f"status {status}")
+        super().__init__(f"{label} QP completion failed: {name} (vendor_err=0x{vendor_err:x}, wr_id={wr_id})")
+
+
+_WC_STATUS_NAMES = {
+    0: "IBV_WC_SUCCESS", 1: "IBV_WC_LOC_LEN_ERR", 2: "IBV_WC_LOC_QP_OP_ERR", 3: "IBV_WC_LOC_EEC_OP_ERR",
+    4: "IBV_WC_LOC_PROT_ERR", 5: "IBV_WC_WR_FLUSH_ERR", 6: "IBV_WC_MW_BIND_ERR", 7: "IBV_WC_BAD_RESP_ERR",
+    8: "IBV_WC_LOC_ACCESS_ERR", 9: "IBV_WC_REM_INV_REQ_ERR", 10: "IBV_WC_REM_ACCESS_ERR",
+    11: "IBV_WC_REM_OP_ERR", 12: "IBV_WC_RETRY_EXC_ERR", 13: "IBV_WC_RNR_RETRY_EXC_ERR",
+}
+
+
+def check_completion(wc: Any, label: str) -> None:
+    """
+    Raise if a work completion is not IBV_WC_SUCCESS.
+
+    Before this check, error and flush completions were counted as fast
+    successful completions, which made failed transfers look like
+    microsecond-scale writes. Results collected before this fix (for example
+    benchmarks/results/dual_qp_remote_benchmark.json) must be re-run.
+    """
+    status = int(getattr(wc, "status", IBV_WC_SUCCESS))
+    if status != IBV_WC_SUCCESS:
+        try:
+            from middleware import telemetry as _tel
+            _tel.default().event(label, "qp_error")
+        except Exception:
+            pass
+        raise RDMACompletionError(status, label, int(getattr(wc, "vendor_err", 0) or 0), int(getattr(wc, "wr_id", 0) or 0))
+
+
 class QueueSelection(Enum):
     HOT_QP = "hot"
     COLD_QP = "cold"
@@ -344,6 +383,7 @@ class DualQPPool:
             nc, wcs = qpe.cq.poll(num_entries=1)
             if nc > 0:
                 qpe.outstanding -= 1
+                check_completion(wcs[0], "hot")
                 return iters
         raise TimeoutError("Hot QP CQ poll timeout")
 
@@ -357,6 +397,7 @@ class DualQPPool:
             nc, wcs = qpe.cq.poll(num_entries=1)
             if nc > 0:
                 qpe.outstanding -= 1
+                check_completion(wcs[0], "cold")
                 return iters
             time.sleep(sleep_us / 1e6)
         raise TimeoutError("Cold QP CQ poll timeout")
