@@ -232,14 +232,16 @@ for run in serve["runs"]:
         rows.append({"label": run.get("label"), **{k: r.get(k) for k in ("prompt_len", "n", "ok", "ttft_p50_ms", "ttft_p99_ms", "itl_p50_ms", "itl_p99_ms")}})
 tt = pd.DataFrame(rows)
 if not tt.empty:
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+    figg, ax = plt.subplots(1, 2, figsize=(11, 3.6))
     for lab, g in tt.groupby("label"):
         ax[0].plot(g.prompt_len, g.ttft_p50_ms, marker="o", label=f"{lab} p50"); ax[0].plot(g.prompt_len, g.ttft_p99_ms, ls="--", alpha=.6)
         ax[1].plot(g.prompt_len, g.itl_p50_ms, marker="o", label=lab)
     ax[0].set_xlabel("prompt tokens"); ax[0].set_ylabel("TTFT ms (dashed p99)"); ax[1].set_xlabel("prompt tokens"); ax[1].set_ylabel("ITL p50 ms")
-    for a in ax: a.grid(alpha=.3); a.legend(fontsize=8)
-    plt.tight_layout()
+    for a in ax: a.legend()
+    figg.suptitle(f"one GPU, prefill + decode instances sharing it ({HOST})")
+    fig("07_single_gpu_ttft_itl", caption="E7")
+else:
+    print("no TTFT rows (GPU cells skipped)")
 tt'''),
 ("md", "## 5. GPU decompression and a libfabric loopback sanity check"),
 ("code", '''dec = {}
@@ -261,4 +263,4 @@ pd.DataFrame(fab)'''),
 
 build("08_local_gpu.ipynb", "08 · Single-GPU end-to-end run",
       "Everything that one GPU can exercise: GPU-resident connector data path, scuffedQuant on real KV, and vLLM disaggregated serving with ScuffedRdmaConnector on one card.",
-      params, cells)
+      params, cells, sections=[(7, "ScuffedRdmaConnector inside vLLM", "07-connector.md"), (11, "scuffedQuant: rotate, quantize, sketch the residual", "11-scuffedquant.md")])

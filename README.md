@@ -232,17 +232,21 @@ flowchart LR
 
 Each notebook has a parameter cell. `MODE = "local"` runs smoke sizes on any Linux box with libfabric (tcp / shm providers), results to `/tmp`. `MODE = "cluster"` runs on server 1 and server 2, results to `benchmarks/results/`, tagged with hostname and UTC time. Notebook 08 has `MODE = "gpu"` for one machine with an NVIDIA GPU. Local numbers are smoke tests, not results.
 
-| Notebook | What it runs |
-|---|---|
-| [00_environment_check](notebooks/00_environment_check.ipynb) | RDMA devices, GID table, libfabric providers, pyverbs, builds all native code, full test suite |
-| [01_hol_blocking](notebooks/01_hol_blocking.ipynb) | hot RTT under a cold bulk stream, single vs dual endpoint, native verbs vs libfabric; re-run of the Update 4 pyverbs benchmark |
-| [02_completion_signaling](notebooks/02_completion_signaling.ipynb) | CQ data vs flag-in-payload vs sentinel vs remote-write counter vs trailing READ, instructions per post |
-| [03_libfabric_vs_libibverbs](notebooks/03_libfabric_vs_libibverbs.ipynb) | latency and bandwidth per stack, MSG / RDM / mixed endpoints, counters vs CQ, wait objects, blob channel vs TCP |
-| [04_wfa_and_policy](notebooks/04_wfa_and_policy.ipynb) | learned WFA vs static thresholds, policy tree decisions with explanations |
-| [05_scuffedquant](notebooks/05_scuffedquant.ipynb) | packed sizes, Granite 3.3-2B top-8 overlap per layer |
-| [06_vllm_disagg_ttft](notebooks/06_vllm_disagg_ttft.ipynb) | ScuffedRdmaConnector loopback, TTFT / ITL sweeps against NIXL (UCX and LIBFABRIC backends) and single-node baselines |
-| [07_storage_tier](notebooks/07_storage_tier.ipynb) | NVMe spill coalescing sweep, PMP spill choice |
-| [08_local_gpu](notebooks/08_local_gpu.ipynb) | one GPU: connector with KV caches on the GPU, scuffedQuant on real KV, vLLM prefill + decode on one card through libfabric `shm`, greedy-output match and TTFT / ITL against a single instance and NIXL |
+Every notebook opens with a **Math** cell (the formulas it checks, mirroring its [`docs/explained/`](docs/explained/) page) and saves every figure for the paper: `docs/figures/<name>.png|.pdf` for model figures (arithmetic, proofs, repo results; the same on any machine) and `docs/figures/<MODE>/<name>.png|.pdf` for measured ones. The committed notebooks were executed in local mode, so GitHub renders their outputs. [`docs/figures/README.md`](docs/figures/README.md) lists the figures.
+
+| Notebook | Sections | What it runs | Figures |
+|---|---|---|---|
+| [00_environment_check](notebooks/00_environment_check.ipynb) | | RDMA devices, GID table, libfabric providers, pyverbs, builds all native code, full test suite | |
+| [01_hol_blocking](notebooks/01_hol_blocking.ipynb) | 1, 2 | KV size and wire time vs prompt length; the P-K / Cobham / per-packet waits; hot RTT under a cold bulk stream, single vs dual endpoint, native verbs vs libfabric; re-run of the Update 4 pyverbs benchmark | `01_kv_traffic`, `02_hol_model`, `02_hol_measured` |
+| [02_completion_signaling](notebooks/02_completion_signaling.ipynb) | 6 | CQ data vs flag-in-payload vs sentinel vs remote-write counter vs trailing READ, instructions per post | `06_completion_measured`, `06_completion_instructions` |
+| [03_libfabric_vs_libibverbs](notebooks/03_libfabric_vs_libibverbs.ipynb) | 4, 5 | the credit-window bound; latency and bandwidth per stack, MSG / RDM / mixed endpoints, counters vs CQ, wait objects, blob channel vs TCP | `05_credit_window`, `04_dualpool_latency_bw`, `04_dualpool_matrix`, `05_blob_channel` |
+| [04_wfa_and_policy](notebooks/04_wfa_and_policy.ipynb) | 8, 9, 10 | Proposition 1 run on the static classifier; learned WFA training and held-out evaluation; policy decisions per context; PMP decision regions and a Poisson simulation of the implemented vs the derived rule | `08_wfa_*`, `09_policy_routes`, `10_pmp_regions`, `10_pmp_simulation` |
+| [05_scuffedquant](notebooks/05_scuffedquant.ipynb) | 11 | rotation lemma checked numerically; bytes per vector vs FP8 and KIVI; the sketch's 1/√m error law; round trip; top-8 overlap per layer; the Update 4 Granite result re-summarized | `11_rotation`, `11_bytes_per_vector`, `11_sketch_error`, `11_topk_overlap`, `11_topk_granite_update4` |
+| [06_vllm_disagg_ttft](notebooks/06_vllm_disagg_ttft.ipynb) | 7 | staging-cost model; connector tests; two-process loopback; TTFT / ITL sweeps against NIXL (UCX and LIBFABRIC backends) and single-node baselines | `07_staging_cost`, `07_ttft_itl` |
+| [07_storage_tier](notebooks/07_storage_tier.ipynb) | 12, 10 | the a + nb coalescing model fitted to the Update 6 NVMe sweep; functional checks; PMP spill choice; coalescing sweep through `StorageTier` | `12_coalescing_fit`, `10_pmp_spill`, `12_storage_sweep` |
+| [08_local_gpu](notebooks/08_local_gpu.ipynb) | 7, 11 | one GPU: connector with KV caches on the GPU, scuffedQuant on real KV, vLLM prefill + decode on one card through libfabric `shm`, greedy-output match and TTFT / ITL against a single instance and NIXL | `07_single_gpu_ttft_itl` |
+
+Rebuild after editing a generator: `cd notebooks/_build && python3 make_NN_*.py`, then `jupyter nbconvert --to notebook --execute --inplace notebooks/NN_*.ipynb`.
 
 ## Repository
 
@@ -257,6 +261,7 @@ Each notebook has a parameter cell. `MODE = "local"` runs smoke sizes on any Lin
 | `middleware/nccl_plugin/` | NCCL net plugin |
 | `notebooks/` | research notebooks (generated from `notebooks/_build/`) |
 | `docs/animations/`, `docs/media/` | Manim sources for the README animations (`render.sh`) and the rendered GIFs |
+| `docs/explained/`, `docs/figures/` | per-section write-ups with derivations and proofs; figures saved by the notebooks for the paper (model figures at the top level, measured ones under `local/`, `cluster/`, `gpu/`) |
 | `scripts/local_gpu/` | `setup_gpu_env.sh`: libfabric, CUDA torch, vLLM, builds and tests on a GPU machine (WSL2 or Linux) |
 | `tests/`, `middleware/tests/` | pytest suite (`pytest -q` from the repo root) |
 | `benchmarks/` | benchmark scripts, `fabric/runner.py`, `vllm_disagg/`, `test_arch/`, results |

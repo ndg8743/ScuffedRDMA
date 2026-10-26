@@ -196,6 +196,7 @@ The KIVI figure assumes a 16-bit scale and a 16-bit zero point per group of 32 n
 - Granite 3.3-2B, 40 layers, FP32 KV: top-8 attention overlap (do the 8 highest-scoring keys under the estimate match the exact top 8?) is **91.1% ± 3.3%**, minimum 82.8% (`benchmarks/results/scuffed_quant_llm.json`).
 - Same file, mean absolute error of $`\langle q, k\rangle`$ against the exact value: **25.1 with the sketch, 58.2 with the 3-bit reconstruction alone**, so the sketch cuts the error by about 2.3×. The top-8 overlap above was computed with the sketch; the reconstruction-only path that the vLLM connector uses (§6) has no overlap number yet.
 - In that benchmark the query is the last token's key (`benchmark_scuffed_quant_llm.py`), not a real query vector. Real queries come from $`W_Q`$ and can behave differently; notebook 08 is where to repeat it with real queries.
+- Notebook 05 sweeps the sketch size on synthetic keys with outlier channels: the corrected error follows $`c/\sqrt m`$ as Proposition 4.3 says, but the sketch only beats the reconstruction alone from about $`m = 128`$ bits up (1.6× better at $`m = 256`$ there, 2.3× on the Granite run). Below that the sketch's own noise exceeds the quantization error.
 - This is a ranking metric. It does not by itself say how generation quality changes; that needs an end-to-end run with the scuffedQuant codec in the connector (notebook 08 has the switch).
 
 ## 8. Status

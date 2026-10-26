@@ -17,4 +17,6 @@ One page per section of the [README walkthrough](../../README.md#the-thesis-sect
 | 11 | [scuffedQuant](11-scuffedquant.md) | orthogonal rotation; coordinate variance; Lloyd–Max conditions; unbiased sketch; 1/√m error; 64-byte format |
 | 12 | [NVMe storage tier](12-storage-tier.md) | O_DIRECT alignment; no double allocation; CRC32 guarantees; coalescing model vs measured data |
 
+Each page's formulas are also the **Math** cell of the notebook that checks them ([`notebooks/`](../../notebooks/), see the README's notebook table), and the notebooks save their figures to [`docs/figures/`](../figures/).
+
 Conventions: KiB/MiB are powers of two; MB/s and Gb/s are powers of ten. "Measured" numbers name their results file; everything else is arithmetic, a model with stated assumptions, or labeled illustrative.

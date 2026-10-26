@@ -39,6 +39,31 @@ and a single non-disaggregated server.
   against prompt length. Results land in `benchmarks/results/vllm_disagg/`."""
 
 CELLS = [
+    ("md", r"""## Math: what the connector guarantees, and what staging costs
+
+**Section 7.** The connector keys every transfer by a proxy-generated `xfer_id` (vLLM renames requests internally, so the prefill and decode engines name the same request differently). With 122 random bits per UUID, the chance that any two of $n$ ids collide is at most $n^2/2^{123}$: about $10^{-19}$ for $n = 10^9$ requests. Each attention layer's blocks are gathered, encoded (raw bf16 or scuffedQuant), and queued as one blob `<xfer_id>/<layer>` on the sender; decode waits per layer with a deadline, reports blocks that never arrived through `get_block_ids_with_load_errors`, and vLLM recomputes those. So a lost layer degrades to recomputation, never to a wrong answer, and a request waits at most $L \times$ `load_timeout_s` ([docs/explained/07](../docs/explained/07-connector.md)).
+
+**Host staging.** None of the lab servers has a GPUDirect path, so every layer is copied GPU → host before it is sent and host → GPU after it arrives. For a layer of $b$ bytes over PCIe with effective rate $P$ and a wire of rate $C$,
+
+$$
+t_{\text{copy}} = \frac{b}{P}, \qquad t_{\text{wire}} = \frac{8b}{C}, \qquad \frac{t_{\text{copy}}}{t_{\text{wire}}} = \frac{C}{8P},
+$$
+
+which is independent of $b$: at $P = 20$ GB/s and $C = 10$ Gb/s the copy is about 6% of the wire time per layer; at 100 Gb/s it would be 63%. The first figure below plots both against layer size; notebook 08 times the real copies on the GPU.
+
+The connector tests, the two-process loopback and the TTFT runner self-test run anywhere; the cross-node TTFT sweep is E8 and needs the servers."""),
+    ("md", "## 0. Staging cost model (model figure)"),
+    ("code", '''import numpy as np
+b = 2.0 ** np.arange(16, 27)                      # 64 KiB .. 64 MiB per layer
+P = 20e9                                           # effective PCIe copy rate, bytes/s (assumed; measured in notebook 08)
+figst, ax = plt.subplots(figsize=(6, 3.2))
+ax.plot(b / 2**20, b / P * 1e3, color=C["spill"], label="host staging copy, 20 GB/s (one direction)")
+for rate, col in ((10e9, C["hot"]), (25e9, C["gold"]), (100e9, C["ok"])):
+    ax.plot(b / 2**20, 8 * b / rate * 1e3, color=col, ls="--", label=f"wire, {rate/1e9:.0f} Gb/s")
+ax.axvline(4, color=C["muted"], ls=":", lw=1); ax.text(4.2, 0.02, "4 MiB = one layer of a 2K-token Granite 3.3-2B request", fontsize=7, rotation=90, va="bottom", color=C["muted"])
+ax.set_xscale("log", base=2); ax.set_yscale("log"); ax.set_xlabel("layer bytes (MiB)"); ax.set_ylabel("ms"); ax.legend(); ax.set_title("staging copy vs wire time per layer")
+fig("07_staging_cost", model=True, caption="copy/wire ratio = C/(8P), independent of size")
+print(f"copy / wire at 10 Gb/s: {10e9 / (8 * P):.1%}; at 100 Gb/s: {100e9 / (8 * P):.0%}")'''),
     ("md", "## 1. Connector tests\n\nScheduler bookkeeping, block gather/scatter for every KV layout, codec "
            "(bfloat16, scuffedQuant), producer to consumer through the real connector class, proxy, TTFT runner. "
            "The two vLLM-import tests run when vLLM is installed (cluster) or its source is on `VLLM_SRC`."),
@@ -141,8 +166,7 @@ else:
         save(f"ttft_{label}", res)
 list(sweeps)'''),
     ("md", "## 5. Plot\n\nTTFT and ITL percentiles against prompt length for every setup measured."),
-    ("code", '''import matplotlib.pyplot as plt
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    ("code", '''figt, axes = plt.subplots(1, 2, figsize=(11, 3.6))
 for label, res in sweeps.items():
     L = [r["prompt_len"] for r in res["results"]]
     for ax, key in ((axes[0], "ttft"), (axes[1], "itl")):
@@ -151,13 +175,11 @@ for label, res in sweeps.items():
         line, = ax.plot(L, p50, marker="o", label=f"{label} p50")
         ax.plot(L, p99, marker="x", linestyle="--", color=line.get_color(), label=f"{label} p99")
 for ax, t in zip(axes, ("TTFT (ms)", "ITL (ms)")):
-    ax.set_xscale("log", base=2); ax.set_xlabel("prompt tokens"); ax.set_ylabel(t); ax.grid(alpha=.3)
-axes[0].legend(fontsize=8)
+    ax.set_xscale("log", base=2); ax.set_xlabel("prompt tokens"); ax.set_ylabel(t)
+axes[0].legend()
 title = "mock server (measurement check, not results)" if MODE == "local" else f"{MODEL}: {PREFILL_HOST} prefill, {DECODE_HOST} decode"
-fig.suptitle(title)
-plt.tight_layout()
-fig.savefig(RESULTS / f"{HOST}_ttft_itl.png", dpi=120)
-plt.show()'''),
+figt.suptitle(title)
+fig("07_ttft_itl", caption="E8 in cluster mode; a mock server with known delays in local mode")'''),
     ("md", "## 6. Connector telemetry from the running servers\n\nWith `metrics_port` set in "
            "`kv_connector_extra_config` (launch.sh sets 9464), each worker serves Prometheus text on "
            "`metrics_port + rank`: per-class ops, bytes, QP error/reconnect/TCP-fallback events, completion "
@@ -175,5 +197,5 @@ else:
 
 if __name__ == "__main__":
     p = build("06_vllm_disagg_ttft.ipynb", "06 · vLLM disaggregated prefill/decode: ScuffedRdmaConnector TTFT",
-              INTRO, PARAMS, CELLS)
+              INTRO, PARAMS, CELLS, sections=[(7, "ScuffedRdmaConnector inside vLLM", "07-connector.md")])
     print("wrote", p)

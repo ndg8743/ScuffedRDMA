@@ -23,6 +23,7 @@ Status of every next step from the proposal through Update 8, checked against th
 | Completion-signaling microbenchmark, instructions per post | U7 step 3 | cluster | `sf_bench -m sig`, notebook 02 |
 | libfabric vs libibverbs comparison | U7 step 4, U8 | cluster | notebook 03 |
 | Per-class telemetry, QP error / reconnect / TCP fallback, Prometheus | U2, U7 step 5 | built | `middleware/telemetry.py` |
+| FabricBlobChannel multi-chunk blobs stall intermittently (libfabric `tcp` loopback) | found 2026-10-26, notebook 03 | **open bug**, blocks E6–E8 | `benchmarks/fabric/blob_multichunk_check.py` |
 | NCCL net plugin | U5-2 | builds; NCCL + vLLM run open | `middleware/nccl_plugin/` |
 | UCCL vs ScuffedRDMA mixed-traffic p99 | U5-2 | open | `benchmarks/test_arch/stack-draft/bench_uccl_p2p.py` |
 | NVSHMEM + OpenMPI GPU-initiated puts | U5-2 | open | |
@@ -37,7 +38,7 @@ Status of every next step from the proposal through Update 8, checked against th
 | WFA classifier, static thresholds + phase detection | U2 | built | `wfa_classifier.py` |
 | WFA with learned transition weights, synthetic validation | U2, proposal | built; real-trace training is cluster | `wfa_learner.py`, notebook 04 |
 | Rule-Node Expression Tree policy engine | proposal | built | `middleware/policy/` |
-| PMP bang-bang controller | U4 | built | `pmp_controller.py` |
+| PMP bang-bang controller | U4 | built; switching rule inconsistent with its derivation (sign, and μ multiplies instead of divides), fix not applied | `pmp_controller.py`, `docs/explained/10-pmp-controller.md` §6, notebook 04 §10 |
 | PMP spill choice under GPU memory pressure | U6 step 3 | built | `pmp_controller.py`, notebook 07 |
 
 ## Compression and storage
@@ -45,6 +46,7 @@ Status of every next step from the proposal through Update 8, checked against th
 | Item | From | Status | Where |
 |---|---|---|---|
 | scuffedQuant (Hadamard + Lloyd-Max + 256-bit QJL), bit-packed wire format | U4 | built | `scuffed_quant.py`, notebook 05 |
+| scuffedQuant sketch unused on the vLLM path (`decode_kv` calls `decompress`, not `attention_scores`); quality vs FP8 / KIVI | found 2026-10-23 | open decision: apply the correction on the receiver or drop the 32 B sketch | `docs/explained/11-scuffedquant.md` §6, notebook 05 |
 | Per-architecture scuffedQuant (Transformer, Mamba, Granite 4 hybrid, MoE) | U5-2 | built, results on both nodes | `benchmarks/test_arch/` |
 | NVMe spill / retrieve with coalescing, WFA-gated | U6 steps 1-2 | built; NVMe sweep is cluster | `storage_tier.py`, notebook 07 |
 | sandook on the cluster; GPFS tier on Hydra | U5-2, U6 | open | |

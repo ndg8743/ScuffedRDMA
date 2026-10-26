@@ -107,6 +107,7 @@ A credit is 8 bytes and gates the sender's next chunk. If credits shared the col
 | Notification after data | follows from write-with-immediate semantics |
 | Correct reassembly | proven |
 | Throughput ≤ $`NB/R`$ | Little's law; the actual $`R`$ is measured by `benchmarks/fabric/blob_bench.py` (E6) |
+| Multi-chunk blobs (larger than one slot) delivered | **open bug**: intermittent stall on the libfabric `tcp` provider in loopback (first seen executing notebook 03, 2026-10-26; `benchmarks/fabric/blob_multichunk_check.py` reproduces it). Single-chunk blobs always pass. The reassembly proof above assumes every chunk arrives; the stall means a chunk or its credit is lost or never polled, which is a transport or `_pump` bug, not a proof gap. Must be fixed before E6–E8. |
 
 ## References
 

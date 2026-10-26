@@ -99,6 +99,33 @@ So **"costate proportional to queue depth" is the myopic approximation to a quad
 
 which is a queue-length-weighted $`c\mu`$ rule: serve the queue whose backlog is most expensive to leave waiting, scaled by how quickly serving it pays off.
 
+## 5a. The same statement in the control-theory textbooks, and where the queue-depth rule really comes from
+
+The derivation above is the special case of the general principle as it is stated in lecture notes on optimal control (Ha's *PMP vs. Bellman's dynamic programming*, which follows Evans' *Introduction to Mathematical Optimal Control Theory*). Writing the state as $`x = (q_H, q_C)`$, the dynamics as $`\dot x = f(x, u)`$ and the running payoff as $`r(x, u) = -L(x)`$ (payoff is maximized there; cost is minimized here), the **control-theory Hamiltonian** is
+
+```math
+H(x, p, u) = f(x, u)\cdot p + r(x, u),
+```
+
+and the Pontryagin Maximum Principle says that along an optimal pair $`(x^*, u^*)`$ there is a costate $`p^*`$ with
+
+1. $`\dot x^* = \nabla_p H`$, $`\dot p^* = -\nabla_x H`$ (the state and adjoint equations);
+2. $`H(x^*(t), p^*(t), u^*(t)) = \max_{a \in U} H(x^*(t), p^*(t), a)`$ for every $`t`$ (the maximization condition);
+3. $`H`$ is constant in $`t`$ along the optimal trajectory;
+4. $`p^*(T) = \nabla g(x^*(T))`$ (transversality; $`0`$ when there is no terminal payoff).
+
+Items 1 and 2 are sections 3 and 4 above with the sign flipped (maximize $`-L`$ = minimize $`L`$). **Bang-bang** is the same observation as in the linear time-optimal problem of those notes: for $`\dot x = Mx + Nu`$, $`u \in [-1, 1]^m`$, the Hamiltonian $`H = (Mx + Nu)\cdot p - 1`$ is affine in $`u`$, so the maximizer is $`u^*_i = \mathrm{sgn}\big((N^\top p)_i\big)`$, each control pinned to a corner of its box. Our $`S(t)`$ is $`(N^\top p)`$ for this problem.
+
+The notes also give the result that justifies section 5. Define the **value function** $`v(x, t) = \sup_u P_{x,t}[u]`$ (the best payoff from state $`x`$ at time $`t`$). Dynamic programming shows $`v`$ solves the Hamilton–Jacobi–Bellman equation $`v_t + \max_a\{f(x,a)\cdot\nabla_x v + r(x,a)\} = 0`$ with $`v(x, T) = g(x)`$, and then (Ha, final theorem; Evans §5) **the costate is the gradient of the value function**:
+
+```math
+p^*(t) = \nabla_x v\big(x^*(t), t\big).
+```
+
+That is what "shadow price" means precisely: $`p_H`$ is how much the optimal cost-to-go changes per unit of extra hot backlog. For a quadratic holding cost over a short remaining window $`\tau`$ the value function is approximately $`-\tfrac{\tau}{2}(\alpha q_H^2 + \beta q_C^2)`$ (ignoring how the queues will move inside the window), so $`\nabla_x v \approx -\tau(\alpha q_H, \beta q_C)`$, which is the queue-depth approximation of section 5 with the sign convention of a payoff. The approximation is exact only when $`v`$ is exactly quadratic in $`q`$; it is the first step of the generalized $`c\mu`$ rule (Van Mieghem), and it is the same ansatz-then-verify method the notes use for Merton's problem (guess $`v = g(t)x^\gamma`$, substitute into HJB, solve for $`g`$).
+
+Notebook 04 draws the decision regions and simulates the implemented and the routing-consistent rules on Poisson arrivals.
+
 ## 6. Checking the implemented rule
 
 `decide()` computes exactly $`S = \alpha q_H C\mu_H - \beta q_C C\mu_C`$, and then:
@@ -182,3 +209,6 @@ Why this bounds switching: between two switches $`S`$ must travel from $`+\epsil
 6. J. A. Van Mieghem. "Dynamic Scheduling with Convex Delay Costs: The Generalized cμ Rule." *Annals of Applied Probability* 5(3):809–833, 1995. [Project Euclid](https://projecteuclid.org/euclid.aoap/1177004706). *Used for: with convex (e.g. quadratic) costs the priority depends on queue state, which is what the queue-depth approximation captures (§5).*
 7. V. I. Utkin. "Variable structure systems with sliding modes." *IEEE Transactions on Automatic Control* 22(2):212–222, 1977. *Used for: chattering near the switching surface (§8).*
 8. Update 4 (`Updates/Update4-UCX/update4.tex`, Section "PMP: Bang-Bang QP Allocation") and Update 6 (`Updates/Update6-StorageTier/update6.tex`). *The original statements checked in §6–§7.*
+9. S.-Y. Ha. *Lecture 2: PMP vs. Bellman's Dynamic Programming.* Lecture notes (Ajou University lecture series), Department of Mathematical Sciences, Seoul National University. [PDF](https://www.math.snu.ac.kr/~syha/Ajou-Lecture-2.pdf). *Used for: the statement of PMP (i)–(iv), bang-bang control for the linear time-optimal problem, the HJB equation and $`p^* = \nabla_x v`$ (§5a).*
+10. L. C. Evans. *An Introduction to Mathematical Optimal Control Theory*, version 0.2. Lecture notes, UC Berkeley. [PDF](https://math.berkeley.edu/~evans/control.course.pdf). *Chapters 4 (PMP) and 5 (dynamic programming); the source Ha's lecture follows (§5a).*
+11. `notebooks/04_wfa_and_policy.ipynb`, section 10 (decision regions and the Poisson simulation of both rules); figures `docs/figures/10_pmp_regions.png`, `10_pmp_simulation.png`.
