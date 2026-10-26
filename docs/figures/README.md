@@ -5,6 +5,8 @@ Every figure here is written by a notebook in [`notebooks/`](../../notebooks/) t
 - **Top level** (`docs/figures/<name>`): model figures. Arithmetic, proofs, or results files already in the repo. The same on every machine; usable in the paper as they are.
 - **`local/`, `cluster/`, `gpu/`**: measured on the machine that ran the notebook, in that `MODE`. `local/` is the smoke run on a VM with the libfabric `tcp` / `shm` providers and `/tmp` instead of NVMe: it shows the measurement path works, nothing else. The paper's measured figures come from `cluster/` (server 1 and server 2) and `gpu/`.
 
+Each measured directory also holds `HARDWARE.md`, written by notebook 00: the machine (virtualization, CPU, memory, disks, NICs, RDMA devices, GPU, libfabric and library versions) the figures in that directory came from.
+
 The number prefix is the README section the figure belongs to.
 
 | Figure | Notebook | Kind | What it shows |

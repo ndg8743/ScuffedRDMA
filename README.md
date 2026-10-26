@@ -236,7 +236,7 @@ Every notebook opens with a **Math** cell (the formulas it checks, mirroring its
 
 | Notebook | Sections | What it runs | Figures |
 |---|---|---|---|
-| [00_environment_check](notebooks/00_environment_check.ipynb) | | RDMA devices, GID table, libfabric providers, pyverbs, builds all native code, full test suite | |
+| [00_environment_check](notebooks/00_environment_check.ipynb) | | hardware record (`docs/figures/<MODE>/HARDWARE.md`), RDMA devices, GID table, libfabric providers, pyverbs, builds all native code, full test suite | |
 | [01_hol_blocking](notebooks/01_hol_blocking.ipynb) | 1, 2 | KV size and wire time vs prompt length; the P-K / Cobham / per-packet waits; hot RTT under a cold bulk stream, single vs dual endpoint, native verbs vs libfabric; re-run of the Update 4 pyverbs benchmark | `01_kv_traffic`, `02_hol_model`, `02_hol_measured` |
 | [02_completion_signaling](notebooks/02_completion_signaling.ipynb) | 6 | CQ data vs flag-in-payload vs sentinel vs remote-write counter vs trailing READ, instructions per post | `06_completion_measured`, `06_completion_instructions` |
 | [03_libfabric_vs_libibverbs](notebooks/03_libfabric_vs_libibverbs.ipynb) | 4, 5 | the credit-window bound; latency and bandwidth per stack, MSG / RDM / mixed endpoints, counters vs CQ, wait objects, blob channel vs TCP | `05_credit_window`, `04_dualpool_latency_bw`, `04_dualpool_matrix`, `05_blob_channel` |
