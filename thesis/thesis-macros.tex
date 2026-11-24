@@ -1,0 +1,270 @@
+% =====================================================================
+%  Thesis-specific packages and macros. Loaded by thesis.tex after the
+%  template preamble. Everything here was tested with tagging on.
+% =====================================================================
+\usepackage{xurl}          % URLs may break at any character
+\usepackage{longtable}     % tables that run over a page
+\usepackage{array}
+% \FloatBarrier keeps a float in its own section. Use the placeins package
+% when it is installed; otherwise define the same command here.
+\makeatletter
+\IfFileExists{placeins.sty}{\usepackage{placeins}}{%
+  \def\FloatBarrier{\par\begingroup \let\@elt\relax
+    \edef\@tempa{\@botlist\@deferlist\@dbldeferlist}%
+    \ifx\@tempa\@empty
+    \else
+      \ifx\@fltovf\relax
+        \if@firstcolumn \clearpage \else \null\newpage\FloatBarrier \fi
+      \else
+        \newpage \let\@fltovf\relax \FloatBarrier
+      \fi
+    \fi \endgroup
+    \suppressfloats[t]}}
+\makeatother
+
+% Set \showlogofalse to drop the university logo from the title page.
+% The Library's sample title page has no logo; keep it only if the
+% department agrees.
+\newif\ifshowlogo
+\showlogotrue
+
+% Ragged-right paragraph column of a given width: L{4cm}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+% Identifiers, commands and short file names. Underscores need no
+% escape: \code{sf_bench}. Use \nolinkurl{...} for long paths.
+\NewDocumentCommand{\code}{m}{\texttt{\detokenize{#1}}}
+
+% Microseconds.
+\newcommand{\us}{\,\textmu s}
+
+\emergencystretch=2em
+\hyphenation{lib-fabric lib-ib-verbs Soft-RoCE Infini-Band Flash-Atten-tion}
+
+% Tables: a little air between rows, so that cells of several lines do
+% not run into the next row; captions of long tables as wide as the text;
+% and space between a caption and the table under it.
+\AddToHook{env/tabular/begin}{\renewcommand{\arraystretch}{1.3}}
+\AddToHook{env/longtable/begin}{\renewcommand{\arraystretch}{1.3}}
+\setlength{\LTcapwidth}{\linewidth}
+\AddToHook{env/table/begin}{\setlength{\abovecaptionskip}{2pt}\setlength{\belowcaptionskip}{8pt}}
+
+% Run-in labels. \paragraph under a \section would be a level-5 heading
+% directly below a level-2 one, which skips heading levels in the tagged
+% PDF, so a label is set as italic text at the start of the paragraph
+% instead of as a heading. The text of the thesis does not use run-in
+% labels or bold lead-ins: a paragraph opens with a topic sentence. Inside
+% a proof the steps are named in italics with \emph{Step name.}
+\RenewDocumentCommand{\paragraph}{s o m}{%
+  \par\noindent\textit{#3}\hspace{0.6em}\ignorespaces}
+
+% The lemma and definition environments are declared in thesis.tex, next
+% to the proposition environment.
+
+% --- Headings in the form of the department's theses ----------------------
+% A chapter opens with CHAPTER and its number on one centred line and the
+% title centred under it, in bold at a size close to that of the text.
+% Section headings are bold and flush left. The names of the unnumbered
+% parts (contents, lists, bibliography) are set in capitals.
+% TeX Live 2026 builds headings from templates and TeX Live 2025 from the
+% macros of the report class, so both are set. Neither touches the tags.
+\renewcommand{\contentsname}{CONTENTS}
+\renewcommand{\listfigurename}{LIST OF FIGURES}
+\renewcommand{\listtablename}{LIST OF TABLES}
+\renewcommand{\bibname}{BIBLIOGRAPHY}
+\makeatletter
+\IfInstanceExistsTF{heading}{chapter}
+  {%
+    \EditInstance{heading}{chapter}{
+      after-penalty-vspace = 36pt,
+      after-vspace         = 30pt,
+      text                 = \MakeUppercase{\@chapapp},
+      heading-decls        = \centering \parindent0pt \normalfont \bfseries \large,
+      title-decls          = \large,
+    }
+    \EditInstance{headformat}{chapter}{
+      separator-b = \par \nobreak \vspace{2pt},
+    }
+    \EditInstance{heading}{part}{
+      text          = \MakeUppercase{\partname},
+      heading-decls = \centering \normalfont \bfseries \Large,
+      title-decls   = \Large,
+    }
+    \EditInstance{heading}{section}{heading-decls = \normalfont \large \bfseries}
+    \EditInstance{heading}{subsection}{heading-decls = \normalfont \normalsize \bfseries}
+    \EditInstance{heading}{subsubsection}{heading-decls = \normalfont \normalsize \itshape}
+  }
+  {%
+    \def\@makechapterhead#1{%
+      \vspace*{24\p@}%
+      {\parindent \z@ \centering \normalfont
+        \ifnum \c@secnumdepth >\m@ne
+          \large\bfseries \MakeUppercase{\@chapapp}\space \thechapter
+          \par\nobreak
+          \vskip 2\p@
+        \fi
+        \interlinepenalty\@M
+        \large \bfseries #1\par\nobreak
+        \vskip 30\p@
+      }}
+    \def\@makeschapterhead#1{%
+      \vspace*{24\p@}%
+      {\parindent \z@ \centering \normalfont
+        \interlinepenalty\@M
+        \large \bfseries #1\par\nobreak
+        \vskip 30\p@
+      }}
+    \def\@part[#1]#2{%
+      \ifnum \c@secnumdepth >-2\relax
+        \refstepcounter{part}%
+        \addcontentsline{toc}{part}{\thepart\hspace{1em}#1}%
+      \else
+        \addcontentsline{toc}{part}{#1}%
+      \fi
+      \markboth{}{}%
+      {\centering
+       \interlinepenalty \@M
+       \normalfont
+       \ifnum \c@secnumdepth >-2\relax
+         \Large\bfseries \MakeUppercase{\partname}\nobreakspace\thepart
+         \par
+         \vskip 30\p@
+       \fi
+       \Large \bfseries #2\par}%
+      \@endpart}
+    \renewcommand\section{\@startsection{section}{1}{\z@}%
+      {-3.5ex \@plus -1ex \@minus -.2ex}{2.3ex \@plus .2ex}%
+      {\normalfont\large\bfseries}}
+    \renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+      {-3.25ex \@plus -1ex \@minus -.2ex}{1.5ex \@plus .2ex}%
+      {\normalfont\normalsize\bfseries}}
+    \renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+      {-3.25ex \@plus -1ex \@minus -.2ex}{1.5ex \@plus .2ex}%
+      {\normalfont\normalsize\itshape}}
+  }
+\makeatother
+
+% --- The research questions -------------------------------------------------
+% Stated once, so that the problem statement and the conclusion repeat them
+% in the same words.
+\newcommand{\rqone}{Does giving each traffic class its own endpoint keep the
+  tail latency of small messages flat while bulk transfers run, on software
+  RoCE and on hardware RoCE?}
+\newcommand{\rqtwo}{What does a portable transport interface cost against the
+  raw RDMA interface on the path small messages take?}
+\newcommand{\rqthree}{How much of the time to first token is cache transfer,
+  and do per-transfer routing, compression and spilling reduce it against a
+  transport that treats every transfer alike?}
+
+% --- Star notes: things to fix, fill in or remove ------------------------
+% Every note printed in the PDF starts with a star (*), and nothing else in
+% the document uses that character, so a search for * finds everything that
+% still has to be fixed, filled in or removed. Three commands print notes:
+%   \fixnote{text}             * text
+%   \waiting{results from E3}  * Waiting for results from E3.
+%   \pendingfigure{...}        a placeholder figure whose box starts with
+%                              "* Waiting for ..." and lists the steps
+% \blank prints a blank for a value that a run will supply; the sentence is
+% followed by \waiting{...}. Every note is also written to thesis.aux, and
+%   python3 tools/notes.py thesis.aux
+% lists them with their page numbers. To remove a note, delete its command.
+% \shownotesfalse hides the notes in the text and under the tables, which is
+% only for checking the page count: the blanks, the empty cells and the
+% placeholder figures stay.
+\newif\ifshownotes
+\shownotestrue
+\newcommand{\blank}{\mbox{\_\_\_\_\_}}
+\makeatletter
+\newcommand{\thesisnote}[2]{}   % read back from the .aux file; prints nothing
+\NewDocumentCommand{\thesislognote}{+m}{%
+  \protected@write\@auxout{}{\string\thesisnote{\thepage}{\detokenize{#1}}}}
+\makeatother
+\NewDocumentCommand{\fixnote}{+m}{%
+  \ifshownotes
+    \thesislognote{#1}%
+    \textbf{*}\,\textit{#1}%
+  \fi}
+\NewDocumentCommand{\waiting}{m}{\fixnote{Waiting for #1.}}
+
+% --- Placeholder for a figure that waits for a result --------------------
+% \pendingfigure{label}{caption}{what it waits for}{step one ;; step two ;; ...}
+% Draws a dashed box that starts with "* Waiting for <what it waits for>."
+% and lists the steps that produce the real figure. The same words become
+% the alt text. The third argument completes the sentence "Waiting for ...",
+% for example: results from E3 (run R2). The last two arguments are read
+% verbatim: plain text only, underscores allowed, steps separated by two
+% semicolons. Use it at the top level of a chapter, never inside another
+% command.
+\newcommand{\thesispendingbox}[3]{%
+  \begin{tikzpicture}[diagram, alt={#1}]
+    \node[draw=dInk, dashed, line width=0.8pt, fill=white,
+          text width=0.88\linewidth, align=left, inner sep=9pt, font=\small]
+      {\textbf{*\,Waiting for #2.}\par\smallskip
+       To produce this figure:\par #3};
+  \end{tikzpicture}}
+\ExplSyntaxOn
+\seq_new:N \l__thesis_steps_seq
+\tl_new:N \l__thesis_alt_tl
+\tl_new:N \l__thesis_disp_tl
+\int_new:N \l__thesis_step_int
+\cs_new_protected:Npn \__thesis_box:nnn #1#2#3 { \thesispendingbox {#1} {#2} {#3} }
+\cs_generate_variant:Nn \__thesis_box:nnn { VnV }
+\NewDocumentCommand{\pendingfigure}{m m +v +v}
+  {
+    \seq_set_split:Nnn \l__thesis_steps_seq { ;; } {#4}
+    \tl_set:Nn \l__thesis_alt_tl { Placeholder~for~a~figure.~Waiting~for~#3.~To~produce~it:~ }
+    \tl_clear:N \l__thesis_disp_tl
+    \int_zero:N \l__thesis_step_int
+    \seq_map_inline:Nn \l__thesis_steps_seq
+      {
+        \int_incr:N \l__thesis_step_int
+        \tl_put_right:Ne \l__thesis_alt_tl { Step~\int_use:N \l__thesis_step_int :~ \exp_not:n {##1} .~ }
+        \tl_put_right:Ne \l__thesis_disp_tl { \int_use:N \l__thesis_step_int .~ \exp_not:n {##1} \exp_not:N \par }
+      }
+    % two hyphens in a command-line option must not join into a dash
+    \tl_replace_all:Nnn \l__thesis_disp_tl { -- } { - \kern 0pt - }
+    \begin{figure}[htbp]
+      \centering
+      \thesislognote{Waiting~for~#3.~(placeholder~figure:~#2)}
+      \__thesis_box:VnV \l__thesis_alt_tl {#3} \l__thesis_disp_tl
+      \caption[#2]{#2.}
+      \label{#1}
+    \end{figure}
+  }
+\ExplSyntaxOff
+
+% Single-spaced, small block for long tables outside floats.
+\newenvironment{tightblock}{\par\begingroup\setstretch{1}\small}{\par\endgroup}
+
+% Reference names, written out and capitalised.
+\crefname{figure}{Figure}{Figures}
+\crefname{table}{Table}{Tables}
+\crefname{chapter}{Chapter}{Chapters}
+\crefname{section}{Section}{Sections}
+\crefname{appendix}{Appendix}{Appendices}
+\crefname{equation}{Equation}{Equations}
+\crefname{proposition}{Proposition}{Propositions}
+\crefname{definition}{Definition}{Definitions}
+\crefname{lemma}{Lemma}{Lemmas}
+\crefname{algorithm}{Algorithm}{Algorithms}
+\crefname{part}{Part}{Parts}
+
+% Plot data generated from the results files in the repository.
+\input{figures/data}
+
+% \plotcoords[plot options]{\macroHoldingCoordinates}: an \addplot whose
+% coordinate list is stored in a macro (see figures/data.tex).
+\makeatletter
+\newcommand{\plotcoords}[2][]{\expandafter\thesis@plot\expandafter{#2}{#1}}
+\newcommand{\thesis@plot}[2]{\addplot[#2] coordinates {#1};}
+\makeatother
+
+% Shared look of the charts.
+\pgfplotsset{thesis chart/.style={
+    width=0.84\linewidth, height=6.0cm,
+    axis lines*=left, axis line style={draw=dInk, line width=0.7pt},
+    ymajorgrids, grid style={draw=dGray!35, line width=0.4pt},
+    tick align=outside, tick style={draw=dInk},
+    tick label style={font=\footnotesize}, label style={font=\small},
+    legend style={draw=none, fill=white, font=\footnotesize, legend cell align=left, row sep=1pt, inner sep=3pt},
+  }}

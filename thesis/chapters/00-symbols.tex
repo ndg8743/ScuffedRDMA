@@ -1,0 +1,70 @@
+% Symbols by the part of the thesis in which they are used. A letter that
+% is used with two meanings appears once for each, under the part to which
+% the meaning belongs. Keep this list in step with the definitions that
+% follow each equation in the text. To drop the list, remove the two lines
+% that include it in chapters/00-front.tex.
+\begin{tightblock}
+\renewcommand{\arraystretch}{1.12}
+\begin{longtable}{L{3.9cm}L{11.2cm}}
+  \toprule
+  Symbol & Meaning \\
+  \midrule
+  \endhead
+  \multicolumn{2}{l}{\textit{Used throughout}} \\*
+  $C$ & Rate of the link in bits per second; in the controller model, its capacity, set to 1. \\
+  $d$ & Number of entries of a key, a value or a cache vector, 64 for this model. \\
+  $L$,\ $T$ & Number of layers of the model, 40, and number of tokens of the prompt. \\
+  $t_{\text{wire}}$,\ $t_{\text{credit}}$ and the like & A duration in seconds, named by its subscript and defined where it is used. \\
+  $s_{\text{cache}}$,\ $s_{\text{packed}}$ and the like & A size in bytes, named by its subscript and defined where it is used. \\
+  $a \cdot b$,\ \ $\langle u, v \rangle$,\ \ $\lVert u \rVert$ & Dot product or inner product of two vectors, and length of a vector. \\
+  $\operatorname{E}[\,\cdot\,]$,\ \ $\lceil\,\cdot\,\rceil$ & Mean of a random quantity, and rounding up to a whole number. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{Attention and the size of the cache (\cref{ch:transformers,sec:traffic})}} \\*
+  $z_i$ & Score at position $i$ of a list that is passed to the softmax. \\
+  $Q$,\ $K$,\ $V$ & Matrices whose rows are the queries, keys and values of all positions. \\
+  $h$,\ $w$ & Number of key-value heads of a layer, 8, and bytes of one entry, 2. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{Waiting on a shared link (\cref{sec:hol,sec:sfbench})}} \\*
+  $k$,\ $s_i$ & Number of cold messages ahead of a hot one, and size of the $i$th in bytes. \\
+  $W$,\ $\overline{W}$ & Wait of a hot message behind them, and mean wait in the queueing model. \\
+  $\lambda$,\ $S$,\ $\rho$ & Arrival rate, service time of a message, and fraction of time the link is busy. \\
+  $p_{99}^{\text{hot}}$ & 99th percentile of the one-way latency of the hot messages. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{The pool and the blob channel (\cref{sec:pool,sec:channel})}} \\*
+  $N$,\ $B$ & Receive slots on each side, 8 by default, and size of a slot, 4 MiB by default. \\
+  $s$,\ $c$ & Number of a slot and of its credit, and traffic class, hot or cold. \\
+  $\var{posted}[c]$,\ $\var{done}[c]$ & Number of operations posted and completed on the endpoint of class $c$. \\
+  $X$,\ $P$ & Throughput, and rate of a copy between GPU and host memory, in bytes per second. \\
+  $k_i$,\ $K$ & Number of writes to slot $i$ in the observed period, and their sum over all slots. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{The classifier (\cref{sec:classifier})}} \\*
+  $x$,\ $\phi(x)$,\ $F$ & A transfer, its vector of features, and the number of features. \\
+  $s$,\ $s'$,\ $r$ & Current state, next state, and any one of the three states. \\
+  $W_{s,s'}$,\ $W$ & Weight vector for a pair of states, and all weights together. \\
+  $t$,\ $p$,\ $e$ & Logarithm of the size of a transfer, and indicators of prefill and of decode. \\
+  $n$,\ $(x_i, s_i, y_i)$ & Number of examples, and example $i$ with its previous and its labeled next state. \\
+  $J(W)$,\ $\eta$ & Training objective, and weight of its penalty. \\
+  $\tau_P$,\ $\tau_D$,\ $\gamma_P$,\ $\gamma_D$ & Cut-offs on $t$ and slopes, for prefill and for decode. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{The controller (\cref{sec:controller})}} \\*
+  $q_H$,\ $q_C$ & Number of operations that wait in the hot and in the cold queue. \\
+  $\lambda_H$,\ $\lambda_C$,\ $\mu_H$,\ $\mu_C$ & Arrival rates, and service rates per unit of capacity, in operations per second. \\
+  $u$,\ $\alpha$,\ $\beta$ & Share of the link for the hot queue, and weights of the two backlogs in the cost. \\
+  $p_H$,\ $p_C$,\ $S$ & Costs of one more waiting operation in each queue, and the switching function. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{The quantizer (\cref{ch:shrink})}} \\*
+  $x$,\ $\ell$,\ $u$ & A cache vector, its length, and the unit vector $x / \ell$. \\
+  $H$,\ $D$,\ $\delta_j$,\ $R$ & Hadamard matrix, diagonal sign matrix, its entry $j$, and the rotation (\cref{eq:rotation}). \\
+  $y$,\ $\hat y$ & Rotated vector, and the same vector after quantization. \\
+  $b$,\ $K$ & Number of bits per coordinate, 3, and number of levels, $2^b$. \\
+  $c_k$,\ $\theta_k$ & Level $k$ and threshold $k$ of the scalar quantizer. \\
+  $\hat x$,\ $r$,\ $\rho$ & Reconstruction of $x$, residual $x - \hat x$, and length of the residual. \\
+  $m$,\ $s_j$,\ $z_j$,\ $q$ & Sign bits of the sketch, 256, random vector $j$, its sign, and a query. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{The storage tier (\cref{sec:tier})}} \\*
+  $A$,\ $\var{len}$,\ $w$ & Alignment unit, 4,096 bytes, length of a block, and size of its slot. \\
+  $n$,\ $X(n)$ & Number of blocks in a batch, and write throughput at that batch size. \\
+  $G$,\ $E$ & Generator polynomial of the checksum, and polynomial of the changed bits. \\
+  \bottomrule
+\end{longtable}
+\end{tightblock}

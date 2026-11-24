@@ -1,0 +1,786 @@
+\chapter{The Middleware: Pool, Blob Channel and Connector}
+\label{ch:blobs}
+
+The previous chapter described what an RDMA interface offers to a program:
+endpoints with their own send queues, registered memory, one-sided writes,
+and completions whose order is guaranteed only within one connection. The
+middleware is built on those primitives from the bottom up, as
+each layer exists to remove one cost identified in the problem statement. The
+dual-endpoint pool removes the shared queue of \cref{fig:hol} by giving each
+traffic class its own endpoint and its own completion handling, the blob
+channel turns raw writes into named byte strings of any length under flow
+control, and the connector attaches the channel to the serving engine, so
+that the cache of a real request crosses the link. The components that choose
+a class, an encoding and a destination for each transfer are the subject of
+the next chapter, and they appear here only at the points where a decision
+enters the path.
+
+\section{One Transfer Through the Middleware}
+\label{sec:overview}
+
+\Cref{fig:architecture} shows the layers and the path that one layer of cache
+takes through them. The serving engine calls the connector once per attention
+layer during prefill, the connector gathers the blocks of that layer and
+copies them to host memory, and the codec frames them as one blob, either as
+raw 16-bit values or in the packed format of the quantizer
+(\cref{ch:shrink}). The sender then obtains a class for the blob from the
+classifier, and the blob channel cuts the blob into chunks, takes one credit
+per chunk, and issues one RDMA write with immediate data per chunk on the
+endpoint of that class. Below the channel, the pool posts each operation
+through libfabric or through raw verbs, which are two implementations of one
+C interface, and the network card or the Soft-RoCE driver carries the
+packets. On the decode server the same layers run in the opposite order, and
+the only traffic in the reverse direction is the 8-byte credit that frees a
+receive slot, which always travels on the hot endpoint.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Layer diagram of the middleware as two columns joined at the bottom. The left
+        column is the prefill server and the right column is the decode server. Left column,
+        top to bottom, with arrows pointing down: serving engine, prefill pass, called per
+        layer; connector, gathers blocks and copies them to host memory; codec, raw or packed
+        by the quantizer; sender, class from the static classifier; blob channel, chunks,
+        credits and staging slots; then a framed pair, the hot endpoint of the pool with depth
+        64 and busy polling, and the cold endpoint of the pool with depth 512 and a blocking
+        wait. The right column holds the same layers with arrows pointing up: the two
+        endpoints of the pool; blob channel, reassembly and return of credits; receiver,
+        staging area by key; codec, unpack and reconstruct; connector, writes blocks into the
+        block table; serving engine, decode steps. Three horizontal arrows join the endpoints
+        of the two servers: a solid arrow from the left hot endpoint to the right hot endpoint
+        labeled marker, a dashed arrow from the right hot endpoint back to the left hot
+        endpoint labeled credits, and a solid arrow from the left cold endpoint to the right
+        cold endpoint labeled chunks. A wide box under both columns reads: libfabric or raw
+        verbs on one RDMA device and one link, Soft-RoCE on commodity Ethernet or RoCE version
+        2 on 100 gigabit Ethernet. Below it a dashed box reads: decision components of the
+        next chapter, evaluated separately from this path: learned
+        classifier, rule tree and controller, which choose class, compression and spill, and
+        the storage tier on an NVMe drive. A dashed arrow runs from this box to the sender.},
+      lay/.style={tint=#1, text width=54mm, minimum height=11mm, font=\footnotesize, align=center, inner xsep=3pt, inner ysep=3pt}]
+    % prefill server
+    \node[heading] at (0,1.0) {Prefill server};
+    \node[lay=dGray]   (pe) at (0,0)      {Serving engine\\prefill pass, called per layer};
+    \node[lay=dBlue]   (pc) at (0,-1.45)  {Connector\\gather blocks, copy to host memory};
+    \node[lay=dBlue]   (pk) at (0,-2.9)   {Codec\\raw, or packed by the quantizer};
+    \node[lay=dPurple] (ps) at (0,-4.35)  {Sender\\class from the static classifier};
+    \node[lay=dGreen]  (pb) at (0,-5.8)   {Blob channel\\chunks, credits, staging slots};
+    \node[lay=dOrange] (ph) at (0,-7.45)  {Pool, hot endpoint\\depth 64, busy polling};
+    \node[lay=dOrange] (pl) at (0,-8.8)   {Pool, cold endpoint\\depth 512, blocking wait};
+    \begin{scope}[on background layer]
+      \node[frame, fit=(ph)(pl), inner sep=5pt] (pp) {};
+    \end{scope}
+    % decode server
+    \node[heading] at (8.6,1.0) {Decode server};
+    \node[lay=dGray]   (de) at (8.6,0)      {Serving engine\\decode steps};
+    \node[lay=dBlue]   (dc) at (8.6,-1.45)  {Connector\\write blocks into the block table};
+    \node[lay=dBlue]   (dk) at (8.6,-2.9)   {Codec\\unpack, reconstruct};
+    \node[lay=dPurple] (ds) at (8.6,-4.35)  {Receiver\\staging area, by key};
+    \node[lay=dGreen]  (db) at (8.6,-5.8)   {Blob channel\\reassembly, return of credits};
+    \node[lay=dOrange] (dh) at (8.6,-7.45)  {Pool, hot endpoint\\depth 64, busy polling};
+    \node[lay=dOrange] (dl) at (8.6,-8.8)   {Pool, cold endpoint\\depth 512, blocking wait};
+    \begin{scope}[on background layer]
+      \node[frame, fit=(dh)(dl), inner sep=5pt] (dp) {};
+    \end{scope}
+    % vertical flow
+    \draw[flow] (pe) -- (pc); \draw[flow] (pc) -- (pk); \draw[flow] (pk) -- (ps);
+    \draw[flow] (ps) -- (pb); \draw[flow] (pb) -- (pp);
+    \draw[flow] (dp) -- (db); \draw[flow] (db) -- (ds); \draw[flow] (ds) -- (dk);
+    \draw[flow] (dk) -- (dc); \draw[flow] (dc) -- (de);
+    % logical connections between endpoints
+    \draw[flow]  ($(ph.east)+(0,0.22)$) -- ($(dh.west)+(0,0.22)$) node[midway, above=1pt, small text] {marker};
+    \draw[reply] ($(dh.west)+(0,-0.22)$) -- ($(ph.east)+(0,-0.22)$) node[midway, below=1pt, small text] {credits};
+    \draw[flow, line width=1.6pt] (pl.east) -- (dl.west) node[midway, above=1pt, small text] {chunks};
+    % device and link
+    \node[tint=dGray, text width=140mm, minimum height=11mm, font=\footnotesize, align=center, inner xsep=3pt, inner ysep=3pt]
+      (link) at (4.3,-10.45) {libfabric or raw verbs on one RDMA device and one link:\\Soft-RoCE on commodity Ethernet, or RoCEv2 on 100 gigabit Ethernet};
+    \draw[flow] (pp.south) -- (pp.south |- link.north);
+    \draw[flow] (dp.south |- link.north) -- (dp.south);
+    % decision components
+    \node[draw=dInk, dashed, line width=0.8pt, rounded corners=3pt, fill=white, text width=140mm,
+          minimum height=15mm, font=\footnotesize, align=center, inner xsep=3pt, inner ysep=4pt]
+      (dec) at (4.3,-12.35) {Decision components of the next chapter, evaluated separately from this path:\\learned classifier, rule tree and controller (class, compression, spill),\\and the storage tier (NVMe drive)};
+    \draw[reply] (dec.west) -- ++(-0.45,0) |- (ps.west);
+  \end{tikzpicture}
+  \caption[The layers of the middleware and the path of one layer of cache]{The layers of the middleware and the path of one layer of cache. Horizontal arrows are logical connections between endpoints; both classes use the same device and cable.}
+  \label{fig:architecture}
+\end{figure}
+
+\Cref{alg:transfer} states the same path as a procedure, with a reference on
+each line to the algorithm that expands it. The procedure has four actors:
+the engine thread of each server, which calls the connector, a sender thread
+on the prefill server, and a receiver thread on the decode server. The two
+engine threads never wait on each other directly, as they are coupled only
+through the staging area of the decode server, in which the receiver thread
+stores each blob under its key until the engine asks for it. This coupling is
+what allows a layer that is lost or late to cost a timeout and a
+recomputation instead of an incorrect result (\cref{sec:connector}).
+
+\begin{pseudocode}{One layer of cache of request $r$, from the prefill server to the decode server}{alg:transfer}
+  \Statex \textbf{Prefill server, engine thread,} after attention layer $\ell$ of request $r$
+  \State $\var{blocks} \gets$ the blocks of $r$ in the cache of layer $\ell$, gathered on the GPU
+  \State $\var{blob} \gets \Call{Encode}{\var{blocks}}$ \Comment{copy to host; raw, or \cref{alg:quant}}
+  \State $c \gets \Call{Classify}{\var{key}(r,\ell),\ |\var{blob}|,\ \ell}$ \Comment{hot or cold, \cref{alg:static}}
+  \State append $(\var{key}(r,\ell),\ \var{blob},\ c)$ to the send queue
+  \Statex \textbf{Prefill server, engine thread,} after the last layer of $r$
+  \State append $(\var{key}(r,\text{done}),\ \text{marker},\ \text{hot})$ to the send queue
+  \Statex \textbf{Prefill server, sender thread}
+  \For{each $(k, \var{blob}, c)$ taken from the send queue, in order}
+    \State \Call{SendBlob}{$k, \var{blob}, c$} \Comment{chunks and credits, \cref{alg:blob-send}}
+  \EndFor
+  \Statex \textbf{Decode server, receiver thread}
+  \Loop
+    \State $(k, \var{blob}) \gets \Call{ReceiveBlob}{\,}$ \Comment{\cref{alg:blob-deliver}}
+    \State store $\var{blob}$ in the staging area under $k$
+  \EndLoop
+  \Statex \textbf{Decode server, engine thread,} before the first decode step of $r$
+  \For{each layer $\ell$}
+    \State $\var{blob} \gets$ the entry under $\var{key}(r,\ell)$ in the staging area, or none after the timeout
+    \If{no entry arrived}
+      \State report the blocks of layer $\ell$ as failed \Comment{the engine recomputes them}
+    \Else
+      \State $\var{blocks} \gets \Call{Decode}{\var{blob}}$
+      \State write $\var{blocks}$, except the prefix already held, into the block table on the GPU
+    \EndIf
+  \EndFor
+\end{pseudocode}
+
+Two statements about \cref{fig:architecture} prevent a misreading of the
+results. First, the solid path is the one that the connector executes: the
+class of a blob is chosen by the static classifier (\cref{alg:static}), the
+encoding is fixed by configuration for a whole run, and no blob is diverted
+to storage. On this path every layer blob carries a new key, so the access
+counts of the static classifier never exceed one and the class is decided by
+size alone. The marker and the credits therefore use the hot endpoint, and
+every layer of cache, which is at least one 16-token block of 32 KiB for the
+model used here (\cref{eq:kvsize}), uses the cold endpoint. Second, the
+learned classifier, the rule tree, the controller and the storage tier are
+implemented and tested as separate components, and each has a defined entry
+point into the path: the sender accepts a class that overrides the
+classifier, and the storage tier accepts a block together with a decision.
+Connecting those entry points to the connector is future work. The experiments are assigned accordingly, as E1 to E5
+exercise the pool, E6 the blob channel, and E7 and E8 the connector on the
+solid path, whereas the decision components, the quantizer and the storage
+tier are evaluated separately, on synthetic traffic, on caches taken from the
+model, and on an NVMe drive.
+
+\fixnote{Confirm against the connector at the commit used for the runs: the two statements above, the single send queue of the sender, and the marker that the decode side does not wait for (\cref{sec:connector}). If the decision components are connected to the serving path first, rewrite this paragraph and the dashed box of \cref{fig:architecture}.}
+
+\section{The Dual-Endpoint Pool}
+\label{sec:pool}
+
+The pool is the lowest layer of the middleware and the one that carries its
+central idea, which is that urgent and bulk traffic do not share a queue. It
+sits directly on the interface of \cref{ch:libfabric}, and every layer above
+it, from the blob channel to the connector, sends through it.
+
+\subsection{One Interface, Two Libraries}
+
+The interface of the pool is a small C header (\cref{app:calls}). It opens a
+pool with a hot and a cold class, connects or listens, exposes one registered
+memory region per side, and offers write, read and send per class, together
+with calls that poll for arrivals and wait for local completions. Two
+libraries implement this header: libscuffedfabric on libfabric, and
+libscuffedverbs on raw verbs with reliable connected queue pairs. The
+benchmark of \cref{sec:sfbench} is one source file linked against either
+library, so that when the two differ in a measurement, the library beneath
+the header is the only element that changed, which is the comparison that RQ2
+requires.
+
+\subsection{Two Classes, Two Queues}
+
+The pool gives each traffic class its own endpoint and its own completion
+handling, and both halves of that statement matter. The separate endpoint
+removes the shared send queue of \cref{fig:hol}, so that the wait of
+\cref{eq:fifo} no longer contains cold messages. The separate completion
+queue removes a second and less visible queue: if both classes reported to
+one completion queue, a hot completion that arrived behind $k$ cold
+completions would cost $k$ polls to reach, whereas with a queue per class the
+hot poller never sees a cold completion. The two classes are then configured
+for opposite goals, as \cref{tab:classes} lists.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Configuration of the two traffic classes]{Configuration of the two traffic classes.}
+  \label{tab:classes}
+  \small
+  \begin{tabular}{L{3.6cm}L{5.2cm}L{5.2cm}}
+    \toprule
+    & Hot class & Cold class \\
+    \midrule
+    Goal & lowest latency for small messages & highest throughput for large ones \\
+    Queue depth & 64 & 512 \\
+    Waiting for completions & busy polling, or a counter & blocking wait, so no processor core spins \\
+    Small payloads & copied by the provider at the call, so the buffer is free at once & not applicable \\
+    Transport & reliable connection & reliable connection \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The hot class spends a processor core to save microseconds, as its thread
+polls the completion queue without sleeping and small payloads are copied by
+the provider at the call, which frees the buffer at once. The cold class does
+the opposite, because a thread that streams megabytes should sleep while the
+link is busy, and a cold thread that polled would compete with the hot poller
+for the processor. For this reason the cold class waits on a kernel wait
+object, and the cluster runs pin the two threads to different cores
+(\cref{sec:sfbench}).
+
+\Cref{alg:pool} gives the data path of the pool in full. An operation is
+submitted to the endpoint of its class, and if the send queue of that
+endpoint is full, the caller reaps completions of the same class until space
+appears, so that a full cold queue delays cold callers only. Completions are
+counted per class, by busy polling on the hot class and by a blocking wait of
+at most 10 ms on the cold class.
+
+\begin{pseudocode}{Posting an operation on a class and counting its completion}{alg:pool}
+  \Function{Post}{$c$, operation} \Comment{$c$ is hot or cold}
+    \Loop
+      \State submit the operation to the endpoint of class $c$ \Comment{write, read or send}
+      \If{the provider accepted it}
+        \State $\var{posted}[c] \gets \var{posted}[c] + 1$ and \Return
+      \ElsIf{the error is not a full queue, or the queue has been full for 60 s}
+        \State \textbf{fail} with that error
+      \EndIf
+      \State \Call{Progress}{$c$} \Comment{reap completions to free queue space}
+    \EndLoop
+  \EndFunction
+  \Function{Progress}{$c$}
+    \State read up to 64 entries from the completion queue of class $c$
+    \If{an entry reports an error}
+      \State \textbf{fail} with that error \Comment{never counted as done}
+    \EndIf
+    \State $\var{done}[c] \gets \var{done}[c] +{}$ the number of entries read
+  \EndFunction
+  \Function{WaitTx}{$c$, $n$} \Comment{returns once $\var{done}[c] \ge n$}
+    \While{$\var{done}[c] < n$}
+      \If{class $c$ has a wait object} \Comment{cold class}
+        \State sleep on its completion queue for at most 10 ms, then count as in \textsc{Progress}
+      \Else \Comment{hot class}
+        \State \Call{Progress}{$c$}
+      \EndIf
+    \EndWhile
+  \EndFunction
+\end{pseudocode}
+
+Two details of \cref{alg:pool} carry weight in later sections. An entry with
+an error status ends the operation with that error and is never added to
+$\var{done}$, which is rule 2 of \cref{sec:rules} enforced at the lowest
+layer. In addition, the counters $\var{posted}[c]$ and $\var{done}[c]$ give
+every operation on a class a sequence number, and since the completions of
+one reliable connection are reported in posting order, $\var{done}[c] \ge n$
+means that the $n$th operation posted on class $c$ has completed, which is
+the fact on which \cref{lem:staging} rests. When the hot class is configured
+with a completion counter instead of a queue, \textsc{Progress} reads the
+counter into $\var{done}[c]$ and the rest is unchanged.
+
+What the pool guarantees is narrow and is stated exactly, since the
+experiments test nothing more. No cold message is ahead of a hot message in
+the send queue of the hot class, and no cold completion is ahead of a hot
+completion in its completion queue. What happens below the two endpoints,
+where their packets meet on one device and one cable, is outside the control
+of the pool: on a hardware card the device arbitrates between queue pairs,
+and on Soft-RoCE the kernel does. Whether the hot class stays fast there is
+the question that E3 measures (\cref{sec:res-e3}).
+
+\subsection{Differences Between Providers}
+
+The tests of the pool run over three software providers of libfabric 1.17,
+and they showed two differences that the design of the completion signal
+has to respect. The shared-memory provider does not promise that two writes
+to the same peer are applied in order, so a signal that relies on a second
+write arriving after the first is not valid on it. The TCP provider did not
+increment the counter for remotely originated writes, so the counter signal
+is skipped there.
+
+\waiting{results from E1 to E5 on the verbs provider: state whether either
+difference occurs there}
+
+\section{The Blob Channel}
+\label{sec:channel}
+
+The pool moves bytes between offsets of two registered regions and reports
+completions, which is too low a level for a caller that holds a cache layer
+of several megabytes under a name. The blob channel supplies the missing
+parts: a framing that names each byte string, a division into chunks that fit
+a fixed slot, and a credit scheme that prevents the sender from overwriting
+data that the receiver has not yet copied out.
+
+\subsection{Layout}
+
+Each side registers one memory region and divides it into three parts: $N$
+receive slots of $B$ bytes into which the peer writes, $N$ staging slots in
+which outgoing chunks are assembled, and a small scratch area for credits.
+The defaults are $N = 8$ and $B = 4$ MiB, and every slot begins with a
+64-byte header (\cref{fig:slot}, with the fields in \cref{app:wire}).
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Byte layout of one slot of the blob channel, drawn as a horizontal bar in three
+        parts. Part one, 64 bytes, the header: magic number, blob identifier, key length, flags,
+        total blob length, chunk offset and chunk length. Part two, the key, a variable number
+        of bytes. Part three, the chunk payload, which fills the rest of the slot up to B bytes.
+        A brace under the whole bar is labeled one slot, B bytes, 4 mebibytes by default.},
+      cell/.style={draw=dInk, line width=0.8pt, minimum height=11mm, font=\footnotesize, align=center, inner sep=3pt}]
+    \node[cell, fill=dBlue!12, minimum width=44mm] (h) at (0,0) {Header, 64 bytes};
+    \node[cell, fill=dGreen!12, minimum width=20mm, anchor=west] (k) at (h.east) {Key};
+    \node[cell, fill=dOrange!10, minimum width=58mm, anchor=west] (p) at (k.east) {Chunk payload};
+    \draw[decorate, decoration={brace, amplitude=5pt, mirror}, draw=dGray, line width=0.6pt]
+      ($(h.south west)+(0,-0.15)$) -- ($(p.south east)+(0,-0.15)$)
+      node[midway, below=7pt, small text] {one slot: $B$ bytes (4 MiB by default)};
+    \node[small text, align=left, anchor=north west, text width=120mm] at ($(h.south west)+(0,-1.0)$)
+      {Header fields: magic number, blob identifier, key length, flags, total length, chunk offset, chunk length.};
+  \end{tikzpicture}
+  \caption[One slot of the blob channel]{One slot of the blob channel.}
+  \label{fig:slot}
+\end{figure}
+
+\subsection{Protocol}
+
+A blob is a key and a byte string, and a credit is the right to write into
+one specific receive slot of the peer, of which the sender initially holds
+all $N$. \Cref{alg:blob-send,alg:take-credit} give the sending side. The
+sender cuts the blob into chunks of at most $B - 64 - |\var{key}|$ bytes,
+which is what remains of a slot of $B$ bytes after the 64-byte header and the
+key of $|\var{key}|$ bytes, and for each chunk it takes a credit, builds header, key and chunk in the staging slot with the
+same number, and writes that staging slot into the receive slot of the peer
+with one RDMA write with immediate data, in which the immediate value carries
+the kind ``data'' and the slot number.
+
+\begin{pseudocode}{Sending a blob}{alg:blob-send}
+  \Function{SendBlob}{$\var{key}$, $\var{data}$, class $c$}
+    \State $\var{cap} \gets B - 64 - |\var{key}|$ \Comment{payload bytes per chunk}
+    \State $\var{id} \gets$ next blob identifier, $\var{off} \gets 0$
+    \Repeat
+      \State $\var{len} \gets \min(\var{cap},\ |\var{data}| - \var{off})$
+      \State $s \gets \Call{TakeCredit}{\,}$ \Comment{a free receive slot of the peer, \cref{alg:take-credit}}
+      \State build header, $\var{key}$ and $\var{data}[\var{off} : \var{off}+\var{len}]$ in staging slot $s$
+      \State \Call{Post}{$c$, write of staging slot $s$ to receive slot $s$, immediate (data, $s$)}
+      \State $\var{mark}[s] \gets (c,\ \var{posted}[c])$
+      \State $\var{off} \gets \var{off} + \var{len}$
+    \Until{$\var{off} \ge |\var{data}|$}
+  \EndFunction
+\end{pseudocode}
+
+\begin{pseudocode}{Taking a credit before a chunk is written}{alg:take-credit}
+  \Function{TakeCredit}{\,}
+    \Loop
+      \If{a credit $s$ is free}
+        \If{$\var{mark}[s]$ is set to $(c', n)$}
+          \State \Call{WaitTx}{$c'$, $n$} \Comment{the earlier write from staging slot $s$ is complete}
+        \EndIf
+        \State \Return $s$
+      \EndIf
+      \State \Call{Drain}{\,} \Comment{\cref{alg:blob-recv}; fail once the deadline has passed}
+    \EndLoop
+  \EndFunction
+\end{pseudocode}
+
+\begin{pseudocode}{Draining both endpoints}{alg:blob-recv}
+  \Function{Drain}{\,}
+    \For{class $c$ in (hot, cold)}
+      \State \Call{Progress}{$c$}
+      \For{each arrival on the endpoint of $c$ with immediate $(\var{kind}, s)$}
+        \If{$\var{kind}$ is credit}
+          \State add $s$ to the free credits
+        \Else \Comment{a data chunk is in receive slot $s$}
+          \State read $\var{id}$, $\var{key}$, $\var{total}$, $\var{off}$ and $\var{len}$ from the header of slot $s$
+          \State copy $\var{len}$ payload bytes of slot $s$ to offset $\var{off}$ of the buffer of blob $\var{id}$
+          \State \Call{Post}{hot, 8-byte write with immediate (credit, $s$)}
+          \If{all $\var{total}$ bytes of blob $\var{id}$ have been copied}
+            \State append $(\var{key},\ \text{buffer})$ to the ready list
+          \EndIf
+        \EndIf
+      \EndFor
+    \EndFor
+  \EndFunction
+\end{pseudocode}
+
+\Cref{alg:blob-recv,alg:blob-deliver} give the receiving side. The first of
+them is also the routine that a waiting sender runs, since credits arrive
+through the same completion queues as data. The completion of each write names the slot through its
+immediate value. The receiver copies the chunk out of the slot to its place
+in the blob, by blob identifier and offset, and only then returns the credit
+of the slot, as an 8-byte write on the hot endpoint whose immediate value
+carries the kind ``credit'' and the slot number. When all bytes of a blob
+have been copied, the blob is delivered to the caller under its key.
+
+\begin{pseudocode}{Receiving a blob}{alg:blob-deliver}
+  \Function{ReceiveBlob}{\,}
+    \While{the ready list is empty}
+      \State \Call{Drain}{\,} \Comment{\cref{alg:blob-recv}}
+    \EndWhile
+    \State \Return the first entry of the ready list
+  \EndFunction
+\end{pseudocode}
+
+Three choices in these algorithms carry the properties proved below. A
+chunk and its notification are a single operation, the write with immediate
+data, so that no second message exists that could overtake the data. The
+receiver posts the credit only after it has copied the chunk out, so that a
+slot is never rewritten while it is being read. Finally, the credit travels
+on the hot endpoint whatever class the data used, so that the signal which
+allows the sender to continue never waits behind bulk data that the same side
+is sending in the opposite direction.
+
+\subsection{Proved Properties}
+
+Four properties of this protocol are proved in \cref{sec:proofs-blob}.
+
+\begin{proposition}[Slots are never overwritten in use]
+\label{prop:slots}
+A receive slot cycles through three states, free with its credit at the
+sender, being written, and written with the receiver copying out, and returns
+to free only when the receiver sends the credit. The sender writes a slot only
+while holding its credit, so no slot is written while its previous contents
+are still being read.
+\end{proposition}
+
+\begin{proposition}[Notification never precedes data]
+\label{prop:notify}
+The receiver learns of a chunk only from the completion of the write with
+immediate data, and by fact 3 of \cref{sec:ordering} that completion follows
+the placement of every byte of the write.
+\end{proposition}
+
+\begin{proposition}[Reassembly is independent of arrival order]
+\label{prop:reassembly}
+Each chunk carries its blob identifier, the total length, its own offset and
+its length, so a receiver reconstructs the blob from chunks received in any
+order.
+\end{proposition}
+
+\begin{proposition}[Throughput bound]
+\label{prop:credit}
+Let $N$ be the number of receive slots, $B$ the size of a slot in bytes, and
+$t_{\text{credit}}$ the mean duration of the round trip of a credit, from the
+moment a slot is written to the moment its credit can be used again. Then the
+throughput $X$ of the channel, in bytes per second over a long period,
+satisfies
+\mathalt{X is at most N times B divided by t credit}{%
+\begin{equation}
+  X \le \frac{N B}{t_{\text{credit}}}.
+  \label{eq:credit}
+\end{equation}}
+\end{proposition}
+
+The last bound sizes the window. With the defaults, $N B = 32$ MiB can be in
+flight. A 10 gigabit link is the tighter limit as long as $t_{\text{credit}}$
+stays under about 27 ms, and a 100 gigabit link as long as it stays under
+about 2.7 ms. On the
+lab pair the window is therefore not the bottleneck unless credit processing
+is delayed by tens of milliseconds, which is the reason credits are kept off
+the cold endpoint.
+
+\fixnote{Fix before E6: blobs larger than one slot stall intermittently when the channel runs on the TCP provider of libfabric in loopback (reproducer: \nolinkurl{benchmarks/fabric/blob_multichunk_check.py}; cause not identified). With 4 MiB slots a layer of Granite 3.3 2B fits in one chunk for prompts up to about 2,000 tokens, so the 2,048-token and 4,096-token points of E8 need the fix or a larger slot. If the stall is still open at submission, state it here as a limitation.}
+
+\subsection{Proofs of the Channel Properties}
+\label{sec:proofs-blob}
+
+The notation is that of \cref{sec:channel}. Each side has $N$ receive slots of
+$B$ bytes, numbered by $s$. A credit for slot $s$ is the right to write into
+receive slot $s$ of the peer, and the sender starts with all $N$ credits. The
+counters $\var{posted}[c]$ and $\var{done}[c]$ of \cref{alg:pool} count the
+operations posted and completed on the endpoint of class $c$.
+
+\subsubsection{Slots Are Never Overwritten in Use}
+
+\begin{proof}[Proof of \cref{prop:slots}]
+For a slot $s$ consider three conditions.
+\begin{enumerate}
+  \item[(A)] The sender holds the credit for $s$.
+  \item[(B)] A write to $s$ has been posted, and the receiver has not finished
+        copying its chunk out.
+  \item[(C)] The receiver has finished copying, and the sender has not yet
+        processed the credit message for $s$.
+\end{enumerate}
+The claim is that exactly one of these holds for every slot at every moment,
+and the proof is by induction over the steps of the protocol.
+
+\emph{At the start.} The sender holds every credit, so (A) holds for every
+slot and the others do not.
+
+\emph{Each step.} Three steps touch a slot. The sender takes the credit for
+$s$ and posts a write to $s$, which it can do only in (A), and the slot is
+then in (B). The receiver copies the chunk out and then posts the credit
+message, in that order (lines 9 and 10 of \cref{alg:blob-recv}), and the slot
+moves from (B) to (C). The sender processes the credit message and holds the
+credit again, and the slot moves from (C) to (A). No step applies to a slot
+in any other condition, and each step leaves the slot in exactly one
+condition.
+
+\emph{Conclusion.} A write is posted to $s$ only in (A), and (A) is entered
+only from (C), which is entered only when the copy has finished. Hence no
+slot is written while its previous contents are still being read.
+\end{proof}
+
+\Cref{fig:credit} draws the cycle that the proof follows.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Cycle of three conditions of one receive slot, drawn as three boxes joined by
+        arrows into a loop. Box A: free, the sender holds the credit. An arrow from A to B is
+        labeled: the sender takes the credit and posts the write. Box B: in use, the write is
+        posted and the receiver has not finished copying. An arrow from B to C is labeled: the
+        receiver copies the chunk, then posts the credit. Box C: copied out, the credit is on
+        its way to the sender. An arrow from C back to A is labeled: the sender processes the
+        credit. A note says a write is posted to the slot only in condition A.},
+      st/.style={tint=#1, text width=34mm, minimum height=13mm, font=\footnotesize, align=center, inner xsep=3pt}]
+    \node[st=dGreen]  (a) at (0,0)     {(A) Free\\sender holds the credit};
+    \node[st=dOrange] (b) at (6.1,0)   {(B) In use\\written, being copied};
+    \node[st=dBlue]   (c) at (12.2,0)  {(C) Copied out\\credit on its way back};
+    \draw[flow] (a) -- (b) node[midway, above=2pt, small text, align=center] {takes credit,\\posts write};
+    \draw[flow] (b) -- (c) node[midway, above=2pt, small text, align=center] {copies, then\\posts credit};
+    \draw[flow] (c.south) -- ++(0,-1.0) -| (a.south);
+    \node[small text] at (6.1,-1.4) {the sender processes the credit};
+    \node[small text] at (6.1,-2.2) {A write is posted to the slot only in condition (A).};
+  \end{tikzpicture}
+  \caption[The three conditions of a receive slot]{The three conditions of a receive slot in the proof of \cref{prop:slots}.}
+  \label{fig:credit}
+\end{figure}
+
+The sending side needs the matching property for its staging slots, because a
+one-sided write reads its source buffer after it is posted.
+
+\begin{lemma}[Staging slots are not reused early]
+\label[lemma]{lem:staging}
+The sender does not rewrite staging slot $s$ until the earlier write that
+used it as a source has completed at the sender.
+\end{lemma}
+
+\begin{proof}
+When the sender posts a write from staging slot $s$ on the endpoint of class
+$c$, it records $\var{mark}[s] = (c, n)$, where $n = \var{posted}[c]$ is the
+number of operations posted on that endpoint so far, this one included
+(line 9 of \cref{alg:blob-send}). Before it reuses $s$ it waits until
+$\var{done}[c] \ge n$ (line 5 of \cref{alg:take-credit}). Completions on one
+endpoint are reported in the order in which the operations were posted, so
+when the number of completions has reached $n$, the recorded write is among
+them. A completed write no longer reads its source, and a write small enough
+to be injected is copied when it is posted, so that its source is free at
+once.
+\end{proof}
+
+The lemma depends on in-order completion on a single endpoint. That holds
+for the send queue of a reliable connection, which is what both back ends
+use.
+
+\subsubsection{Notification Never Precedes Data}
+
+\begin{proof}[Proof of \cref{prop:notify}]
+The chunk and its notification are one operation, a write with immediate
+data. The receiver is told of the chunk only by the completion that carries
+the immediate value. By fact 3 of \cref{sec:ordering}, that completion is
+generated after every byte of the write is in place. There is no second
+message that could arrive first.
+\end{proof}
+
+A design that sent the data in one write and a separate ``done'' message on
+another endpoint would need an ordering guarantee between endpoints, and
+none exists.
+
+\subsubsection{Reassembly}
+
+\begin{proof}[Proof of \cref{prop:reassembly}]
+The sender cuts the byte range from $0$ to the total length into consecutive
+intervals that do not overlap: the offset starts at $0$ and advances by the
+length of each chunk until it reaches the total. Each chunk's header carries
+the blob identifier, the total, the chunk's offset and its length, and the
+receiver copies the chunk to exactly that range of the buffer it keeps for
+that blob identifier. The position of a chunk therefore does not depend on
+when it arrives. The transport delivers each write once or reports the
+connection as failed, so on a connection that has not failed every interval
+arrives once, and the number of bytes received equals the total exactly when
+every interval has arrived. That is the condition under which the receiver
+delivers the blob.
+\end{proof}
+
+The proof assumes that every chunk arrives. A transfer in which one does
+not, or in which its completion is not processed, is a fault of the
+implementation or of the provider and not a gap in this argument.
+
+\subsubsection{The Throughput Bound}
+
+\begin{proof}[Proof of \cref{prop:credit}]
+Observe the channel for a period of length $t_{\text{obs}}$. Let $k_i$ be the
+number of times that slot $i$ is written in that period, and let
+$K = k_1 + \dots + k_N$ be the number of all writes.
+
+\emph{Counting round trips.} Between two consecutive writes to the same slot
+lies one complete round trip of its credit, so slot $i$ completes at least
+$k_i - 1$ round trips inside the period, and their durations add up to at
+most $t_{\text{obs}}$. Over all $N$ slots there are therefore at least
+$K - N$ complete round trips with a total duration of at most
+$N t_{\text{obs}}$. Their mean duration is $t_{\text{credit}}$, hence
+\mathalt{the quantity K minus N, times t credit, is at most N times t obs, so K is at most N
+  plus N times t obs divided by t credit}{%
+\begin{equation}
+  (K - N)\, t_{\text{credit}} \le N\, t_{\text{obs}}
+  \qquad\text{so}\qquad
+  K \le N + \frac{N\, t_{\text{obs}}}{t_{\text{credit}}}.
+\end{equation}}
+
+\emph{From writes to bytes.} Each write carries at most $B$ bytes, header and
+key included, so the bytes moved in the period are at most $B K$, and the
+throughput over the period is
+\mathalt{X equals the bytes moved divided by t obs, which is at most B times K over t obs,
+  which is at most N times B over t obs, plus N times B over t credit}{%
+\begin{equation}
+  X = \frac{\text{bytes moved}}{t_{\text{obs}}}
+    \le \frac{B K}{t_{\text{obs}}}
+    \le \frac{N B}{t_{\text{obs}}} + \frac{N B}{t_{\text{credit}}}.
+\end{equation}}
+The first term vanishes as $t_{\text{obs}}$ grows, which gives
+\cref{eq:credit}.
+\end{proof}
+
+\section{Five Completion Signals}
+\label{sec:signals}
+
+The channel uses the completion of a write with immediate data as its arrival
+signal, which is the safe choice by \cref{prop:notify} and not the only one.
+It costs a posted receive per write and a completion queue entry to process,
+and for a message of a few bytes those costs are a large part of the whole
+exchange. \Cref{tab:signals} lists the five mechanisms that the benchmark can
+run, with the guarantee on which each one rests.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Five completion signals for a one-sided write]{Five completion signals for a one-sided write.}
+  \label{tab:signals}
+  \small
+  \begin{tabular}{L{3.1cm}L{5.2cm}L{5.9cm}}
+    \toprule
+    Mechanism & How the receiver learns & Correct because, and when it fails \\
+    \midrule
+    Completion with immediate data & reads its completion queue & fact 3. Costs a posted receive per write \\
+    Flag in the payload & polls a byte at the end of the buffer & nothing guarantees it for a multi-packet message (fact 2). Safe for single-packet messages \\
+    Sentinel write & polls a second, tiny write posted after the data & fact 1, if the provider keeps write-after-write order. The shared-memory provider does not \\
+    Remote-write counter & reads a counter the provider increments & counts arrivals without identifying them. The TCP provider did not count \\
+    Write, then read & the sender reads 8 bytes back and waits for that completion & fact 1: the read is executed after the write. Signals the sender, not the receiver \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The second and third rows are the lightweight signals used in low-latency
+collective libraries, where a receiver polls memory instead of a queue
+\citep{shen2026sol}. The fourth is the counter of fabric-lib
+\citep{licker2026fabriclib} expressed in libfabric. The fifth signals the sender instead of the receiver, which matters when the
+sender must know that data is in place before it tells a third party to read
+it. A production file system has reported an issue of that kind, in which a
+race between its RDMA layer and the file system allowed a client to read
+incorrect file data \citep{ibm_ij44629}. E5 measures all five on both pairs,
+with the rule that a mechanism replaces the default only if it moves the 99th
+percentile.
+
+\section{The Connector}
+\label{sec:connector}
+
+The pool and the channel are measured by a benchmark, which answers the
+first two research questions and says nothing about a real request. The
+connector closes that distance, as it is the piece that lets the serving
+engine of \cref{ch:inference} produce its cache on one server and consume it
+on another through the blob channel.
+
+\subsection{The Interface Offered by the Serving Engine}
+
+vLLM supports split serving through a connector interface: a class with a
+scheduler side, which decides for each request whether cache will be saved or
+loaded, and a worker side, which is called around each attention layer to
+save or load the blocks of that layer \citep{vllm_disagg}. The engine's own
+implementation of this interface uses NIXL \citep{nixl}.
+ScuffedRdmaConnector implements the same interface on the blob channel, and
+it is checked against the engine source at a pinned revision and against a
+released version.
+
+\subsection{One Request from End to End}
+
+The connector follows \cref{alg:transfer} for each layer, and the steps
+around it involve the proxy and the scheduler side of both instances.
+
+\begin{enumerate}
+  \item A small proxy receives the user's request and assigns it a transfer
+        identifier. It sends the request to the prefill instance with the
+        output length set to one token.
+  \item The scheduler side of the prefill instance records the transfer
+        identifier and marks the request as a producer.
+  \item As the prefill pass runs, the worker side is called for each
+        attention layer. It gathers the blocks of that layer from GPU memory,
+        copies them to host memory, encodes them, and queues one blob keyed
+        by the transfer identifier and the layer name.
+  \item When the last layer is queued, a short ``done'' marker for the
+        request is queued on the hot class.
+  \item The proxy forwards the original request, with the transfer
+        identifier, to the decode instance.
+  \item The scheduler side of the decode instance reports that all but the
+        last prompt token are already computed.
+  \item Its worker side waits for the blob of each layer, skips the blocks
+        that it already holds in a local prefix cache, decodes the rest and
+        writes them into the block table of the engine on the GPU.
+  \item Decoding starts and tokens stream to the user.
+\end{enumerate}
+
+Blobs are keyed by the transfer identifier of the proxy because the engine
+appends a random suffix to its own request identifiers, so that the two
+instances do not agree on those. The decode instance does not wait for the
+marker: it starts when the proxy forwards the request and then waits for each
+layer under its key, and the marker is discarded once the layers are loaded.
+
+\subsection{Where the Classes Separate on the Serving Path}
+
+The sender of the connector keeps one first-in first-out queue and one thread
+for both classes (lines 4 to 7 of \cref{alg:transfer}), so on the serving
+path the classes separate below it, in the channel and the pool. Within one
+request that order is required, as the marker closes the layers that precede
+it. Across concurrent requests, however, a marker that is queued behind the
+layers of another request waits for them in the sender before it reaches the
+hot endpoint, which reintroduces above the pool the wait that the pool
+removes. A send queue per class would carry the separation up to the
+connector, and it is listed as future work. The
+measurements of the separation itself, E3 and E4, are taken with the
+benchmark directly on the pool and do not pass through this queue.
+
+\subsection{Failure Behavior}
+
+A layer that does not arrive within the timeout is reported to the engine as
+a failed load for those blocks, and the engine recomputes them. A lost layer
+therefore costs time and never produces incorrect output, which a test
+verifies by dropping a layer on purpose. The default timeout of 30 seconds
+per layer is far too long for a real deployment and is a configuration value.
+If the RDMA channel cannot be opened, the connector falls back to a TCP
+channel and records an event, so that a fallback is visible in the metrics
+instead of silent.
+
+\subsection{The Cost of Staging Through Host Memory}
+
+With no GPU-direct path (\cref{ch:compat}), each layer is copied from GPU
+memory to host memory before it is sent, and back on the other side. A layer
+of $s$ bytes takes the time $t_{\text{copy}} = s / P$ to copy, where $P$ is
+the rate of the copy in bytes per second, and the time
+$t_{\text{wire}} = 8 s / C$ to cross a link of rate $C$ in bits per second
+(\cref{eq:wiretime}). The ratio of one copy to the wire time of the same
+bytes therefore does not depend on their number:
+\mathalt{copy time divided by wire time equals s over P, divided by 8 s over C, which equals
+  C divided by 8 P}{%
+\begin{equation}
+  \frac{t_{\text{copy}}}{t_{\text{wire}}} = \frac{s / P}{8 s / C} = \frac{C}{8P}.
+  \label{eq:staging}
+\end{equation}}
+For an assumed $P$ of 20 GB/s this ratio is about 6 percent at 10 gigabits
+per second and 62 percent at 100, which means that the copy is a minor cost
+on the lab pair and a major one on the faster link. The copy rate is an
+assumption, and E7 times the real copies.
+
+\subsection{Baselines}
+
+The comparison in E8 is against the NIXL connector of the engine on two back
+ends. On UCX, NIXL is in its standard configuration. On libfabric, the NIXL
+revision read for this work searches for specific vendor adapters and falls
+back to TCP, so on the lab pair that row measures the libfabric path of NIXL
+over TCP. A third reference is our connector on its TCP channel, which
+isolates the effect of the transport from the effect of the connector.
+
+The path of a transfer is thereby fixed from the engine of one server to the
+engine of the other, and the next chapter turns to the choices that can be
+made for each transfer along it.

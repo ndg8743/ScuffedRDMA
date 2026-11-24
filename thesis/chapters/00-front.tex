@@ -1,0 +1,109 @@
+% =====================================================================
+%  FRONT MATTER (roman page numbers)
+%  The title page and the committee approval page follow the form used by
+%  theses accepted in the Department of Computer Science, which is also the
+%  form of the Library's sample (Committee_Approval.pdf): the same lines in
+%  the same order, centred, with the title in capitals.
+% =====================================================================
+\pagenumbering{roman}
+
+% --- Title page ------------------------------------------------------
+\begin{center}
+  \thispagestyle{empty}
+  \setstretch{1}
+  \ifshowlogo
+    \IfFileExists{figures/newpaltz-logo.png}{%
+      \includegraphics[width=2.2in,
+        alt={Logo of SUNY New Paltz: the words New Paltz, State University of New York,
+          beside a blue and orange mark.}]{figures/newpaltz-logo.png}\par
+      \vspace{0.45in}}{\vspace*{0.6in}}
+  \else
+    \vspace*{0.6in}
+  \fi
+  % para/tag=Title marks this paragraph as the document title in the tags.
+  {\tagpdfsetup{para/tag=Title}\large \MakeUppercase{\thesistitle}\par}
+  \vfill
+  by\par
+  \vspace{2\baselineskip}
+  \thesisauthor\par
+  \vspace{2\baselineskip}
+  In Partial Fulfillment of the Requirements for the Degree of\par
+  \vspace{0.6\baselineskip}
+  {\large \thesisdegree\par}
+  \vfill
+  in\par
+  \vspace{\baselineskip}
+  The Department of \thesisdept\par
+  \vspace{\baselineskip}
+  State University of New York\par
+  New Paltz, New York 12561\par
+  \vspace{2\baselineskip}
+  \thesisdate\par
+  \vspace*{0.4in}
+\end{center}
+\clearpage
+
+% --- Committee approval page: typed names, no signatures -------------
+% Signatures go on the SOAR Thesis Release Form, not on this page.
+% Each member takes two lines: name and role, then department. Fill in
+% the lines in square brackets and check the role given to each member.
+\begin{center}
+  \thispagestyle{empty}
+  \setstretch{1}
+  \vspace*{0.6in}
+  {\large \MakeUppercase{\thesistitle}\par}
+  \vspace{2.5\baselineskip}
+  \thesisauthor\par
+  \vspace{2\baselineskip}
+  State University of New York at New Paltz\par
+  \vspace{2\baselineskip}
+  We, the thesis committee for the above candidate for the Master of Science degree, hereby
+  recommend acceptance of this thesis.\par
+  \vspace{3\baselineskip}
+  Ashley Suchy, Thesis Advisor\par
+  Department of Computer Science, SUNY New Paltz\par
+  \vspace{2.5\baselineskip}
+  Wafi Danesh, Thesis Committee Member\par
+  Department of Computer Engineering, SUNY New Paltz\par
+  \vspace{2.5\baselineskip}
+  \fixnote{[Name]}, Thesis Committee Member\par
+  \fixnote{[Department]}, SUNY New Paltz\par
+  \vfill
+  Submitted in partial fulfillment of the requirements for the Master of Science degree in
+  Computer Science at the State University of New York at New Paltz\par
+  \vspace*{0.4in}
+\end{center}
+\clearpage
+% The approval page is not counted, so the abstract is page ii.
+\addtocounter{page}{-1}
+
+\frontchapter{ABSTRACT}
+\input{chapters/00-abstract}
+
+% --- Dedication --------------------------------------------------------
+% A dedication is optional and the page is switched off, so that the
+% thesis has no page that holds only a note. To add one, remove the two
+% percent signs below and write the dedication under the heading.
+%\frontchapter{DEDICATION}
+%
+
+% --- Acknowledgments -----------------------------------------------------
+% Left empty. Write the text under the heading.
+\frontchapter{ACKNOWLEDGMENTS}
+
+\fixnote{To be written.}
+
+% The three lists are set with tighter line spacing than the body text.
+\begingroup
+\setstretch{1.15}
+\tableofcontents
+\listoffigures
+\listoftables
+\clearpage
+\endgroup
+
+\frontchapter{TERMS AND ABBREVIATIONS}
+\input{chapters/00-terms}
+
+\frontchapter{SYMBOLS}
+\input{chapters/00-symbols}

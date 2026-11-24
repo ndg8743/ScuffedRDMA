@@ -1,0 +1,574 @@
+\chapter{Testbed and Experimental Method}
+\label{ch:testbed}
+
+The preceding chapters described the design. What remains before any result
+can be read is the machines on which it runs and the method by which it is
+measured. The
+testbed consists of four servers at two sites (\cref{ch:servers}), which
+required firmware and driver work before they could run an experiment
+(\cref{ch:bringup}) and which impose limits that shaped the design
+(\cref{ch:compat}). The method (\cref{ch:method}) fixes the rules under
+which a number may be reported, the software used, the tests, the benchmark
+tool and the eight experiments.
+
+\section{The Four Servers}
+\label{ch:servers}
+
+All measurements are taken on four machines at two sites, and the two sites
+answer two different questions. Servers 1 and 2 sit in a university
+laboratory, have the GPUs that run the model, and are connected by commodity
+Ethernet at 10 gigabits per second. Their network cards have no RDMA hardware, so RDMA runs
+in software over plain Ethernet (Soft-RoCE, \cref{ch:rdma}), which is the
+situation of a small laboratory that wants to split inference across two
+machines it already owns. This pair therefore carries the research question.
+Servers 3 and 4 sit in a home laboratory and are connected by a 100 gigabit
+cable between two ConnectX-4 cards that implement RoCEv2 in hardware. They
+exist to separate two costs that the first pair cannot distinguish: on
+Soft-RoCE the kernel builds and parses every RDMA packet, so a slow path
+through our library and a slow path through the kernel are indistinguishable
+from outside, whereas running the same benchmark on both pairs shows which
+part of a latency figure is due to our software and which part to the
+software network card. The machines are referred to as server 1 to server 4
+throughout, and the names denote roles: server 1 runs the prefill side and
+the benchmark client, server 2 runs the decode side and the benchmark target,
+and servers 3 and 4 form the pair with RDMA hardware. \Cref{tab:servers}
+lists them and \cref{fig:topology} shows the wiring.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The testbed]{The testbed.}
+  \label{tab:servers}
+  \small
+  \begin{tabular}{L{1.5cm}L{1.0cm}L{3.3cm}L{1.8cm}L{2.6cm}L{3.3cm}}
+    \toprule
+    Name & Site & Board and processor & Memory & GPUs & Network adapters \\
+    \midrule
+    Server 1 & Lab & & 128 GB & 2 $\times$ RTX 5090 (64 GB in total) & Intel X710-DA2, 10GbE \\
+    Server 2 & Lab & ASRock TRX40 Creator, Threadripper 3960X & 64 GB & 3 $\times$ RTX 3090 (72 GB in total) & Aquantia AQC107, 10GbE; Realtek RTL8125, 2.5GbE \\
+    Server 3 & Home & Ryzen 9 7950X & 192 GB DDR5 & RTX 5070 Ti (16 GB) & Mellanox ConnectX-4, 100GbE \\
+    Server 4 & Home & Gigabyte GA-X99-UD4P, Xeon E5-2697A v4 & 128 GB DDR4 ECC & 2 $\times$ Tesla V100 (64 GB in total) & Mellanox ConnectX-4 (MT27700), 100GbE, two ports \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{the hardware record of server 1 (run R0): board and processor}
+\end{table}
+
+Three details in the table matter later. The cards of server 1 are from the
+newest consumer generation and those of server 2 are two generations older,
+so one model state has to move between two different GPU architectures. The
+board of server 4 is an older consumer board that needed firmware work before
+it would start with a Tesla V100 installed (\cref{ch:bringup}). In addition,
+the network card of server 4 sits in a slot that is wired for eight PCI
+Express lanes, not sixteen, which caps what a 100 gigabit card can deliver
+there.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Wiring diagram of the testbed in two frames. Left frame, the university lab: server 1
+        with two RTX 5090 cards and server 2 with three RTX 3090 cards. A thick solid line joins
+        them directly, labeled 10 gigabit Ethernet, Soft-RoCE, addresses 10.0.0.x. A thin dashed
+        line joins both servers to a box labeled lab network 192.168.1.0/24.
+        Right frame, the home lab: server 3 with one RTX 5070 Ti and server 4 with two Tesla V100
+        cards, joined directly by a thick double line labeled 100 gigabit Ethernet, hardware
+        RoCEv2, direct cable, no switch. No link joins the two frames.},
+      srv/.style={tint=dBlue, minimum width=27mm, minimum height=14mm, font=\footnotesize, align=center},
+      lan/.style={box, draw=dGray, minimum width=62mm, minimum height=7mm, font=\footnotesize}]
+    % lab
+    \node[srv] (s1) at (0,0) {Server 1\\2 $\times$ RTX 5090};
+    \node[srv] (s2) at (5.6,0) {Server 2\\3 $\times$ RTX 3090};
+    \node[lan, minimum width=83mm] (lan) at (2.8,-3.0) {Lab network, 192.168.1.0/24};
+    \draw[line width=2pt, draw=dOrange] (s1.east) -- (s2.west)
+      node[midway, above=3pt, small text, align=center] {10GbE\\Soft-RoCE};
+    \node[small text] at (2.8,-0.45) {10.0.0.x};
+    \draw[reply, draw=dGray, -] (s1.south) -- (s1.south |- lan.north);
+    \draw[reply, draw=dGray, -] (s2.south) -- (s2.south |- lan.north);
+    \begin{scope}[on background layer]
+      \node[frame, fill=dGray!6, fit={(s1)(s2)(lan)(2.8,1.25)(2.8,-3.7)}, label={[heading]above:University lab}] (lab) {};
+    \end{scope}
+    % home
+    \node[srv, tint=dGreen] (s3) at (10.9,0) {Server 3\\RTX 5070 Ti};
+    \node[srv, tint=dGreen] (s4) at (10.9,-3.0) {Server 4\\2 $\times$ Tesla V100};
+    \draw[line width=2pt, double, double distance=1.2pt, draw=dPurple] (s3.south) -- (s4.north)
+      node[midway, right=5pt, small text, align=left] {100GbE\\hardware\\RoCEv2};
+    \begin{scope}[on background layer]
+      \node[frame, fill=dGray!6, fit={(s3)(s4)(10.9,1.25)(10.9,-3.7)}, inner xsep=30pt, label={[heading]above:Home lab}] (home) {};
+    \end{scope}
+  \end{tikzpicture}
+  \caption[The two sites]{The two sites. Solid lines carry RDMA traffic. Dashed lines are the lab network, which carries connection setup and nothing that is measured.}
+  \label{fig:topology}
+\end{figure}
+
+On the laboratory pair a direct cable joins the two 10 gigabit cards, with
+its own addresses and a frame size of 9,000 bytes, and all RDMA traffic uses
+that cable, while the laboratory network carries only the TCP connection that
+sets up each test. An RDMA device is bound to one network interface, so RDMA
+traffic follows the device, but connection setup follows the address. Every
+results file therefore records the device, the interface under it and the
+address used. The home pair has a single path, a direct-attach copper cable
+between the two ConnectX-4 cards with no switch.
+
+\section{Firmware and System Bring-Up}
+\label{ch:bringup}
+\label{sec:bios-problem}
+
+None of the four servers could run an experiment as delivered, and the work
+needed to change that explains several limits of the testbed.
+\Cref{fig:bringup-stack} shows the layers that were changed on server 4, the
+machine that needed the most work.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Stack diagram of the six layers that were changed on server 4, bottom to top, each
+        with the tool used. Layer 1, board firmware: an image with a Resizable BAR driver added,
+        tools UEFITool and ReBarUEFI. Layer 2, ACPI table: a 64-bit address window added to the
+        PCI root, tool iasl, loaded by GRUB. Layer 3, kernel command line: PCI reallocation
+        options. Layer 4, network card firmware: ports switched from InfiniBand to Ethernet, tool
+        mstconfig. Layer 5, drivers: NVIDIA legacy driver and CUDA, and a rebuilt Proxmox kernel
+        for the peer memory module. Layer 6, RDMA device: RoCEv2 ports active. An arrow on the
+        left runs upward and is labeled order of work.},
+      layer/.style={tint=#1, minimum width=58mm, minimum height=9.5mm, font=\footnotesize, align=center},
+      tool/.style={small text, anchor=west, align=left, text width=60mm}]
+    \foreach \i/\c/\name/\tool in {
+        0/dGray/{1. Board firmware}/{image with a Resizable BAR driver added (UEFITool, ReBarUEFI)},
+        1/dGray/{2. ACPI table}/{64-bit window on the PCI root (\texttt{iasl}, loaded by GRUB)},
+        2/dBlue/{3. Kernel command line}/{PCI reallocation options},
+        3/dGreen/{4. Network card firmware}/{InfiniBand to Ethernet (\texttt{mstconfig})},
+        4/dBlue/{5. Drivers and kernel}/{NVIDIA legacy driver, CUDA, rebuilt kernel for peer memory},
+        5/dOrange/{6. RDMA device}/{RoCEv2 ports active}} {
+      \node[layer=\c] (l\i) at (0,1.25*\i) {\name};
+      \node[tool] at (3.2,1.25*\i) {\tool};
+    }
+    \draw[flow] (-3.5,0) -- (-3.5,6.25) node[midway, left=2pt, small text, rotate=90, anchor=south] {order of work};
+  \end{tikzpicture}
+  \caption[What was changed on server 4, from firmware up to the RDMA device]{What was changed on server 4, from firmware up to the RDMA device.}
+  \label{fig:bringup-stack}
+\end{figure}
+
+Server 4 is built on a Gigabyte GA-X99-UD4P board and carries two Tesla V100
+cards with 32 GB of memory each. With either card installed it did not
+complete its power-on self test, although it started
+normally with a small display card and the same V100 cards worked in server 3
+\citep{level1techs2026}. The cause is address space. A PCI device asks the
+firmware for memory regions through its base address registers, and a V100
+asks for one very large 64-bit region that can only be placed above the 4 GB
+line. This board offers no working firmware option for such regions, so the
+firmware could not place the region and gave up \citep{x99rebar}. Two changes
+address this. The first replaces one ACPI table at boot: the operating system
+learns from that table which address ranges a PCI root bridge may hand out,
+so a replacement table that widens the 64-bit window of the root bridge lets
+the large regions fit without touching the firmware. Because the replacement
+table was used together with a kernel parameter that tells Linux to ignore
+the ranges that ACPI reports, we do not claim which of the two lets the
+regions fit. The second change is to the firmware itself: ReBarUEFI
+\citep{rebaruefi}, an open-source driver that adds Resizable BAR support, is
+inserted into the firmware image with UEFITool \citep{uefitool}.
+\waiting{the hardware record of server 4 (run R0): state which of the two
+changes is active, and confirm that the board starts with both V100 cards
+installed}
+
+The ConnectX-4 cards arrived configured for InfiniBand, whereas RoCEv2 needs
+the ports in Ethernet mode, which is a firmware setting changed with
+\code{mstconfig} from the mstflint tools \citep{mstflint}. After a restart
+the card presents two RDMA devices, one per port, and the cabled port is
+active at 100 gigabits with RoCEv2 addresses. The V100 belongs to the Volta
+generation, which current driver branches no longer support, so server 4 runs
+a legacy driver branch with a matching CUDA toolkit. GPUDirect RDMA
+\citep{gpudirect}, which allows a network card to read and write GPU memory
+without a copy through host memory, needs a kernel module that in turn needs
+a kernel option for registering peer memory. The stock kernel of the
+hypervisor on server 4 is built without that option, so the module does not
+load, and although we rebuilt the kernel from the vendor's source tree
+\citep{pve_kernel} with the option enabled, it has not been installed.
+GPUDirect is therefore preparation and not a result, and every transfer that
+is measured stages data through host memory.
+
+Servers 1 and 2 needed no firmware work, because their network cards have no
+RDMA function to configure. The Linux kernel includes a software RoCE driver
+that presents an ordinary Ethernet interface as an RDMA device
+\citep{ibta_softroce2015,kernel_ib}, and the user-space tools come from
+rdma-core \citep{rdmacore}. Two commands create the device:\par
+\begingroup\setstretch{1}
+\begin{verbatim}
+modprobe rdma_rxe
+rdma link add rxe0 type rxe netdev <interface>
+\end{verbatim}
+\endgroup
+The interface named in the second command decides which physical link carries
+every RDMA packet, which is why it is recorded with every result. Server 1
+needed one further fix that is unrelated to networking, since the serving
+engine failed at start-up on its GPU generation until an import was moved
+(\cref{ch:kernels}).
+
+\section{Limits of the Testbed and Their Consequences}
+\label{ch:compat}
+
+A testbed assembled from existing machines and used parts cannot do
+everything that a purpose-built cluster can, and each limitation forced a
+design decision. We collect them here to make clear that these decisions were
+constraints and not preferences. \Cref{tab:compat} gives the capabilities of
+each server.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Capabilities by server]{Capabilities by server. ``Blocked'' means the hardware supports it and the software did not work.}
+  \label{tab:compat}
+  \small
+  \begin{tabular}{L{4.4cm}L{2.3cm}L{2.3cm}L{2.3cm}L{2.6cm}}
+    \toprule
+    Capability & Server 1 & Server 2 & Server 3 & Server 4 \\
+    \midrule
+    RDMA in the network card & No & No & Yes (RoCEv2) & Yes (RoCEv2) \\
+    RDMA in software (Soft-RoCE) & Yes & Yes & Not needed & Not needed \\
+    Link between the pair & 10GbE & 10GbE & 100GbE & 100GbE, card in an 8-lane slot \\
+    GPUDirect RDMA & No (consumer card) & No (consumer card) & No (consumer card) & Blocked (kernel module) \\
+    GPU generation & Blackwell, consumer & Ampere & Blackwell, consumer & Volta \\
+    Serving engine starts unmodified & No (import-order fix) & Yes & Not tested & Not tested \\
+    Board starts with its GPUs unmodified & Yes & Yes & Yes & No (firmware work) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The lab pair has no RDMA hardware, so it runs Soft-RoCE. The Intel X710 in
+server 1 and the Aquantia card in server 2 are plain Ethernet adapters. The
+kernel's software RoCE driver gives both an RDMA device with the same
+programming interface as hardware. It keeps the semantics of RDMA and gives up
+the speed: every packet is built and parsed by the kernel on a processor core.
+For this reason every latency is reported per stack and per pair,
+and the same benchmark is repeated on the home pair.
+
+The development machines have no RDMA hardware either, which is the reason
+for the two software providers. The current code base was written and tested
+on machines with no RDMA device of any kind, and the library is therefore
+written against an interface with
+software back ends for TCP and shared memory (\cref{ch:libfabric}), and the
+test suite runs on those. Tests that need a real RDMA device are marked and
+run only on the cluster (\cref{ch:method}).
+
+No server offers a GPU-direct path, so the cache is staged through host
+memory. GPUDirect RDMA is available on
+data-center and workstation cards, not on consumer cards \citep{gpudirect},
+and three of the four servers carry consumer cards. On the fourth the kernel
+module did not load (\cref{ch:bringup}). Every transfer therefore copies the cache from GPU memory to pinned host memory, sends it,
+and copies it back to GPU memory on the other side. The copy is not free, but
+its weight depends on the link. If host copies run at 20 GB/s, an assumed
+figure, the copy adds about 6 percent to the wire time of a 10 Gb/s link and
+about 62 percent to that of a 100 Gb/s link. On the lab pair the wire
+dominates (\cref{eq:staging}).
+
+The two GPU generations of the lab pair call for a neutral byte format. The
+prefill server and the decode server have different GPU architectures, so the
+cache moves as
+blocks of plain numbers in the layout the serving engine already uses, with no
+dependence on the kernel that produced them (\cref{sec:connector}).
+
+The type of transport is a constraint as well. RDMA write, the operation
+on which the design is built, exists only on connected, reliable queue pairs,
+and the unreliable datagram service cannot carry it. Both the small and the
+large traffic class therefore use reliable connections, and the difference
+between the classes lies in queue depths and completion handling, not in
+transport type (\cref{ch:rdma,ch:libfabric}).
+
+Two limits belong to server 4. Its 100 gigabit network card sits in a slot
+that is electrically connected by eight lanes of third-generation PCI
+Express, about 63 Gb/s before overhead, so numbers from the home pair are
+bounded by that slot, not by the cable. In addition, the kernel shipped with
+the hypervisor on server 4 lacks the option that the GPUDirect module needs.
+The rebuilt kernel was never installed, so server 4 contributes hardware RoCE
+measurements and no GPU-direct ones.
+
+\section{Experimental Method}
+\label{ch:method}
+
+With the machines and their limits established, the method states how the
+reported numbers are produced, which existing software was used to produce
+them, what the tests are, and how a measurement passes from a machine into a
+table.
+
+\subsection{Rules for Results}
+\label{sec:rules}
+
+Four rules decide what may appear as a result in the next chapter.
+
+\begin{enumerate}
+  \item A number has a results file in the repository, written by the program
+        that measured it, and the file records the exact commands that
+        produced it.
+  \item A transfer counts only if its completion was checked for success. A
+        completion that reports an error is a failure, never a fast transfer.
+  \item A run on a development machine without the real link is a smoke test.
+        It shows that the measurement path works. It is not data.
+  \item Models and arithmetic are labeled as such and are never mixed into a
+        table of measurements.
+\end{enumerate}
+
+Rule 2 guards against a specific failure of RDMA benchmarks. A program that counts completions without reading their status records failed operations as very fast successes, and the result can be physically impossible: at 10 gigabits per second a 4 MiB transfer needs at least 3.4 ms on the wire, so a reported time of a few microseconds can only come from error completions. Every completion path in the benchmark therefore checks the status, and a regression test fails if an error completion is ever counted as a success (\cref{sec:tests}).
+
+\subsection{Existing Software and the Purpose of Each Component}
+\label{sec:reused}
+
+Most of the software on the testbed is not ours. \Cref{tab:reused} lists what was used, in the order in which it comes into play, and what it did at that step. Versions are taken from the hardware record that each run writes (\cref{app:repro}).
+
+\begin{table}[htbp]
+  \centering
+  \caption[Reused software by step]{Reused software by step.}
+  \label{tab:reused}
+  \small
+  \begin{tabular}{L{3.4cm}L{5.0cm}L{6.2cm}}
+    \toprule
+    Step & Reused software & Purpose here \\
+    \midrule
+    1. Start server 4 with its GPUs & \code{iasl}, GRUB, UEFITool, ReBarUEFI & edit and load an ACPI table; add a Resizable BAR driver to the firmware image \\
+    2. Operating systems and GPU drivers & Ubuntu, Proxmox VE, NVIDIA drivers, CUDA & run the GPUs; the peer memory module is the GPUDirect bridge that did not load \\
+    3. RDMA devices & mstflint, rdma-core, the kernel's \code{rdma_rxe} and \code{mlx5} drivers & set the network card to Ethernet; create the software RoCE device; verify port state \\
+    4. Link baselines & perftest & bandwidth and latency of each link, independent of our code \\
+    5. Transport interfaces & libibverbs, libfabric with its verbs, TCP and shared-memory providers; pyverbs for a Python implementation of the pool & the two libraries under the middleware's one interface; software providers let tests run with no RDMA device \\
+    6. Baselines for comparison & NIXL through the serving engine's own connector; UCX & what the middleware is compared with in E7 and E8 \\
+    7. Code taken in & libmesh-rdma (MIT license) & three bootstrap modules were ported from it \\
+    8. Serving & vLLM, Ollama, Docker Compose, Ray & the application that produces and consumes the cache; early single-machine baselines \\
+    9. Models & Granite 3.3 2B and others on PyTorch & real caches for the compression and serving runs \\
+    10. Measurement and analysis & pytest, Jupyter, pandas, matplotlib, Linux performance counters & tests, notebooks, figures, instructions per operation \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Our own work is the layer between steps 5 and 8: the dual-endpoint pool on
+both transport libraries, the benchmark tool, the blob channel, the connector that attaches to the serving engine, the classifier, policy and controller
+that choose a route per transfer, the quantizer's packed format, the storage
+tier, the telemetry, and the notebooks that run all of it. The two preceding chapters describe each one.
+
+Three ported modules were taken from libmesh-rdma \citep{libmesh}: address
+discovery, a 64-byte connection record exchanged over TCP, and the queue pair
+state transitions. That project is MIT licensed, which requires its notice to be kept with the ported files.
+\fixnote{Fix in the repository: restore the MIT notice of libmesh-rdma in the three ported files.}
+
+\subsection{Three Kinds of Test}
+\label{sec:tests}
+
+\subsubsection{Bring-Up Checks}
+
+Each step in \cref{ch:bringup} has a check that confirms that the step succeeded: the
+board completes its self test with the V100 cards installed and the cards
+appear with their memory regions assigned; the network card reports its ports
+active with RoCEv2 addresses; the software RoCE device exists on the intended
+interface; perftest runs between the pair. These checks are pass or fail, and their
+outputs are part of the hardware record.
+
+\subsubsection{Correctness Suite}
+
+The repository has a test suite run with pytest. \Cref{tab:tests} lists what
+each file verifies and where it can run. Tests that need an RDMA device or a
+GPU carry a marker and are skipped elsewhere, so the same command is valid on
+a laptop and on the cluster.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The correctness suite]{The correctness suite.}
+  \label{tab:tests}
+  \small
+  \begin{tabular}{L{4.8cm}L{7.3cm}L{2.4cm}}
+    \toprule
+    Test file & What it verifies & Runs on \\
+    \midrule
+    \code{test_dual_qp_completion} & an error or flushed completion raises and is never counted as a success & anywhere \\
+    \code{test_fabric_pool} & write round trips per provider; blob sizes and classes; each completion mechanism; one endpoint against two; the plugin builds & anywhere; device tests on the cluster \\
+    \code{test_vllm_connector} & block gather and scatter for three layouts; codecs; out-of-order requests; producer and consumer sides; timeouts report the lost blocks; a two-process loopback & anywhere; two tests need the serving engine \\
+    \code{test_wfa_learner} & training lowers the loss; held-out accuracy beats the static classifier; save and load & anywhere \\
+    \code{test_policy_tree} & operators, priority, short circuit, missing fields, bad configurations & anywhere \\
+    \code{test_pmp_controller} & pressure, spill and hysteresis; one test pins the current switching rule & anywhere \\
+    \code{test_scuffed_quant} & packing is exact; sizes match the wire; the sketch lowers inner-product error & anywhere \\
+    \code{test_storage_tier} & round trip, batching, integrity check, slot reuse, direct I/O or a clean fallback & anywhere \\
+    \code{test_telemetry} & histograms, events, export & anywhere \\
+    \code{test_gpu} & layout and codec round trips with tensors on a GPU & GPU machines \\
+    \code{test_rdma_bootstrap} & 64-byte record, handshake, retries, and security regressions for the fixed bounds errors & anywhere; two tests need a device \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+One entry needs a comment. The controller test pins the switching rule as it
+is implemented today, and the previous chapter shows that rule is inconsistent
+with its own derivation. The test passes, and what it protects is a known
+issue. It is listed here so the passing suite is not read as evidence for the
+controller.
+
+Beyond unit tests, the connector's data path is checked end to end by hashing:
+a cache shaped like the model's is taken from one side, encoded, sent, received,
+decoded and stored on the other side, and the two sides are compared with
+SHA-256. This passes on the TCP channel and on the libfabric TCP provider on a
+development machine. \waiting{the same check across the lab pair (with E8)}
+
+\subsubsection{Performance Experiments}
+
+The performance experiments are numbered E1 to E8 and listed in
+\cref{sec:experiments}. All of them use one benchmark tool or the serving
+engine itself, described next.
+
+\subsection{The Benchmark Tool}
+\label{sec:sfbench}
+
+The tool, \code{sf_bench}, is a C program linked against the middleware's
+pool. The same source linked against the raw verbs implementation is
+\code{sv_bench}, so both libraries are measured by identical code. The same
+command runs on both machines, one as server and one as client. It has three
+modes. In signaling mode (\code{sig}) the hot class exchanges small writes in
+a ping-pong, using one of five ways for the receiver to learn that a write
+arrived (\cref{tab:signals}), and the result is latency by message size. In
+bandwidth mode (\code{bw}) one class streams one-sided writes with a fixed
+number in flight, and the result is megabytes per second by message size. In
+head-of-line mode (\code{hol}) the cold class streams bulk writes while the
+hot class runs its ping-pong, and the result is the hot latency distribution
+and the cold throughput. A switch makes both classes share one endpoint,
+which is the baseline against which the design is compared.
+
+Times are read from the monotonic raw clock. Each run discards a warm-up and
+reports the minimum, mean, median, 90th, 99th and 99.9th percentile and the
+maximum. On the cluster a run has 20,000 iterations after a warm-up of 1,000.
+The hot and cold threads can be pinned to chosen cores, away from the cores
+that serve the network card's interrupts. With performance counters enabled
+the tool also reports user-space instructions retired per posted operation,
+following the per-operation accounting of \citet{papadopoulou2017ucx}.
+
+Latency is reported one way, as half the measured round trip:
+\mathalt{one-way latency equals round-trip time divided by two}{%
+\begin{equation}
+  t_{\text{one way}} = \frac{t_{\text{round trip}}}{2},
+  \label{eq:oneway}
+\end{equation}}
+where $t_{\text{round trip}}$ is the time from the posting of a message to
+the arrival of the reply to it, read on the clock of one machine.
+This assumes the two directions cost the same, which holds for a symmetric
+ping-pong between like machines and is only approximate between servers 1 and
+2, whose processors differ. The round-trip value is stored in the results file
+so the assumption can be undone.
+
+For the head-of-line experiment the quantity of interest is how much a bulk
+stream stretches the tail of the small messages:
+\mathalt{head-of-line penalty equals the 99th percentile hot latency with the cold
+  stream running, divided by the 99th percentile hot latency with no cold stream}{%
+\begin{equation}
+  \text{penalty} = \frac{p_{99}^{\text{hot}}(\text{cold stream on})}{p_{99}^{\text{hot}}(\text{cold stream off})},
+  \label{eq:penalty}
+\end{equation}}
+where $p_{99}^{\text{hot}}$ is the 99th percentile of the one-way latency of
+the hot messages, measured once while the cold class streams and once while
+it is idle. A penalty near one means that the small messages did not notice
+the bulk stream.
+
+\subsection{Experiments}
+\label{sec:experiments}
+
+\Cref{tab:experiments} lists the eight experiments. E1 to E6 and E8 run with
+server 1 as client or prefill side and server 2 as target or decode side, over
+Soft-RoCE on the direct cable. E1 to E5 are then repeated on servers
+3 and 4 over hardware RoCEv2.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The experiments]{The experiments.}
+  \label{tab:experiments}
+  \small
+  \begin{tabular}{L{0.7cm}L{3.6cm}L{6.9cm}L{3.2cm}}
+    \toprule
+    ID & Question & Method & Runs on \\
+    \midrule
+    E1 & Hot-path latency of each stack & signaling mode, 8 B to 64 KB, on raw verbs and on two libfabric endpoint types & both pairs \\
+    E2 & Cold bandwidth & bandwidth mode, 4 KB to 16 MB, 16 writes in flight, with and without a blocking wait on the cold queue & both pairs \\
+    E3 & Does a second endpoint remove head-of-line blocking & hot 64 B and 4 KB ping-pong under cold streams of 256 KB, 1 MB and 4 MB, one endpoint against two & both pairs \\
+    E4 & Which libfabric configuration & the E3 load over six combinations of endpoint type and completion handling & both pairs \\
+    E5 & Which completion signal & the five mechanisms, with instructions per operation & both pairs, with performance counters enabled \\
+    E6 & Blob channel against TCP & blobs of 4 KB to 32 MB between the two machines & the lab pair \\
+    E7 & The split engine on one GPU & prefill and decode instances on one card through the connector; token-for-token agreement with a single instance; first-token and inter-token latency & one GPU machine \\
+    E8 & The split engine across machines & first-token and inter-token latency for prompts of 128 to 4,096 tokens: one machine, the connector over verbs, the connector over TCP, and the engine's NIXL connector over two back ends & the lab pair, with NIXL installed on both machines \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+E3 is the experiment the design stands or falls on, and its criterion was
+written before any run so that every outcome is a result. The claim holds on a
+stack if the hot 99th percentile with two endpoints stays near its unloaded
+value while the one-endpoint value grows with the size of the cold writes. If
+both grow, the contention is below the queue pair. On Soft-RoCE that would point
+at the kernel thread that processes packets for every queue pair on the device.
+If both grow on the hardware pair as well, the design is incorrect and a
+different mechanism is needed.
+
+E8 is the experiment at which the question of this work is asked. Its metrics are the two
+latencies a user of a language model sees. Time to first token decomposes as
+\mathalt{time to first token equals prefill time plus cache transfer time plus the time of
+  the first decode step}{%
+\begin{equation}
+  t_{\text{TTFT}} = t_{\text{prefill}} + t_{\text{transfer}} + t_{\text{first decode}},
+  \label{eq:ttft}
+\end{equation}}
+where $t_{\text{TTFT}}$ is the time from the arrival of a request to its
+first generated token, $t_{\text{prefill}}$ is the time of the prefill pass,
+$t_{\text{transfer}}$ is the time spent moving the cache from the prefill
+server to the decode server, and $t_{\text{first decode}}$ is the time of
+the first decode step. Only the middle term belongs to the transport. Inter-token latency is the
+gap between later tokens. Prompts are sequences of random token identifiers of
+an exact length, so the cache size is known for every request, and generation
+is forced to a fixed length.
+
+\subsection{From Measurement to Table}
+\label{sec:collection}
+
+\Cref{fig:collection} shows the path. No number is typed by hand between the
+program that measured it and the thesis.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Flow diagram of how a measurement reaches the thesis, in five boxes joined by
+        arrows from left to right and top to bottom. Box 1: benchmark program, sf_bench or
+        sv_bench, on both machines. Box 2: runner script, which starts both sides over ssh and
+        stores both command lines. Box 3: notebook, one parameter cell, cluster mode. Box 4:
+        results file in JSON plus a hardware record for the same run. Box 5: figures and table
+        fragments that the thesis includes. A side note under box 3 says that local mode
+        produces smoke tests only.},
+      step/.style={tint=#1, minimum width=38mm, minimum height=13mm, font=\footnotesize, align=center}]
+    \node[step=dBlue]   (a) at (0,0)     {Benchmark program\\on both machines};
+    \node[step=dBlue]   (b) at (5.2,0)   {Runner script\\stores both commands};
+    \node[step=dGreen]  (c) at (10.4,0)  {Notebook\\one parameter cell};
+    \node[step=dOrange] (d) at (10.4,-2.6) {Results file (JSON)\\and hardware record};
+    \node[step=dPurple] (e) at (5.2,-2.6)  {Figures and\\table fragments};
+    \node[step=dGray]   (f) at (0,-2.6)    {Thesis};
+    \draw[flow] (a) -- (b); \draw[flow] (b) -- (c); \draw[flow] (c) -- (d);
+    \draw[flow] (d) -- (e); \draw[flow] (e) -- (f);
+    \node[small text, align=center] at (10.4,1.15) {local mode: smoke test only};
+  \end{tikzpicture}
+  \caption[From a benchmark run to the thesis]{From a benchmark run to the thesis.}
+  \label{fig:collection}
+\end{figure}
+
+The benchmark program writes a JSON record with the tool, role, host, mode,
+mechanism, class, endpoint arrangement, iteration counts, core pinning, the
+latency statistics per size, the hot round-trip distribution and the cold
+throughput. A runner script starts the two sides, over ssh for the remote one,
+and attaches both command lines to the record. If a configuration fails, the
+runner stores the error as a row, so a sweep continues and the failure is
+visible in the table instead of missing from it.
+
+Nine notebooks drive the runs. Each begins with one parameter cell that names
+the mode (local, cluster or single GPU), the peer machine and its address, the
+RDMA device, and the cores to pin. The first notebook writes the hardware
+record: kernel, processor, memory, disks, network interfaces with driver and
+link speed, RDMA devices and their address tables, library versions, and the
+result of building the native code and running the test suite. The remaining
+notebooks each cover one or two experiments and write their results under
+\nolinkurl{benchmarks/results/}, their figures under
+\nolinkurl{docs/figures/cluster/}, and, where a table is wanted, a LaTeX
+fragment.
+
+For the serving experiments a launch script starts the instances and a sweep
+program sends the requests and records first-token and inter-token times from
+the streamed response. Before it is trusted on a real server the sweep program
+is run against a mock server with known delays of 40 ms to the first token and
+5 ms between tokens; it measured 41.8 ms and 5.3 ms at the median. The
+middleware exports its own counters in Prometheus text format, and a signal
+log that the learned classifier can later be trained on.
+
+All nine notebooks are committed with output from a development machine: a
+two-core virtual machine with no RDMA device and no GPU. That output shows
+every cell runs. Under rule 3 it is not data, and none of it appears among
+the results.
+The next chapter reports the results obtained under these rules.

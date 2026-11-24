@@ -1,0 +1,119 @@
+\chapter{Related Work}
+\label{ch:related}
+
+The work builds on systems and papers from a field that is moving quickly,
+and they are grouped here by the part of the stack that each one addresses.
+Earlier chapters cite most of them where they are used; here they are
+compared.
+
+\section{Disaggregated Inference}
+
+DistServe \citep{zhong2024distserve} and Splitwise \citep{patel2024splitwise}
+established that prefill and decode should be separated, and showed the gain
+in service quality per unit of hardware. Both assume a data-center network
+and treat the cache transfer as one bulk copy whose cost is bandwidth.
+Mooncake \citep{qin2024mooncake} makes the cache the center of the
+architecture and adds storage for it. NVIDIA's Dynamo \citep{dynamo} and the
+llm-d project \citep{llmd} package the pattern for clusters, and LMCache
+\citep{lmcache2025,lmcache_blog} provides a cache layer for the same serving
+engine used here. We take the split as given and study one aspect that those systems do not: the mix of traffic on the link between the two halves,
+on hardware without the data-center network they assume.
+
+\section{Libraries for Cache Transfer}
+
+NIXL \citep{nixl} is the transfer library under the serving engine's standard
+connector, with back ends for UCX and libfabric. It is the baseline of E8.
+fabric-lib \citep{licker2026fabriclib} is the closest work in spirit: a
+point-to-point RDMA library written for language-model systems, which makes
+the choice of completion signal part of the design; the counter mechanism in
+\cref{tab:signals} follows it. UCCL \citep{uccl} is a communication library
+for GPUs that covers collectives and point-to-point transfers including cache
+transfer. None of the three separates traffic by urgency, and none targets
+software RoCE. OnePiece \citep{chen2026onepiece} is a large-scale inference
+system built on RDMA for a different workload, at a scale that cannot be tested here. Ultra Ethernet, the industry's designed successor to RoCE, is described
+in \cref{sec:uec} and not here, because it adopts the interface this
+middleware is written to and so bears on the design directly.
+
+\section{RDMA over Ethernet at Scale}
+
+Running RDMA over Ethernet in large deployments is a mature subject. DCQCN
+\citep{zhu2015dcqcn} is the congestion control used with RoCEv2, later work
+questioned whether RoCE needs a lossless network at all
+\citep{mittal2018irn}, and an account of RoCE for training clusters at very
+large scale describes the engineering involved \citep{gangidi2024meta}. Work on the control plane shows that setting connections up can dominate in
+elastic settings \citep{zhang2025swift}. High-performance computing reached
+Ethernet from the other side: Slingshot \citep{desensi2020slingshot} is an
+Ethernet-compatible interconnect with congestion control and traffic classes
+of its own, it is programmed through libfabric \citep{libfabric_repo}, and
+its traffic classes are the in-network counterpart of the separation that
+the middleware performs at the endpoints. All of this concerns many machines
+and switches. The present work has two machines and a cable, where congestion
+control is not the issue and the interesting effects are inside one host.
+
+\section{Transport Interfaces and Their Cost}
+
+UCX \citep{shamis2015ucx} and libfabric \citep{grun2015ofi} are the two
+portable interfaces over RDMA. A per-operation study of UCX over InfiniBand
+\citep{papadopoulou2017ucx} supplied the instruction-counting method used in
+E5, and the two have been compared across applications on a production
+supercomputer \citep{bareford2022}.
+An engineering report on a memory leak caused by a transport library's hooks
+in a production split-serving system \citep{mistral2026leak} is a reminder
+that the interface chosen brings its side effects with it. We measure one narrow quantity in this space: the cost of libfabric relative to raw verbs for small messages, with everything else held equal.
+
+\section{Small Messages and Collectives}
+
+Communication libraries for multi-GPU computation face the same small-message
+problem from another side. NCCL \citep{nccl} is the standard library for
+collectives, TACCL \citep{shah2023taccl} synthesizes collective algorithms for
+a topology, and recent work reports that for small collectives the time is
+dominated by software overhead and signaling, and uses flags and sentinel
+buffers polled in memory to avoid completion queues \citep{shen2026sol}. The
+flag and sentinel mechanisms of \cref{tab:signals} come from that line of
+work. Scheduling at the level of whole jobs, as in Cassini
+\citep{rajasekaran2024cassini}, is complementary: it decides when jobs use
+the network, whereas the middleware decides which message goes first.
+
+\section{RDMA Without Dedicated Hardware}
+
+Soft-RoCE \citep{ibta_softroce2015} is what makes the lab pair possible. An
+emulated RDMA network card for virtual machines \citep{rocm_ernic} and a
+library for RDMA between consumer GPU machines without a managed switch
+\citep{libmesh} address neighboring cases, and three modules were ported
+from the second (\cref{sec:reused}). Tesla's TTPoE \citep{ttpoe} is a
+different answer to the same need: a transport protocol that runs directly
+over Ethernet, published with a reference kernel implementation. Its kernel
+modules were built on the testbed, and it is not part of the comparison.
+
+\section{Compressing and Storing the Cache}
+
+Cache compression is active. KIVI \citep{liu2024kivi} quantizes the cache in
+place on the GPU; transform coding \citep{staniszewski2026kvtc} targets compact storage, and
+low-rank compression \citep{zhang2024lorc} reduces the size of the cache in
+memory. TurboQuant
+\citep{zandieh2025turboquant} and QJL \citep{zandieh2024qjl} are the methods
+the quantizer here is assembled from, and a storage vendor has combined
+TurboQuant with flash storage for cache restore
+\citep{alvarez2026flashblade}. No new compression method is proposed here. The claim is narrower: a packed format with measured sizes, applied per
+transfer under a policy.
+
+For storage, the hierarchy of GPU memory, host memory, local flash and a
+shared file system is described by several vendors
+\citep{hsu2026fourtier,hsu2026kv,ibm2025storage}. The storage tier here
+implements one level of it on one machine.
+
+\section{Rule-Based Routing}
+
+The rule tree of \cref{sec:policy} borrows its form from request routers
+for the same serving engine, which combine signals with rules to choose a
+model for each request \citep{liu2026router,wang2025router}. Here the same
+form chooses a path for each transfer.
+
+\section{Position of This Work}
+
+Taken together: the existing systems move the cache as one kind of traffic,
+over hardware built for it. The present work treats the traffic as mixed, on
+commodity Ethernet with a software RDMA device and no GPU-direct path, and
+asks whether classification and scheduling help there.
+\waiting{results from E3 and E8: add one sentence that places the measured
+result among these systems}

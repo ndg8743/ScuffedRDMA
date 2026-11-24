@@ -1,0 +1,67 @@
+\chapter{Reproducing the Results}
+\label[appendix]{app:repro}
+
+\section{Files Behind the Results}
+
+Everything is in the project repository \citep{scuffedrdma}. The figures
+and tables of the results are drawn from these files, and the plots in this
+document are generated from them without retyping.
+
+\begin{tightblock}
+\begin{longtable}{L{4.6cm}L{9.8cm}}
+  \caption[Results files behind the results]{Results files behind the results.}\label{tab:files}\\
+  \toprule
+  Result & File under \nolinkurl{benchmarks/results/} \\
+  \midrule
+  \endhead
+  Quantizer on a real cache & \nolinkurl{scuffed_quant_llm.json} \\
+  Quantizer across models & \nolinkurl{test_arch/} (one file per host and model) \\
+  GPU decompression & \nolinkurl{test_arch/cerberus_gpu_decompress.json}, \nolinkurl{test_arch/chimera_gpu_decompress.json} \\
+  Storage sweep & \nolinkurl{test_arch/chimera_storage_spill.json} \\
+  Python pool, loopback & \nolinkurl{aggregate_results.json}, \nolinkurl{ucx_comparison.json} \\
+  
+  \bottomrule
+\end{longtable}
+\end{tightblock}
+
+To rebuild the software and run the tests on any Linux machine: build the two
+native libraries under \nolinkurl{middleware/}, then run \code{pytest -q} from
+the repository root. Tests that need an RDMA device or a GPU skip themselves.
+The notebooks under \nolinkurl{notebooks/} run in local mode with no special
+hardware and reproduce every model figure.
+
+\section{The Runs in Order}
+
+\Cref{tab:runs} lists the runs that produce the results, in the order in
+which they are made. The steps of each
+run are given with the figure that it fills.
+
+\fixnote{This section lists the outstanding runs: remove it, or reduce it to the commands of each run, when they are complete. R0 to R4 need no change to the code. If R5 is not completed, the evaluation rests on E1 to E5 with R3 and R4 and on the shorter prompts of E8.}
+
+\begin{tightblock}
+\begin{longtable}{L{0.8cm}L{5.2cm}L{4.2cm}L{4.0cm}}
+  \caption[The runs in order]{The runs in order.}\label{tab:runs}\\
+  \toprule
+  Run & What & Needs & Fills \\
+  \midrule
+  \endhead
+  R0 & Hardware record on all four servers, and the firmware state of server 4 & access to each server & \cref{tab:servers} \\
+  R1 & Link baselines on both pairs with raw output saved & R0; server 3 under Linux for the home pair & \cref{fig:pending-10g-baseline,fig:pending-100g-baseline} \\
+  R2 & E1 to E5 on the lab pair, then the home pair & R1; performance counters enabled for E5 & \cref{sec:res-e1} to \cref{sec:res-e5} \\
+  R3 & Storage sweep on the NVMe drive with repeats & server 2 & \cref{fig:pending-nvme} \\
+  R4 & Quantizer on long prompts with real queries & one GPU machine & \cref{fig:pending-quant-long} \\
+  R5 & E6 on the lab pair & R1; the fix for multi-chunk blobs (\cref{sec:channel}) & \cref{sec:res-e6} \\
+  R6 & E7 on one GPU & one GPU machine & \cref{sec:res-e7} \\
+  R7 & E8 across the lab pair & R1; R5 for prompts over about 2,000 tokens; NIXL on both servers & \cref{sec:res-e8}; \cref{sec:impact-transport} \\
+  R8 & The controller after a repair & one of the two repairs applied & \cref{sec:controller} \\
+  \bottomrule
+\end{longtable}
+\end{tightblock}
+
+
+
+\section{Preparation Before the Runs}
+
+Before the first run, the peer address in every notebook's parameter cell is set to the
+peer's address on the direct cable, and the first notebook confirms that the
+RDMA device on both servers is bound to the interface of the direct cable.

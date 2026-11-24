@@ -1,0 +1,219 @@
+% !TeX program = lualatex
+% =====================================================================
+%  Adaptive RDMA Middleware for Disaggregated LLM Inference over
+%  Commodity Ethernet. M.S. thesis, Nathan Gopee, SUNY New Paltz.
+%
+%  Compile with LuaLaTeX and the newest LaTeX available (TeX Live 2025
+%  or later), then BibTeX, then LuaLaTeX twice:
+%      latexmk -lualatex thesis.tex
+%  The PDF is tagged (PDF/UA-2). Every figure has alt text and every
+%  formula has alt text. Fix every LaTeX error before trusting the PDF.
+%
+%  Files: thesis-macros.tex (macros), chapters/*.tex (text),
+%  refs.bib (bibliography), figures/ (images).
+% =====================================================================
+
+% Must come before \documentclass. Turns tagging on, declares the
+% language, and asks for PDF/UA-2.
+%   math/setup = mathml-SE   stores each formula as MathML.
+%   math/alt/use = true      also gives each formula alt text.
+% If a checker only understands PDF/UA-1, write
+%   pdfstandard = ua-1, pdfversion = 1.7
+% and delete the tagging-setup line (formulas keep their alt text).
+% While writing, tagging = off makes builds faster, most of all in
+% chapters with a lot of math. Turn it back on to check and to submit.
+\DocumentMetadata{
+  lang          = en-US,
+  pdfstandard   = ua-2,
+  tagging       = on,
+  tagging-setup = {math/setup = mathml-SE, math/alt/use = true},
+}
+
+\documentclass[12pt,letterpaper,oneside]{report}
+
+% --- Thesis details: edit these lines --------------------------------
+\newcommand{\thesistitle}{Adaptive RDMA Middleware for Disaggregated LLM Inference over Commodity Ethernet}
+\newcommand{\thesisauthor}{Nathan Gopee}
+\newcommand{\thesisdegree}{MASTER OF SCIENCE}
+\newcommand{\thesisdept}{Computer Science}
+\newcommand{\thesisdate}{December 2026}
+
+% --- Math and fonts --------------------------------------------------
+% unicode-math gives every symbol its meaning for a screen reader. It
+% replaces amssymb, amsfonts and bm: do not load those after it.
+\usepackage{amsmath,amsthm}
+\usepackage{unicode-math}
+\IfFontExistsTF{Times New Roman}
+  {\setmainfont{Times New Roman}}   % present on Overleaf, Windows, macOS
+  {\setmainfont{TeX Gyre Termes}}   % Times look-alike that ships with TeX Live
+\setmathfont{TeX Gyre Termes Math}
+
+% --- Page layout -----------------------------------------------------
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+\doublespacing
+% Let a figure share a page with text more often.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.75}
+
+% --- Figures, tables, diagrams, pseudocode ---------------------------
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, calc, fit, backgrounds,
+  shapes.geometric, shapes.misc, decorations.pathreplacing, patterns}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{algpseudocode}
+
+% --- Theorem-like environments ---------------------------------------
+\newtheorem{proposition}{Proposition}[chapter]
+% Lemmas and definitions share the proposition counter. They are declared
+% here, before hyperref and cleveref are loaded: declared after cleveref,
+% a shared-counter theorem stops the build in TeX Live 2025 when tagging
+% is on. Because of the shared counter, label them with the kind named,
+% \label[lemma]{lem:name} and \label[definition]{def:name}, so that
+% \cref prints the right word.
+\newtheorem{definition}[proposition]{Definition}
+\newtheorem{lemma}[proposition]{Lemma}
+
+% --- Contents, bibliography, links -----------------------------------
+\usepackage[nottoc]{tocbibind}        % lists and references show in the contents
+\usepackage[numbers,sort&compress]{natbib}
+% Links work but are printed like the text around them, as in a printed
+% thesis. For blue links on screen, replace hidelinks by
+%   colorlinks = true, allcolors = linkblue
+\definecolor{linkblue}{RGB}{0,51,153} % contrast 10.9:1 against white
+\usepackage{hyperref}
+\hypersetup{
+  pdftitle           = {\thesistitle},
+  pdfauthor          = {\thesisauthor},
+  pdfdisplaydoctitle = true,
+  hidelinks,
+}
+\usepackage{bookmark}
+\usepackage{cleveref}                 % after amsmath and hyperref
+
+% Row 1 of every table is its header row. Change it just before a table
+% that differs, for example \tagpdfsetup{table/header-rows={1,2}}.
+\tagpdfsetup{table/header-rows={1}}
+
+% --- Diagram palette ---------------------------------------------------
+% Every colour is at least 4.5:1 against white, so it is safe for lines
+% and for text. Fills are 12 percent tints behind near-black text. The
+% colours are close in brightness, so never let colour alone carry a
+% difference: pair it with a line style, a pattern, a shape or a label.
+\definecolor{dInk}{RGB}{26,32,44}
+\definecolor{dBlue}{RGB}{0,90,181}
+\definecolor{dOrange}{RGB}{176,72,0}
+\definecolor{dGreen}{RGB}{0,112,84}
+\definecolor{dPurple}{RGB}{110,60,160}
+\definecolor{dGray}{RGB}{92,96,102}
+
+% --- Shared TikZ styles --------------------------------------------------
+\tikzset{
+  diagram/.style = {font=\small, text=dInk, line cap=round, line join=round,
+                    >={Stealth[length=2.4mm, width=1.9mm]}},
+  box/.style     = {draw=dInk, line width=0.8pt, rounded corners=3pt, fill=white,
+                    align=center, inner xsep=8pt, inner ysep=6pt, minimum height=9mm},
+  tint/.style    = {box, draw=#1, fill=#1!12},
+  frame/.style   = {draw=dGray, line width=0.6pt, rounded corners=6pt, inner sep=9pt},
+  flow/.style    = {->, draw=dInk, line width=0.9pt},
+  reply/.style   = {flow, dashed},
+  small text/.style = {font=\footnotesize, text=dInk, inner sep=2pt},
+  heading/.style = {font=\small, text=dInk},
+}
+
+% --- Alt text for math -------------------------------------------------------
+% math/alt/use = true (in \DocumentMetadata) gives every formula alt text
+% automatically: its LaTeX source. \mathalt{words}{formula} replaces that
+% with words you write, for this one formula. Plain words only, no macros.
+% It sets a variable inside the LaTeX tagging code; if a later LaTeX renames
+% that variable, formulas simply fall back to the automatic alt text.
+\ExplSyntaxOn
+\tl_if_exist:NF \l__math_content_template_tl { \tl_new:N \l__math_content_template_tl }
+\NewDocumentCommand{\mathalt}{m +m}
+  {
+    \group_begin:
+    \tl_set:Nn \l__math_content_template_tl { \exp_not:n {#1} }
+    #2
+    \group_end:
+  }
+\ExplSyntaxOff
+\newcommand{\var}[1]{\mathit{#1}}   % a multi-letter variable name in math
+
+% --- Pseudocode ------------------------------------------------------------
+% \begin{pseudocode}{title}{label} ... \end{pseudocode}
+% A numbered, titled, single-spaced block that does not float and is never
+% split across pages (split a very long algorithm in two). Each line
+% becomes a list item in the tag tree, so a screen reader can step
+% through it.
+\newcounter{algorithm}[chapter]
+\renewcommand{\thealgorithm}{\thechapter.\arabic{algorithm}}
+\makeatletter
+\newenvironment{pseudocode}[2]{%
+  \par\addvspace{\baselineskip}%
+  \begingroup
+  \setstretch{1}%
+  % penalties that forbid a page break anywhere inside the block
+  \interlinepenalty=\@M \@itempenalty=\@M \@beginparpenalty=\@M \@endparpenalty=\@M
+  \hrule height 0.9pt \nobreak\vskip 5pt
+  \noindent\refstepcounter{algorithm}\label{#2}%
+  \textbf{Algorithm \thealgorithm.} #1\par
+  \nobreak\vskip 5pt \hrule height 0.4pt \nobreak\vskip 4pt
+  \begin{algorithmic}[1]}%
+  {\end{algorithmic}\par
+   \nobreak\vskip 4pt \hrule height 0.9pt
+   \endgroup\par\addvspace{\baselineskip}}
+\makeatother
+\crefname{algorithm}{algorithm}{algorithms}
+\Crefname{algorithm}{Algorithm}{Algorithms}
+\algrenewcommand{\algorithmiccomment}[1]{\hfill\textit{// #1}}
+
+% Unnumbered front-matter chapter that still shows in the contents and
+% in the PDF bookmarks.
+\newcommand{\frontchapter}[1]{%
+  \chapter*{#1}%
+  \addcontentsline{toc}{chapter}{#1}}
+
+\input{thesis-macros}
+
+% The contents list shows chapters and sections only.
+\setcounter{tocdepth}{1}
+
+\begin{document}
+
+\input{chapters/00-front}
+
+% =====================================================================
+%  MAIN MATTER (arabic page numbers)
+% =====================================================================
+\clearpage
+\pagenumbering{arabic}
+
+\input{chapters/c01-introduction}
+\input{chapters/c02-background}
+\input{chapters/c03-problem}
+\input{chapters/c04-rdma}
+\input{chapters/c05-middleware}
+\input{chapters/c06-decisions}
+\input{chapters/c07-testbed-method}
+\input{chapters/c08-results}
+\input{chapters/c09-related}
+\input{chapters/c10-conclusion}
+
+% =====================================================================
+%  BACK MATTER
+% =====================================================================
+\appendix
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\input{chapters/aA-reproduction}
+\input{chapters/aB-calls}
+\input{chapters/aC-wire}
+
+\end{document}

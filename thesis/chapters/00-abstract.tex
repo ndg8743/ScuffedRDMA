@@ -1,0 +1,28 @@
+Serving a large language model can be divided between two machines: one
+processes the prompt and builds the key-value cache of the model, and the
+other generates the response from that cache. The cache must then cross a
+network, together with a small number of very short messages on which both
+machines wait. Data-center networks are designed for this traffic. In this
+thesis, we study the same division without that hardware: two GPU servers
+connected by commodity Ethernet, with RDMA provided in software and the
+cache staged through host memory.
+
+We present libscuffedrdma, a middleware that treats this traffic as mixed.
+Small urgent messages and large bulk transfers are given separate endpoints
+and separate completion handling behind a single interface, which is
+implemented on both libfabric and raw RDMA verbs. On this foundation we build
+a credit-based blob channel, a connector for the vLLM serving engine, a
+classifier and a rule-tree policy that select a route for each transfer, a
+quantizer with a packed wire format, and an NVMe storage tier. The connector
+routes by size, and the learned classifier, the rule tree and the
+storage tier are evaluated as separate components. We prove the
+properties on which the design relies. We also prove that a classifier based on size thresholds cannot recognize decode traffic, and we show that the switching rule of the queue controller contradicts its own derivation.
+
+On the cache of a real model, the quantizer halves the number of bytes
+relative to 16-bit floating point, while the eight most-attended positions
+agree 91 percent of the time. GPU decompression and storage batching are
+measured. On the laboratory pair, the 99th percentile of a 64-byte message
+under a stream of 1 MiB writes is \blank{} microseconds with one endpoint per
+class and \blank{} microseconds on a shared endpoint, and the transfer of the
+cache accounts for \blank{} percent of the time to first token for a prompt
+of 2,048 tokens. \waiting{results from E3 and E8} The algorithms are given as pseudocode with their proofs, together with the method by which every number is produced.

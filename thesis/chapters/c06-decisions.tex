@@ -1,0 +1,1246 @@
+\chapter{Per-Transfer Decisions, Compression and Storage}
+\label{ch:deciding}
+
+The pool of the previous chapter offers two paths, a quantizer offers a smaller
+encoding, and a storage tier offers a location off the GPU, so a choice among
+them exists for every transfer. Five components make that choice or carry
+it out. The first three decide: a
+classifier that labels a transfer hot or cold, a rule tree that turns labels
+and system state into a decision, and a controller that was intended to
+balance the two queues and has an issue in its switching rule, which we
+analyze. The last two act
+on a decision: the quantizer packs cache vectors into fewer bytes for the
+wire and for disk, and the storage tier moves cache blocks to an NVMe drive
+when GPU memory is short. Neither changes the cache with which the model
+computes, which remains in its 16-bit format on the GPU. Of these components, the static classifier and the quantizer run on the
+serving path of \cref{fig:architecture}, and the others are evaluated on
+their own, so each section states what was measured and on what data. Each
+component is presented in the same order: what it does, the algorithm, and
+the properties that we can prove about it.
+
+\section{Observations Available to the Middleware}
+\label{sec:observations}
+
+A decision needs inputs, and the middleware collects them at the one place
+through which every transfer passes, the sender. Every transfer produces a
+small record: the logarithm of its size, how often
+this tensor has been accessed, the queue depth when it was submitted, whether
+the request is in prefill or decode, the logarithm of the sequence length, the
+logarithm of the time since the previous transfer, and whether it is a control
+message. Latencies go into histograms per class, and events such as timeouts,
+reconnections and fallbacks to TCP are counted. Everything is exported in
+Prometheus text format, and the records can be written to a log that the
+learned classifier trains on.
+
+\section{A Classifier as a Weighted Automaton}
+\label{sec:classifier}
+
+A weighted finite automaton is a finite set of states with transitions that
+carry weights instead of being simply allowed or forbidden
+\citep{droste2009wfa,suresh2021wfa}. The classifier keeps one such automaton
+per tensor, with three states (\cref{fig:wfa}). A tensor in the hot state is
+sent on the hot endpoint.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={State diagram of the classifier with three states in a row: cold, warm and hot.
+        Arrows lead from cold to warm and from warm to hot, labeled used often or small.
+        Arrows lead back from hot to warm and from warm to cold, labeled idle or large. Each
+        state also has a loop back to itself. A note says every arrow carries a weight computed
+        from the features of the transfer, and that transfers in the hot state use the hot
+        endpoint.},
+      st/.style={tint=#1, circle, minimum size=17mm, font=\footnotesize}]
+    \node[st=dBlue]   (c) at (0,0)    {Cold};
+    \node[st=dPurple] (w) at (5.6,0)  {Warm};
+    \node[st=dOrange] (h) at (11.2,0) {Hot};
+    \draw[flow] (c) to[bend left=22] node[midway, above=2pt, small text] {used often, or small} (w);
+    \draw[flow] (w) to[bend left=22] node[midway, above=2pt, small text] {used often, or small} (h);
+    \draw[flow] (h) to[bend left=22] node[midway, below=2pt, small text] {idle, or large} (w);
+    \draw[flow] (w) to[bend left=22] node[midway, below=2pt, small text] {idle, or large} (c);
+    \draw[flow] (c) to[loop left, looseness=5] (c);
+    \draw[flow] (w) to[loop below, looseness=5] (w);
+    \draw[flow] (h) to[loop right, looseness=5] (h);
+    \node[small text, align=center] at (5.6,-2.75) {Every arrow has a weight computed from the transfer's features.\\Transfers in the hot state use the hot endpoint.};
+  \end{tikzpicture}
+  \caption[The three-state automaton kept for each tensor]{The three-state automaton kept for each tensor.}
+  \label{fig:wfa}
+\end{figure}
+
+\subsection{The Static Version and Its Limitation}
+
+The static classifier uses fixed thresholds (\cref{alg:static}). A transfer
+under 4 KiB is hot, one over 256 KiB is cold, and one in between becomes hot
+once its tensor has been accessed ten times. A phase detector then adjusts
+the class: it examines the layer numbers of the last eight transfers, and it
+reports prefill if they increase by one each time, decode if the last three
+are equal, and unknown otherwise. In prefill a hot transfer over 2 KiB is
+moved to the cold class, and in decode a cold transfer is promoted once its
+tensor has been accessed five times.
+
+However, the decode rule of the detector never fires on the traffic for which
+it is intended.
+
+\begin{proposition}[The static detector never reports decode]
+\label{prop:nodecode}
+Let $L \ge 2$ be the number of layers of the model, and suppose that
+transfers arrive layer by layer, with the layer numbers $0, 1, \dots, L-1$
+repeating. Then the phase detector never reports decode.
+\end{proposition}
+
+\begin{proof}
+The detector reports decode only when the last three layer numbers are equal.
+In the stated traffic, consecutive transfers always have different layer
+numbers: the next number is either one higher, or it is $0$ after $L-1$, and
+$0 \ne L-1$ because $L \ge 2$. Hence no two consecutive layer numbers are equal,
+and no three are.
+\end{proof}
+
+\begin{pseudocode}{Static classification of one transfer}{alg:static}
+  \Function{Classify}{$\var{key}$, $\var{size}$, layer $\ell$}
+    \State $n \gets$ number of transfers seen under $\var{key}$, this one included
+    \State $\var{phase} \gets \Call{Phase}{\ell}$
+    \If{$\var{size} < 4$ KiB}
+      \State $c \gets$ hot
+    \ElsIf{$\var{size} > 256$ KiB}
+      \State $c \gets$ cold
+    \Else
+      \State $c \gets$ hot if $n \ge 10$, otherwise cold
+    \EndIf
+    \If{$\var{phase}$ is prefill, $c$ is hot and $\var{size} > 2$ KiB}
+      \State $c \gets$ cold
+    \ElsIf{$\var{phase}$ is decode, $c$ is cold and $n \ge 5$}
+      \State $c \gets$ hot
+    \EndIf
+    \State \Return $c$
+  \EndFunction
+  \Function{Phase}{$\ell$}
+    \State append $\ell$ to a window that keeps the last eight layer numbers
+    \State \textbf{if} the window holds fewer than three numbers \textbf{then return} the phase reported last
+    \State \textbf{if} every number is one more than the number before it \textbf{then return} prefill
+    \State \textbf{if} the last three numbers are equal \textbf{then return} decode
+    \State \Return unknown
+  \EndFunction
+\end{pseudocode}
+
+Decode traffic is exactly of this form: each generated token touches every
+layer in order. A window of eight that lies inside one pass over the layers
+has differences of one and is labeled prefill. A window that contains the
+wrap from $L-1$ to $0$ is labeled unknown. With 40 layers, 7 windows in
+every 40 contain the wrap, so a decode-only stream should be labeled prefill
+82.5 percent of the time, unknown 17.5 percent, and decode never. A synthetic
+stream of 8,000 decode transfers gave 6,605 prefill, 1,395 unknown and 0
+decode, and the one recorded run on a real device gave no decode labels
+either (\cref{sec:res-loopback}).
+
+The consequence is that the cache updates of a running request, which are
+small, urgent, and in the 4 KiB to 256 KiB band, are treated as bulk until
+each has been seen ten times. On the serving path of \cref{sec:overview} the
+effect is more direct, as every blob carries a new key and its count never
+rises above one.
+
+\subsection{The Learned Version}
+
+The replacement keeps the three states and learns the weights. For a transfer
+$x$ whose tensor is in state $s$, the probability of moving to state $s'$ is
+a softmax over the three possible next states,
+\mathalt{the probability of s prime given s and x equals the exponential of W s s prime dot
+  phi of x, divided by the sum over the three states r of the exponential of W s r dot phi
+  of x}{%
+\begin{equation}
+  P(s' \mid s, x) = \frac{\exp\!\big(W_{s,s'} \cdot \phi(x)\big)}{\sum_{r} \exp\!\big(W_{s,r} \cdot \phi(x)\big)},
+  \label{eq:wfa}
+\end{equation}}
+where $\phi(x)$ is the vector of features of the transfer, $W_{s,s'}$ is a
+vector of weights of the same length, one for each pair of a current state
+$s$ and a next state $s'$, the dot is the dot product of \cref{eq:dot}, and
+the sum in the denominator runs over the three states $r$. The features include
+the two phase indicators and the products of each with the logarithm of the
+size, so the model can hold a different size cut-off in each phase, and a
+different sharpness around it. Training minimizes cross-entropy against
+labeled transitions with a quadratic penalty on the weights. Two properties
+are proved in \cref{sec:proofs-wfa}: the training objective is strictly convex
+and has a unique minimum, and a per-phase size cut-off of the kind the static
+classifier lacks can be represented exactly.
+
+\subsection{Evaluation on Synthetic Traffic}
+
+The classifier was evaluated on generated traffic with a rule-based oracle. \Cref{tab:wfa} gives the fraction
+of transfers routed as the oracle routes them, on a model shape that was not
+in the training set.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Routing accuracy on synthetic traffic, 4,000 held-out events per mix]{Routing accuracy on synthetic traffic, 4,000 held-out events per mix. Synthetic data with a synthetic oracle; not a measurement of real traffic.}
+  \label{tab:wfa}
+  \small
+  \begin{tabular}{L{4.6cm}L{3.2cm}L{3.2cm}}
+    \toprule
+    Traffic mix & Static thresholds & Learned weights \\
+    \midrule
+    Balanced & 0.261 & 0.999 \\
+    Decode-heavy & 0.171 & 0.999 \\
+    Prefill-heavy & 1.000 & 0.999 \\
+    Bursty & 0.489 & 0.999 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The static classifier is correct when the traffic is prefill and incorrect in proportion to the amount of decode traffic, as \cref{prop:nodecode} predicts.
+The learned classifier's score is partly by construction, because the oracle
+that labels the test data is the same kind of rule that generated the
+training data. What the table shows is that the model can represent the
+intended policy and that training finds it. Whether it is the right policy for
+real traffic requires traces labeled by measured latency, which is future
+work.
+
+\subsection{Analysis of the Learned Version}
+\label{sec:proofs-wfa}
+
+The notation is the following. The feature vector $\phi(x)$ of a transfer
+$x$ has $F$ components. It consists of the standardized features of
+\cref{sec:observations}, among them the logarithm of the size, written $t$,
+and the two phase indicators, $p$ for prefill and $e$ for decode, each of
+which is $1$ in its phase and $0$ otherwise, together with the products $t p$
+and $t e$ and a final component that is the constant $1$. For each current
+state $s$ and next state $s'$ there is a weight vector $W_{s,s'}$ with $F$
+components, the score of the next state $s'$ is $W_{s,s'} \cdot \phi(x)$, and
+$W$ stands for all weight vectors together. The training set has $n$ examples
+$(x_i, s_i, y_i)$, each of which is a transfer $x_i$, the previous state
+$s_i$ of its tensor, and the labeled next state $y_i$. The previous state is
+taken from the previous label of the same tensor and not from the model's own
+output. The objective is
+\mathalt{J of W equals minus 1 over n times the sum over i of the logarithm of the probability of
+  y i given s i and x i, plus eta over 2 times the squared length of W}{%
+\begin{equation}
+  J(W) = -\frac{1}{n} \sum_{i=1}^{n} \log P(y_i \mid s_i, x_i)
+         + \frac{\eta}{2}\, \lVert W \rVert^2 , \qquad \eta > 0,
+  \label{eq:wfa-loss}
+\end{equation}}
+where $P$ is the probability of \cref{eq:wfa}, $\lVert W \rVert^2$ is the sum
+of the squares of all weights, and $\eta$ is the weight of the penalty.
+
+\begin{proposition}[The training objective has one minimum]
+\label{prop:convex}
+The objective $J$ of \cref{eq:wfa-loss} is strictly convex in $W$ and has
+exactly one minimizer.
+\end{proposition}
+
+\begin{proof}
+\emph{The loss of one example.} Write $z_{i,r} = W_{s_i,r} \cdot \phi(x_i)$
+for the score of next state $r$ on example $i$. Each score is a linear
+function of $W$, and by \cref{eq:wfa} the loss of example $i$ is
+\mathalt{minus the logarithm of the probability of y i equals minus z i y i, plus the logarithm
+  of the sum over r of the exponential of z i r}{%
+\begin{equation}
+  -\log P(y_i \mid s_i, x_i) = -z_{i,y_i} + \log \sum_{r} \exp(z_{i,r}).
+\end{equation}}
+The first term is linear in $W$, and the second is the log-sum-exp function
+of the three scores.
+
+\emph{Log-sum-exp is convex.} Its matrix of second derivatives is
+$\operatorname{diag}(\pi) - \pi \pi^{\mathsf T}$, where
+$\pi = (\pi_1, \pi_2, \pi_3)$ is the vector of the three probabilities of
+\cref{eq:wfa}, $\operatorname{diag}(\pi)$ is the diagonal matrix with these
+entries, and $\pi^{\mathsf T}$ is the transpose of $\pi$. For any vector
+$v = (v_1, v_2, v_3)$,
+\mathalt{v transposed times the quantity diag of pi minus pi pi transposed, times v, equals the
+  sum over r of pi r times v r squared, minus the square of the sum over r of pi r times v r,
+  which is at least zero}{%
+\begin{equation}
+  v^{\mathsf T} \big(\operatorname{diag}(\pi) - \pi \pi^{\mathsf T}\big)\, v
+  = \sum_r \pi_r v_r^2 - \Big(\sum_r \pi_r v_r\Big)^{2} \ge 0 ,
+\end{equation}}
+because the right side is the variance of the values $v_r$ under the
+probabilities $\pi_r$. The matrix is therefore positive semidefinite, and
+log-sum-exp is convex.
+
+\emph{The objective is strictly convex.} A convex function of a linear
+function of $W$ is convex, and a sum of convex functions is convex, so the
+first term of \cref{eq:wfa-loss} is convex in $W$. The penalty has the
+second-derivative matrix $\eta I$, where $I$ is the identity matrix. This
+matrix is positive definite, so the penalty is strictly convex, and the sum
+of a convex and a strictly convex function is strictly convex.
+
+\emph{A minimizer exists and is unique.} A strictly convex function has at
+most one minimizer. One exists, because the loss of each example is the
+negative logarithm of a probability and so is not negative, hence
+$J(W) \ge \tfrac{\eta}{2} \lVert W \rVert^2$, which grows without bound as $W$
+does, and $J$ is continuous.
+\end{proof}
+
+The consequence is that the weights training converges to do not depend on
+where it starts. The implementation runs a fixed number of steps of a
+gradient method, so it approaches the minimizer and is not guaranteed to
+reach it exactly; the notebook checks the loss curve.
+
+\begin{proposition}[A size cut-off per phase is representable]
+\label{prop:cutoff}
+Fix a current state $s$ and two next states $s'$ and $s''$. Let $\tau_P$ and
+$\tau_D$ be two cut-offs on the logarithm $t$ of the size, one for prefill
+and one for decode, and let $\gamma_P$ and $\gamma_D$ be two positive slopes.
+Then there are weights for which the score of $s'$ minus the score of $s''$
+is $-\gamma_P (t - \tau_P)$ for every prefill transfer and
+$-\gamma_D (t - \tau_D)$ for every decode transfer. With those weights the
+model prefers $s'$ to $s''$ exactly when $t < \tau_P$ in prefill and exactly
+when $t < \tau_D$ in decode.
+\end{proposition}
+
+\begin{proof}
+\emph{The target is linear in the features.} The difference of scores to be
+produced is
+\mathalt{Delta of x equals minus gamma P times the quantity t p minus tau P p, minus gamma D
+  times the quantity t e minus tau D e}{%
+\begin{equation}
+  \Delta(x) = -\gamma_P\, (t p - \tau_P\, p) \;-\; \gamma_D\, (t e - \tau_D\, e),
+\end{equation}}
+a linear combination of the four raw features $t p$, $t e$, $p$ and $e$.
+Standardizing a feature subtracts a constant and divides by a positive
+constant, so each raw feature is a linear function of its standardized form
+and the constant feature. Hence there is a vector $v$ with
+$v \cdot \phi(x) = \Delta(x)$ for every transfer $x$.
+
+\emph{The weights.} Set $W_{s,s'} = v$ and $W_{s,s''} = 0$, so that the score
+of $s'$ minus the score of $s''$ is $\Delta(x)$. In prefill $p = 1$ and
+$e = 0$, so the difference is $-\gamma_P (t - \tau_P)$, which is positive
+exactly when $t < \tau_P$. In decode $p = 0$ and $e = 1$, so the difference
+is $-\gamma_D (t - \tau_D)$, which is positive exactly when $t < \tau_D$.
+\end{proof}
+
+Two remarks. The phase indicators alone would already allow two different
+cut-offs; the products add the freedom to make the two slopes differ, which
+sets how sharply the probability changes around each cut-off. Moreover, the proposition states that the intended rule is available to training, not that
+training must find it: the minimizer of \cref{prop:convex} depends on the
+labels. The static classifier cannot hold a decode cut-off at all, because
+its decode rule waits for a detector that never fires
+(\cref{prop:nodecode}).
+
+\section{A Rule Tree for the Decision}
+\label{sec:policy}
+
+A classifier answers one question, hot or cold, from the history of one
+tensor, whereas a decision also depends on state that no single transfer
+shows, such as how full the GPU memory is and how busy the link is. The rule
+tree combines the two, so that the label of the classifier is one input among
+several. The decision for a
+transfer has two fields, a route (hot, cold or spill to storage) and whether
+to compress. A policy is a list of rules, each with a name, a priority, a
+condition and an action that sets one or both fields. A condition is a tree
+whose inner nodes are and, or, and not, and whose leaves compare a field of
+the transfer or of the system state with a constant, test membership in a
+set, or ask the classifier. The form follows the rule composition of a
+request router built for the same serving engine
+\citep{liu2026router,wang2025router}.
+
+\begin{pseudocode}{Evaluating a policy for one transfer}{alg:policy}
+  \State $\var{decision} \gets$ empty
+  \For{each rule, from highest priority to lowest}
+    \If{the rule's condition holds for this transfer}
+      \State set each field the rule names, if that field is still unset
+      \If{the rule is marked final, or both fields are set}
+        \State \textbf{stop}
+      \EndIf
+    \EndIf
+  \EndFor
+  \State set any field still unset to its default: route cold, no compression
+  \State \Return $\var{decision}$
+\end{pseudocode}
+
+Three properties hold by construction and are proved in \cref{sec:proofs-policy}:
+each field is set by the highest-priority rule that matches and names it;
+evaluation may stop early without changing the result; and the cost is linear
+in the size of the rule set. A field that a condition refers to and the
+transfer lacks makes that leaf false and is recorded, so a misspelled field
+name shows up in the explanation of a decision instead of silently matching
+nothing.
+
+\Cref{tab:policy} is the default policy.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The default policy]{The default policy. Higher priority is evaluated first.}
+  \label{tab:policy}
+  \small
+  \begin{tabular}{L{1.5cm}L{7.6cm}L{4.4cm}}
+    \toprule
+    Priority & Condition & Action \\
+    \midrule
+    100 & control message & route hot \\
+    90 & GPU memory at least 90 percent full, size over 256 KiB, not decode & route to storage \\
+    80 & decode phase and a small cache update & route hot \\
+    70 & prefill phase and size over 64 KiB & route cold \\
+    60 & link at least 80 percent busy, route cold or storage, size at least 256 KiB & compress \\
+    30 & classifier says hot and size at most 256 KiB & route hot \\
+    20 & size under 4 KiB & route hot \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The thresholds of the default policy are initial values taken from the sizes
+in \cref{tab:traffic}. Setting them from measured traffic is future work, and no reported result
+depends on them.
+
+\subsection{Properties of the Rule Tree}
+\label{sec:proofs-policy}
+
+The procedure is \cref{alg:policy}. Rules are sorted once, by priority from
+high to low with ties kept in file order, and the decision starts with both
+fields unset. The condition of a rule is evaluated on the transfer, the
+system state and the decision so far, and if it holds, the rule sets each
+field that its action names and that is still unset. Evaluation stops after a
+rule marked final or when both fields are set, and fields that are still
+unset then take their defaults.
+
+\begin{proposition}[Each field belongs to one rule]
+\label{prop:owner}
+When the procedure ends, each field holds the value given by the first rule,
+in sorted order, that was evaluated, whose condition held, and whose action
+names that field. If there is no such rule, the field holds its default.
+\end{proposition}
+
+\begin{proof}
+The proof is by induction on the number of rules processed.
+
+\emph{Invariant.} Every field that is set holds the value from the first
+processed rule that matched and names it, and for every field that is unset
+no processed rule matched and names it.
+
+\emph{Before the first rule.} Nothing is set, and the invariant holds
+trivially.
+
+\emph{One more rule.} Processing a rule changes nothing if its condition
+fails. If the condition holds, the rule sets only fields that are unset. By
+the invariant no earlier rule matched and names those, so this rule is the
+first for them, and fields already set are not touched.
+
+\emph{At the end.} Stopping keeps the invariant, and the defaults fill only
+fields that no processed rule set.
+\end{proof}
+
+\begin{proposition}[Stopping early does not change the decision]
+\label{prop:earlystop}
+The decision is the same as if every node of every rule were evaluated, in
+two senses. Inside a condition, an and node may stop at its first false
+child and an or node at its first true child. Across rules, evaluation may
+stop once both fields are set.
+\end{proposition}
+
+\begin{proof}
+\emph{Inside a condition.} For an and node, one false child makes the node
+false whatever the others are, and if no child is false, all were evaluated.
+The same holds for an or node with true. This is safe only if evaluating a
+child cannot change what another child returns. Comparison and membership
+leaves read the transfer, the system state and the decision so far, none of
+which changes during one condition. A classifier leaf could be different,
+because a classifier may keep history. The engine therefore calls each named
+classifier at most once per decision and reuses the answer at every leaf
+that names it, so every leaf returns the same value whenever and however
+often it is evaluated.
+
+\emph{Across rules.} A rule can set only fields that are unset. Once both
+fields are set no later rule can change the decision, so not evaluating the
+later rules changes nothing.
+\end{proof}
+
+One side effect is worth stating. A classifier that updates its history when
+called is consulted only for transfers whose evaluation reaches one of its
+leaves. In the default policy that leaf is in a rule of low priority, so the
+order of rules decides which transfers the classifier sees.
+
+\begin{proposition}[Linear cost]
+\label{prop:linear}
+One decision costs time proportional to the total number of nodes in the
+policy, plus one call to each classifier the policy names.
+\end{proposition}
+
+\begin{proof}
+Each rule is evaluated at most once per decision, and within a rule each
+node is visited at most once, since early stopping only skips nodes. A
+comparison takes constant time, and a membership test takes time
+proportional to the length of its list, which is part of the size of the
+policy. Each classifier is called at most once per decision. Sorting is done
+when the policy is loaded, not per decision.
+\end{proof}
+
+\section{A Controller and the Issue in Its Switching Rule}
+\label{sec:controller}
+
+\subsection{The Model}
+
+The rule tree decides from thresholds on the current state and has no model
+of how the two queues evolve. A third component, a controller derived from
+optimal control, was designed to supply one. We model the two classes as two
+queues that share one link, with a control that divides the link between
+them:
+\mathalt{Two equations. The rate of change of q H equals lambda H minus u times C times mu H.
+  The rate of change of q C equals lambda C minus the quantity 1 minus u, times C times mu C.}{%
+\begin{align}
+  \dot q_H &= \lambda_H - u\, C \mu_H, \label{eq:qh}\\
+  \dot q_C &= \lambda_C - (1-u)\, C \mu_C. \label{eq:qc}
+\end{align}}
+Here $q_H$ and $q_C$ are the numbers of operations that wait in the hot and
+in the cold queue, and the dot denotes their rate of change in time. The
+arrival rates of the two classes are $\lambda_H$ and $\lambda_C$, in
+operations per second. $C$ is the capacity of the link, which the
+implementation normalizes to $1$, and $\mu_H$ and $\mu_C$ are the service
+rates of the two classes per unit of capacity, in operations per second. The
+control $u$, a number between $0$ and $1$, is the share of the link given to
+the hot queue. The cost to minimize is the weighted backlog over time, with
+weight $\alpha$ on the hot queue and $\beta$ on the cold queue,
+$\alpha > \beta$.
+
+Pontryagin's principle \citep{pontryagin2018,liberzon2012} states that the optimal control minimizes a function, the Hamiltonian, at every instant. Here the
+Hamiltonian is linear in $u$, and a linear function on an interval takes its
+minimum at an end point. The optimal control is therefore always 0 or 1, a
+``bang-bang'' control \citep{bellman1956}, and which one is decided by the
+sign of a switching function,
+\mathalt{S equals p H times C times mu H, minus p C times C times mu C}{%
+\begin{equation}
+  S = p_H\, C \mu_H - p_C\, C \mu_C ,
+  \label{eq:switch}
+\end{equation}}
+in which $p_H$ and $p_C$ are the costs of one more operation of backlog in
+the hot and in the cold queue, and $C$, $\mu_H$ and $\mu_C$ are as in
+\cref{eq:qh,eq:qc}. When $S$ is positive the link should serve the hot
+queue. The implementation approximates $p_H$ by $\alpha q_H$ and $p_C$ by
+$\beta q_C$.
+
+\subsection{The Inconsistency}
+
+The code does not allocate link capacity but routes: for each new transfer it
+computes $S$ and sends the transfer to the cold path when $S$ exceeds a small
+dead band, which differs from the derivation in two ways.
+
+The first is the sign. In the model, positive $S$ means that the hot queue
+deserves the link, whereas the code responds to positive $S$ by sending new
+work away from the hot path.
+
+The second is the form. Choosing which queue a new transfer joins is a
+different problem from choosing which queue to serve. A new transfer should
+join the queue where it expects to wait less, and the expected wait is the
+backlog divided by the service rate, so the rates should divide, not
+multiply. A consistent rule sends a transfer to the cold path when
+\mathalt{alpha times q H divided by mu H is greater than beta times q C divided by mu C}{%
+\begin{equation}
+  \frac{\alpha\, q_H}{\mu_H} > \frac{\beta\, q_C}{\mu_C},
+  \label{eq:route}
+\end{equation}}
+that is, when the weighted expected wait in the hot queue, on the left,
+exceeds that in the cold queue, on the right.
+
+With the default parameters ($\alpha = 2$, $\beta = 1$, $\mu_H = 10{,}000$,
+$\mu_C = 2{,}000$) the implemented rule sends a transfer cold whenever $q_H$
+exceeds one tenth of $q_C$. \Cref{eq:route} would do so only when $q_H$
+exceeds two and a half times $q_C$. The implemented rule therefore abandons
+the hot path at 25 times less hot backlog than a consistent rule would.
+
+The evidence agrees with this analysis. In the one recorded run on a device the controller made
+1,000 decisions and chose cold every time (\cref{sec:res-loopback}). On a
+synthetic grid of queue lengths the implemented rule chooses hot in 6 percent
+of the cases and the consistent rule in 79 percent, and in a simulation with
+Poisson arrivals the mean wait was 1.76 ms under the implemented rule and
+0.28 ms under the consistent one. The simulation is synthetic, so its absolute numbers mean little, and only the
+ordering of the two rules is the finding.
+
+\subsection{Two Consistent Repairs}
+
+There are two consistent repairs, which are to keep the controller as a router
+and use \cref{eq:route}, or to make it allocate service between the queues
+and correct the sign. The unit test of the controller pins the rule as
+implemented (\cref{sec:tests}), and no result depends on it. The controller also has an extension that adds storage as a
+third choice under GPU memory pressure by picking the smallest of three
+costs, to which the same repair applies.
+
+\fixnote{Decide before submission: apply one of the two repairs in the code and measure it (run R8), or keep this section as the analysis of the rule as implemented.}
+
+\section{The Quantizer}
+\label{ch:shrink}
+
+\subsection{Scope of the Quantizer}
+
+The method is not new. It combines the rotation and scalar quantizer of
+TurboQuant \citep{zandieh2025turboquant} with the sign sketch of QJL
+\citep{zandieh2024qjl}. The scalar quantizer is the classical one of Lloyd
+and Max \citep{lloyd1982,max1960}, and the sketch rests on random projections
+that preserve geometry \citep{johnson1984}. The contribution here is a packed wire format, an implementation whose sizes
+are measured from the bytes actually written, and its placement, as
+compression is applied to data in transit and at rest and never to the cache
+on the GPU. On the serving path the codec is selected by configuration for a
+whole run, and the compress field of the rule tree (\cref{sec:policy}) is the
+means by which it can be selected per transfer.
+
+Related work compresses the cache where it lives. KIVI quantizes it to 2 bits inside GPU memory and keeps a recent window at
+full precision \citep{liu2024kivi}; transform coding compresses it for
+compact storage \citep{staniszewski2026kvtc}; low-rank approximation reduces
+its size in memory \citep{zhang2024lorc}; and a storage vendor has
+reported using TurboQuant to speed up restoring caches from flash
+\citep{alvarez2026flashblade}. No quality comparison against any of these was
+run.
+
+\subsection{The Four Steps}
+
+\Cref{fig:quant-pipeline} shows the path of one cache vector $x$ of dimension
+$d$ through the quantizer, and \cref{alg:quant} states the same four steps as
+a procedure.
+
+The first step normalizes. The length $\ell = \lVert x \rVert$ is stored as
+a 32-bit number, and the work continues with the unit vector $u = x / \ell$.
+The second step rotates. The unit vector is multiplied by a random diagonal
+matrix $D$ of signs and then by a Hadamard matrix $H$, which gives
+\mathalt{y equals 1 over the square root of d, times H times D times u}{$y = \tfrac{1}{\sqrt d} H D u$}.
+The rotation preserves lengths and inner products, and it spreads the energy
+of the vector so that every coordinate of $y$ has mean zero and variance
+$1/d$. Cache vectors often have a few channels much larger than the rest, and
+after the rotation they do not. The third step quantizes. Each coordinate of
+$y$ is rounded to one of $2^b$ levels chosen to minimize the squared error
+for that distribution, where $b$ is the number of bits per coordinate, so
+that $b = 3$ gives eight levels. The fourth step sketches the residual $r$,
+the difference between $x$ and its reconstruction $\hat x$. Its length
+$\rho = \lVert r \rVert$ is stored together with the signs of $m$ random
+projections of $r$, and from these signs the inner product of $r$ with any
+query can be estimated, which corrects the attention score computed from the
+reconstruction.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Flow diagram of the quantizer in six boxes joined by arrows. Top row, left to
+        right. The input vector x enters box 1, normalize, which computes the length l of x
+        and the unit vector u equals x divided by l, and stores l in 4 bytes. Box 2, rotate,
+        computes y equals one over the square root of d, times H times D times u, and stores
+        nothing. Box 3, quantize, finds for each coordinate y i the cell k i that contains it
+        and replaces y i by the level c of k i; it stores the indices k in the ceiling of d
+        times b over 8 bytes. Bottom row, right to left. Box reconstruct computes x hat equals
+        l over the square root of d, times D times H times y hat, a step that the receiver
+        repeats. Box residual computes r equals x minus x hat and its length rho, and stores rho
+        in 4 bytes. Box 4, sketch, computes z j equals the sign of the inner product of s j
+        with r divided by rho, for j from 1 to m, and stores the signs z in the ceiling of m
+        over 8 bytes.},
+      st/.style={tint=#1, text width=40mm, minimum height=19mm, font=\footnotesize, align=center, inner xsep=3pt, inner ysep=3pt}]
+    \node[st=dBlue]   (n) at (0,0)     {1. Normalize\\$\ell = \lVert x \rVert,\quad u = x/\ell$\\store $\ell$: 4 bytes};
+    \node[st=dBlue]   (r) at (5.1,0)   {2. Rotate\\$y = \tfrac{1}{\sqrt d}\, H D u$\\nothing stored};
+    \node[st=dBlue]   (q) at (10.2,0)  {3. Quantize\\$k_i$: cell of $y_i$,\quad $\hat y_i = c_{k_i}$\\store $k$: $\lceil d b / 8 \rceil$ bytes};
+    \node[st=dGray]   (h) at (10.2,-2.9) {Reconstruct\\$\hat x = \tfrac{\ell}{\sqrt d}\, D H \hat y$\\repeated by the receiver};
+    \node[st=dOrange] (e) at (5.1,-2.9)  {Residual\\$r = x - \hat x,\quad \rho = \lVert r \rVert$\\store $\rho$: 4 bytes};
+    \node[st=dOrange] (k) at (0,-2.9)    {4. Sketch\\$z_j = \operatorname{sign} \langle s_j, r/\rho \rangle$\\store $z$: $\lceil m / 8 \rceil$ bytes};
+    \node[small text] (x) at (-3.0,0) {$x$};
+    \draw[flow] (x) -- (n); \draw[flow] (n) -- (r); \draw[flow] (r) -- (q);
+    \draw[flow] (q) -- (h); \draw[flow] (h) -- (e); \draw[flow] (e) -- (k);
+  \end{tikzpicture}
+  \caption[The four steps of the quantizer for one vector]{The four steps of the quantizer for one vector. $H$ is a Hadamard matrix, $D$ a random diagonal matrix of signs, $c$ the table of $2^b$ levels, and $s_1, \dots, s_m$ random sign vectors.}
+  \label{fig:quant-pipeline}
+\end{figure}
+
+The proofs are in \cref{sec:proofs-quant}: the rotation is orthogonal; each rotated
+coordinate has the stated mean and variance; the quantizer's levels satisfy
+the conditions for a minimum; the sketch's estimate is unbiased for Gaussian
+projections; and its standard deviation is at most
+\mathalt{the square root of pi over 2 m, times the length of r times the length of q}{%
+\begin{equation}
+  \sqrt{\frac{\pi}{2m}}\; \lVert r \rVert\, \lVert q \rVert ,
+  \label{eq:qjl}
+\end{equation}}
+where $m$ is the number of sign bits of the sketch, $\lVert r \rVert$ is the
+length of the residual and $\lVert q \rVert$ is the length of the query. The
+factor in front is 0.078 at $m = 256$. The implementation uses projections
+with entries of plus and minus one instead of Gaussian entries, so the
+estimate is approximately unbiased and the bound still holds.
+
+\begin{pseudocode}{Packing and unpacking one cache vector}{alg:quant}
+  \Function{Pack}{$x$} \Comment{$D$, the levels $c$ and $s_1, \dots, s_m$ are fixed by a seed}
+    \State $\ell \gets \lVert x \rVert$ and $u \gets x / \ell$
+    \State $y \gets \tfrac{1}{\sqrt d}\, H D u$ \Comment{fast transform, $d \log_2 d$ additions}
+    \For{$i \gets 1$ to $d$}
+      \State $k_i \gets$ index of the cell that contains $y_i$, and $\hat y_i \gets c_{k_i}$
+    \EndFor
+    \State $\hat x \gets \tfrac{\ell}{\sqrt d}\, D H \hat y$ \Comment{what the receiver will reconstruct}
+    \State $r \gets x - \hat x$ and $\rho \gets \lVert r \rVert$
+    \For{$j \gets 1$ to $m$}
+      \State $z_j \gets \operatorname{sign} \langle s_j,\ r / \rho \rangle$
+    \EndFor
+    \State \Return $(\ell,\ \rho,\ k_1 \dots k_d,\ z_1 \dots z_m)$ \Comment{sizes in \cref{eq:packed}}
+  \EndFunction
+  \Function{Unpack}{$\ell$, $k_1 \dots k_d$}
+    \State \Return $\tfrac{\ell}{\sqrt d}\, D H \hat y$ with $\hat y_i = c_{k_i}$
+  \EndFunction
+  \Function{Score}{$q$, $\hat x$, $\rho$, $z_1 \dots z_m$} \Comment{inner product with a query $q$}
+    \State \Return $\langle q, \hat x \rangle + \rho\, \tfrac{\sqrt{\pi/2}}{m} \sum_{j=1}^{m} z_j \langle s_j, q \rangle$ \Comment{\cref{eq:qjl-est}}
+  \EndFunction
+\end{pseudocode}
+
+\subsection{The Packed Format}
+
+\Cref{fig:packed} shows one packed vector. Its size in bytes is
+\mathalt{s packed equals 4 plus 4 plus the ceiling of d times b over 8, plus the ceiling of m
+  over 8}{%
+\begin{equation}
+  s_{\text{packed}} = 4 + 4 + \left\lceil \frac{d\, b}{8} \right\rceil + \left\lceil \frac{m}{8} \right\rceil ,
+  \label{eq:packed}
+\end{equation}}
+where the two terms of 4 bytes hold the length $\ell$ of the vector and the
+length $\rho$ of its residual as 32-bit numbers, the third term holds the $d$
+codes of $b$ bits each, the fourth holds the $m$ sign bits of the sketch, and
+the brackets round up to a whole number of bytes.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Byte layout of one packed vector for 64 dimensions, 3 bits per coordinate and a
+        256-bit sketch, drawn as a bar in four parts. Part one, 4 bytes: the length of the
+        vector. Part two, 4 bytes: the length of the residual. Part three, 24 bytes: the 64
+        three-bit codes. Part four, 32 bytes: the 256 sign bits of the sketch. A brace under
+        the bar is labeled 64 bytes in total, against 128 bytes for the same vector in 16-bit
+        floating point.},
+      cell/.style={draw=dInk, line width=0.8pt, minimum height=11mm, font=\footnotesize, align=center, inner sep=2pt}]
+    \node[cell, fill=dGray!12, minimum width=15mm] (a) at (0,0) {length\\4};
+    \node[cell, fill=dGray!12, minimum width=15mm, anchor=west] (b) at (a.east) {residual\\4};
+    \node[cell, fill=dBlue!12, minimum width=42mm, anchor=west] (c) at (b.east) {3-bit codes\\24};
+    \node[cell, fill=dOrange!10, minimum width=54mm, anchor=west] (e) at (c.east) {sign sketch\\32};
+    \draw[decorate, decoration={brace, amplitude=5pt, mirror}, draw=dGray, line width=0.6pt]
+      ($(a.south west)+(0,-0.15)$) -- ($(e.south east)+(0,-0.15)$)
+      node[midway, below=7pt, small text] {64 bytes (the same vector is 128 bytes in 16-bit floating point)};
+  \end{tikzpicture}
+  \caption[One packed vector for $d = 64$, $b = 3$, $m = 256$]{One packed vector for $d = 64$, $b = 3$, $m = 256$. Numbers are bytes.}
+  \label{fig:packed}
+\end{figure}
+
+\Cref{tab:packed} gives sizes produced by the packing routine itself, for the
+head dimension of the model used here and for a wider one.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Bytes per packed vector and the ratio to 16-bit floating point]{Bytes per packed vector, from the packing routine, and the ratio to 16-bit floating point.}
+  \label{tab:packed}
+  \small
+  \begin{tabular}{L{2.6cm}L{3.0cm}L{3.0cm}L{2.4cm}L{2.4cm}}
+    \toprule
+    Dimension & Bits per coordinate & Sketch bits & Bytes & Ratio to 16-bit \\
+    \midrule
+    64 & 2 & 64 & 32 & 4.00 \\
+    64 & 3 & 64 & 40 & 3.20 \\
+    64 & 3 & 256 & 64 & 2.00 \\
+    64 & 4 & 256 & 72 & 1.78 \\
+    128 & 3 & 64 & 64 & 4.00 \\
+    128 & 3 & 256 & 88 & 2.91 \\
+    128 & 4 & 256 & 104 & 2.46 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Limitations}
+
+Two limits of the implementation should be stated beside the result of
+\cref{sec:res-quant}.
+
+First, the sketch is not used where it travels. On the connector path the
+receiver reconstructs each vector and writes it into the cache, and the
+attention kernel then computes scores from the reconstruction alone. The 32
+sketch bytes and the residual length cross the wire unused. Dropping them
+would give 28 bytes per vector at $d = 64$, at the higher inner-product
+error of \cref{tab:quant}, and applying the correction would need the
+receiving kernel to use the sketch, which it does not.
+
+Second, a sketch is only worth sending above a certain length. On synthetic
+vectors with outlier channels the sketch reduced inner-product error only
+from about 128 bits upward and made it worse below that.
+
+\subsection{Analysis of the Quantizer}
+\label{sec:proofs-quant}
+
+Throughout, $d$ is the dimension of a cache vector and is a power of two,
+which covers the head dimensions used here. The implementation pads other
+dimensions with zeros to the next power of two. The inner product of two
+vectors $u$ and $v$ is written $\langle u, v \rangle$ and is their dot
+product (\cref{eq:dot}), the length of a vector is
+$\lVert u \rVert = \sqrt{\langle u, u \rangle}$, and
+$\operatorname{E}[\,\cdot\,]$ denotes the mean of a random quantity.
+
+\subsubsection{The Rotation}
+
+The Hadamard matrices are defined by $H_1 = (1)$ and
+\mathalt{H of 2 n is the two by two block matrix with rows H n, H n and H n, minus H n}{%
+\begin{equation}
+  H_{2n} = \begin{pmatrix} H_n & H_n \\ H_n & -H_n \end{pmatrix},
+\end{equation}}
+so that $H_n$ is a square matrix with $n$ rows whose entries are all $+1$ or
+$-1$. $D$ is a diagonal matrix with the diagonal entries
+$\delta_1, \dots, \delta_d$, each of which is $+1$ or $-1$, and the rotation
+is the matrix
+\mathalt{R equals 1 over the square root of d, times H d times D}{%
+\begin{equation}
+  R = \frac{1}{\sqrt d}\, H_d\, D .
+  \label{eq:rotation}
+\end{equation}}
+
+\begin{lemma}[The rotation is orthogonal]
+\label[lemma]{lem:orth}
+Let $R^{\mathsf T}$ be the transpose of $R$ and $I$ the identity matrix.
+Then $R R^{\mathsf T} = I$. Hence $\lVert R u \rVert = \lVert u \rVert$ and
+$\langle R u, R v \rangle = \langle u, v \rangle$ for all vectors $u$ and
+$v$, and $R^{\mathsf T}$ undoes $R$ exactly.
+\end{lemma}
+
+\begin{proof}
+\emph{The Hadamard matrix.} First $H_d H_d^{\mathsf T} = d I$, by induction
+on the size. The claim holds for $d = 1$. If $H_n H_n^{\mathsf T} = n I$,
+multiplying the block form by its transpose gives the diagonal blocks
+$H_n H_n^{\mathsf T} + H_n H_n^{\mathsf T} = 2 n I$ and the off-diagonal blocks
+$H_n H_n^{\mathsf T} - H_n H_n^{\mathsf T} = 0$, which is the claim for $2n$.
+
+\emph{The sign matrix.} $D D^{\mathsf T} = I$, because every diagonal entry
+squares to $1$.
+
+\emph{The product.} By \cref{eq:rotation} and the two previous steps,
+\mathalt{R times R transposed equals 1 over d times H d times D times D transposed times H d
+  transposed, which equals 1 over d times H d times H d transposed, which equals I}{%
+\begin{equation}
+  R R^{\mathsf T}
+  = \frac{1}{d}\, H_d\, D D^{\mathsf T} H_d^{\mathsf T}
+  = \frac{1}{d}\, H_d H_d^{\mathsf T} = I .
+\end{equation}}
+
+\emph{The consequences.} For a square matrix $R R^{\mathsf T} = I$ implies
+$R^{\mathsf T} R = I$, so that
+$\langle R u, R v \rangle = u^{\mathsf T} R^{\mathsf T} R\, v = \langle u, v \rangle$,
+and the statement about lengths is the case $v = u$.
+\end{proof}
+
+\begin{lemma}[Every rotated coordinate has mean zero and variance $1/d$]
+\label[lemma]{lem:moments}
+Fix a unit vector $u$, and let the diagonal entries
+$\delta_1, \dots, \delta_d$ of $D$ be independent and equally likely to be
+$+1$ or $-1$. Then each coordinate $y_i$ of $y = R u$ has mean $0$ and
+variance $1/d$.
+\end{lemma}
+
+\begin{proof}
+By \cref{eq:rotation}, coordinate $i$ of $y$ is
+\mathalt{y i equals 1 over the square root of d, times the sum over j from 1 to d of H i j times
+  delta j times u j}{%
+\begin{equation}
+  y_i = \frac{1}{\sqrt d} \sum_{j=1}^{d} H_{ij}\, \delta_j\, u_j ,
+\end{equation}}
+where $H_{ij}$ is the entry of $H_d$ in row $i$ and column $j$ and $u_j$ is
+coordinate $j$ of $u$.
+
+\emph{The mean.} Each $\delta_j$ has mean $0$, so $y_i$ has mean $0$.
+
+\emph{The variance.} The $\delta_j$ are independent with $\delta_j^2 = 1$, so
+the mean of $\delta_j \delta_k$ is $1$ if $j = k$ and $0$ otherwise, and
+$H_{ij}^2 = 1$. Therefore
+\mathalt{the mean of y i squared equals 1 over d times the sum over j and k of H i j times H i
+  k times u j times u k times the mean of delta j delta k, which equals 1 over d times the
+  sum over j of u j squared, which equals 1 over d}{%
+\begin{equation}
+  \operatorname{E}\big[y_i^2\big]
+  = \frac{1}{d} \sum_{j,k} H_{ij} H_{ik}\, u_j u_k \operatorname{E}[\delta_j \delta_k]
+  = \frac{1}{d} \sum_j u_j^2 = \frac{1}{d},
+\end{equation}}
+where the last step uses that $u$ is a unit vector, and because the mean is
+$0$ this is the variance.
+\end{proof}
+
+The lemma gives two moments, not a distribution. Each $y_i$ is a sum of $d$
+independent terms, and when no single coordinate of $u$ dominates, the
+central limit theorem makes it close to a normal variable with that mean and
+variance. That approximation is what justifies using one table of levels for
+every coordinate of every vector.
+
+\subsubsection{The Scalar Quantizer}
+
+Let $Y$ be a random coordinate with density $f$ and finite variance. A
+quantizer has $K = 2^b$ levels $c_1 < \dots < c_K$ and thresholds
+$\theta_0 = -\infty < \theta_1 < \dots < \theta_{K-1} < \theta_K = \infty$,
+and it replaces any value $y$ in cell $k$, the interval from $\theta_{k-1}$
+to $\theta_k$, by the level $c_k$. Its mean squared error is
+\mathalt{the mean squared error equals the sum over k from 1 to K of the integral from theta k
+  minus 1 to theta k of the quantity y minus c k, squared, times f of y}{%
+\begin{equation}
+  \mathrm{MSE} = \sum_{k=1}^{K} \int_{\theta_{k-1}}^{\theta_k} (y - c_k)^2 f(y)\, dy ,
+  \label{eq:mse}
+\end{equation}}
+in which term $k$ is the contribution of the values that fall into cell $k$.
+
+\begin{proposition}[Conditions for a minimum \citep{lloyd1982,max1960}]
+\label{prop:lloyd}
+If the levels and thresholds minimize the mean squared error of
+\cref{eq:mse}, then each threshold is midway between its two levels,
+$\theta_k = \tfrac12 (c_k + c_{k+1})$ for $k = 1, \dots, K-1$, and each level
+is the mean of $Y$ over its cell,
+$c_k = \operatorname{E}[\,Y \mid \theta_{k-1} < Y \le \theta_k\,]$ for
+$k = 1, \dots, K$.
+\end{proposition}
+
+\begin{proof}
+\emph{Thresholds, for fixed levels.} The error of a single value $y$ is
+smallest when it is sent to the nearest level, and the values nearer to $c_k$
+than to $c_{k+1}$ are those below the midpoint of the two. Any other
+threshold sends some values to a level that is not their nearest and raises
+the error.
+
+\emph{Levels, for fixed thresholds.} The error is a sum of $K$ terms, each
+of which depends on one level, and
+\mathalt{the derivative of the mean squared error with respect to c k equals minus 2 times the
+  integral from theta k minus 1 to theta k of the quantity y minus c k, times f of y}{%
+\begin{equation}
+  \frac{\partial\, \mathrm{MSE}}{\partial c_k}
+  = -2 \int_{\theta_{k-1}}^{\theta_k} (y - c_k)\, f(y)\, dy ,
+\end{equation}}
+which is zero exactly when $c_k$ is the mean of $Y$ over the cell. The second
+derivative is twice the probability of the cell, which is positive, so this
+is the minimum for those thresholds.
+\end{proof}
+
+Lloyd's algorithm alternates the two conditions. Neither step can raise the
+error, and the error is never negative, so it converges. The implementation runs
+50 rounds on 200,000 samples of one coordinate of a random unit vector. For
+$d = 64$ and $b = 3$ the resulting levels, multiplied by $\sqrt d$, are
+$-2.118$, $-1.338$, $-0.764$, $-0.257$, $0.233$, $0.738$, $1.316$ and
+$2.097$, computed from the code. On the sample they were fitted to, every
+threshold is exactly the midpoint of its levels and every level is within
+$0.0002$ of the mean of its cell, in units of the coordinate's standard
+deviation. They are close to the classical eight levels for a normal
+variable, $\pm 0.245$, $\pm 0.756$, $\pm 1.344$ and $\pm 2.152$
+\citep{max1960}. The levels satisfy the conditions for the sample they were
+fitted to; the conditions are necessary for a minimum and no more is claimed.
+
+\subsubsection{The Sketch}
+
+Let $r$ be the residual of one vector,
+$\bar r = r / \lVert r \rVert$ the unit vector in its direction, and $q$ a
+query. Let $s_1, \dots, s_m$ be random vectors of dimension $d$, and let the
+sketch store the signs
+$z_j = \operatorname{sign} \langle s_j, \bar r \rangle$, each of which is
+$+1$ or $-1$. The estimate of the inner product $\langle q, r \rangle$ is
+\mathalt{the estimate equals the length of r, times the square root of pi over 2, divided by m,
+  times the sum over j from 1 to m of z j times the inner product of s j and q}{%
+\begin{equation}
+  \widehat{\langle q, r \rangle}
+  = \lVert r \rVert\, \frac{\sqrt{\pi/2}}{m} \sum_{j=1}^{m} z_j\, \langle s_j, q \rangle ,
+  \label{eq:qjl-est}
+\end{equation}}
+in which the hat marks the estimate, $\lVert r \rVert$ is the stored length
+of the residual, and $\langle s_j, q \rangle$ is the projection of the query
+on the same random vector that produced the sign $z_j$.
+
+\begin{lemma}[The mean of a sign times a normal variable]
+\label[lemma]{lem:sign}
+Let $X$ and $Y$ be jointly normal random variables with mean $0$, let
+$\sigma^2 > 0$ be the variance of $X$, and let $\kappa$ be the covariance of
+$X$ and $Y$. Then
+$\operatorname{E}[\operatorname{sign}(X)\, Y] = \sqrt{2/\pi}\; \kappa / \sigma$,
+where $\operatorname{sign}(X)$ is $+1$ if $X$ is positive and $-1$
+otherwise.
+\end{lemma}
+
+\begin{proof}
+\emph{Splitting $Y$.} Write $Y = a X + V$ with $a = \kappa / \sigma^2$, which
+defines the variable $V = Y - a X$. Then $V$ has mean $0$ and is uncorrelated
+with $X$, since their covariance is $\kappa - a \sigma^2 = 0$, and for
+jointly normal variables uncorrelated means independent. Hence
+$\operatorname{E}[\operatorname{sign}(X) V] = \operatorname{E}[\operatorname{sign}(X)] \operatorname{E}[V] = 0$
+and
+$\operatorname{E}[\operatorname{sign}(X) Y] = a \operatorname{E}\lvert X \rvert$.
+
+\emph{The mean of $\lvert X \rvert$.} For a normal variable with mean $0$ and
+variance $\sigma^2$,
+\mathalt{the mean of the absolute value of X equals 2 over sigma times the square root of 2 pi,
+  times the integral from zero to infinity of x times the exponential of minus x squared
+  over 2 sigma squared, which equals sigma times the square root of 2 over pi}{%
+\begin{equation}
+  \operatorname{E}\lvert X \rvert
+  = \frac{2}{\sigma \sqrt{2\pi}} \int_0^\infty x\, e^{-x^2 / 2\sigma^2}\, dx
+  = \sigma \sqrt{\frac{2}{\pi}} ,
+\end{equation}}
+and $a \sigma \sqrt{2/\pi} = \sqrt{2/\pi}\; \kappa / \sigma$.
+\end{proof}
+
+\begin{proposition}[The estimate is unbiased for normal projections \citep{zandieh2024qjl}]
+\label{prop:unbiased}
+If the vectors $s_1, \dots, s_m$ are independent and their entries are
+independent standard normal variables, then the mean of the estimate of
+\cref{eq:qjl-est} is $\langle q, r \rangle$.
+\end{proposition}
+
+\begin{proof}
+Fix $q$ and $r$, and write $X_j = \langle s_j, \bar r \rangle$ and
+$Y_j = \langle s_j, q \rangle$ for the two projections on $s_j$, so that
+$z_j = \operatorname{sign}(X_j)$. The pair $X_j$, $Y_j$ is jointly normal
+with mean $0$, $X_j$ has variance $\lVert \bar r \rVert^2 = 1$, and the
+covariance of the pair is $\langle \bar r, q \rangle$. By \cref{lem:sign}
+with $\sigma = 1$ and $\kappa = \langle \bar r, q \rangle$,
+$\operatorname{E}[z_j Y_j] = \sqrt{2/\pi}\, \langle \bar r, q \rangle$. Each
+of the $m$ terms of the sum has this mean, so the mean of the estimate is
+\mathalt{the length of r, times the square root of pi over 2, times the square root of 2 over
+  pi, times the inner product of r bar and q, which equals the inner product of q and r}{%
+\begin{equation}
+  \lVert r \rVert\, \sqrt{\frac{\pi}{2}}\, \sqrt{\frac{2}{\pi}}\, \langle \bar r, q \rangle
+  = \lVert r \rVert\, \langle \bar r, q \rangle = \langle q, r \rangle .
+\end{equation}}
+\end{proof}
+
+\begin{proposition}[Standard deviation of the estimate]
+\label{prop:qjlvar}
+If the vectors $s_1, \dots, s_m$ are independent and the entries of each are
+uncorrelated with mean $0$ and variance $1$, the standard deviation of the
+estimate of \cref{eq:qjl-est} is at most the bound of \cref{eq:qjl}.
+\end{proposition}
+
+\begin{proof}
+\emph{One term.} With $Y_j = \langle s_j, q \rangle$ as before, the terms
+$z_j Y_j$ are independent and identically distributed. Since $z_j^2 = 1$,
+the variance of one term is at most
+$\operatorname{E}[Y_j^2] = \lVert q \rVert^2$, where the last step uses only
+that the entries of $s_j$ are uncorrelated with mean $0$ and variance $1$.
+
+\emph{The estimate.} The variance of the mean of $m$ such terms is at most
+$\lVert q \rVert^2 / m$, and the estimate is that mean multiplied by
+$\lVert r \rVert \sqrt{\pi / 2}$. Its variance is therefore at most
+$\tfrac{\pi}{2m} \lVert r \rVert^2 \lVert q \rVert^2$, and the square root of
+this is the bound of \cref{eq:qjl}. For $m = 256$ the factor
+$\sqrt{\pi / 512}$ is $0.078$.
+\end{proof}
+
+The implementation draws the entries of each $s_j$ as $+1$ or $-1$ with
+equal probability. Those entries are independent with mean $0$ and variance
+$1$, so \cref{prop:qjlvar} applies as stated. \Cref{prop:unbiased} does not:
+$X_j$ and $Y_j$ are then sums of $d$ independent terms and only approximately
+jointly normal, so the estimate is approximately unbiased, with an error
+that shrinks as $d$ grows. The size of that bias at $d = 64$ was not
+measured.
+
+\section{The Storage Tier}
+\label{sec:tier}
+
+\subsection{Place in the System}
+
+Serving systems are converging on a hierarchy for cache: GPU memory, host
+memory, local flash, and a shared file system below that
+\citep{hsu2026fourtier,hsu2026kv,ibm2025storage}. We implement one step of it, from memory to a local NVMe drive, as a place to
+which the rule tree can send a cold block when the GPU is nearly full. The
+tier is exercised by its own tests and by the sweep of \cref{sec:res-nvme},
+and no experiment in this work spills a block of a running request.
+
+\subsection{Design}
+
+The tier keeps one backing file. A block is stored under its key in a run of
+4 KiB extents found by a first-fit search of a free list; freed runs are
+merged with their neighbors. The tier keeps a 32-bit checksum of each block
+in its index and verifies it on every read, so a damaged block is reported
+and never returned as data. The index is held in memory, so the tier is
+spill space for one run of the server and not a store that survives a
+restart. Writes are batched: the tier queues blocks and writes a
+batch with one call followed by one flush to stable storage. If the file
+system allows it, the file is opened for direct I/O, which bypasses the
+operating system's cache and requires every length, offset and buffer address
+to be a multiple of 4,096. Where direct I/O is refused, the tier falls back
+to buffered writes and records why. The procedures are stated with the
+analysis that follows, which proves the alignment conditions, the invariants
+of the free list, and the classes of error that the checksum detects.
+
+\subsection{Analysis of the Storage Tier}
+\label{sec:proofs-storage}
+
+\Cref{alg:tier,alg:tier-read} give the write and the read path of the tier,
+and \cref{alg:alloc}, further below, the allocator beneath them. The tier
+works in units of
+$A = 4{,}096$ bytes, the alignment that direct I/O requires. A block of
+$\var{len}$ bytes occupies a slot of $w = \lceil \var{len} / A \rceil\, A$
+bytes, that is, its length rounded up to a multiple of $A$. The tier keeps
+the end of the file, written $\var{end}$, a list of free extents, each with
+an offset and a size, and an index from each key to the offset, length, slot
+size and checksum of its block.
+
+\begin{pseudocode}{Spilling a block to the storage tier}{alg:tier}
+  \Function{Spill}{$\var{key}$, $\var{block}$}
+    \State append $(\var{key}, \var{block})$ to the pending list
+    \If{the pending list holds $n$ blocks} \Comment{$n$ is the batch size}
+      \State \Call{WriteBatch}{the pending list} on a worker thread, and empty the list
+    \EndIf
+  \EndFunction
+  \Function{WriteBatch}{blocks $1, \dots, n$ of $\var{len}_1, \dots, \var{len}_n$ bytes}
+    \State $w_i \gets \lceil \var{len}_i / A \rceil\, A$ for each $i$ \Comment{slot of block $i$, $A = 4{,}096$}
+    \State $\var{base} \gets \Call{Allocate}{w_1 + \dots + w_n}$ \Comment{\cref{alg:alloc}}
+    \State place each block at the start of its slot in one aligned buffer, padded with zeros
+    \State write the buffer at offset $\var{base}$ with one call, then flush to stable storage once
+    \For{$i \gets 1$ to $n$}
+      \State $\var{index}[\var{key}_i] \gets$ (offset of slot $i$,\ $\var{len}_i$,\ $w_i$,\ \Call{Crc32}{block $i$})
+    \EndFor
+  \EndFunction
+\end{pseudocode}
+
+\begin{pseudocode}{Reading a block back from the storage tier}{alg:tier-read}
+  \Function{Retrieve}{$\var{key}$}
+    \State \textbf{if} the block is still pending \textbf{then return} it from memory
+    \State $(o,\ \var{len},\ w,\ \var{crc}) \gets \var{index}[\var{key}]$
+    \State read the slot of $w$ bytes at offset $o$ and keep its first $\var{len}$ bytes
+    \State \textbf{if} \Call{Crc32}{bytes kept} differs from $\var{crc}$ \textbf{then fail} with an integrity error
+    \State \Return the bytes kept
+  \EndFunction
+\end{pseudocode}
+
+\begin{proposition}[Every transfer meets the conditions of direct I/O]
+\label{prop:align}
+In every write and read that the tier issues with direct I/O, the file
+offset, the length and the address of the buffer are multiples of $A$.
+\end{proposition}
+
+\begin{proof}
+\emph{Lengths.} A block of $\var{len}$ bytes is given a slot of
+$w = \lceil \var{len} / A \rceil\, A$ bytes. A batch is written as one run of
+such slots, whose length is a sum of multiples of $A$, and a read covers one
+slot or a run of them.
+
+\emph{Offsets.} The argument is an induction over the operations of the
+allocator (\cref{alg:alloc}). The end of the file starts at $0$. An allocation returns either
+the end of the file, which then advances by a multiple of $A$, or the start
+of a free extent, which is then shortened from the front by a multiple of
+$A$. A release returns a range that an allocation handed out, split at slot
+boundaries, so its offset and size are multiples of $A$, and merging two such
+ranges gives another. Every offset and size that the allocator ever holds is
+therefore a multiple of $A$.
+
+\emph{Addresses.} Buffers for direct I/O are obtained from anonymous memory
+maps, which begin on a page boundary, and the page size on these machines is
+$4{,}096$ bytes.
+\end{proof}
+
+The proposition assumes that $A$ is a multiple of the logical block size of
+the device, which is 512 or 4,096 bytes on the drives used here.
+
+\begin{pseudocode}{Allocating and releasing extents}{alg:alloc}
+  \Function{Allocate}{$w$} \Comment{$w$ bytes, a multiple of $A$}
+    \For{each free extent of $g$ bytes at offset $o$, in order of offset} \Comment{first fit}
+      \If{$g \ge w$}
+        \State shorten the extent to $g - w$ bytes at offset $o + w$, or remove it if $g = w$
+        \State \Return $o$
+      \EndIf
+    \EndFor
+    \State $o \gets \var{end}$, then $\var{end} \gets \var{end} + w$ and \Return $o$ \Comment{grow the file}
+  \EndFunction
+  \Function{Release}{$o$, $w$} \Comment{$w$ bytes at offset $o$}
+    \State insert the extent of $w$ bytes at offset $o$ into the free list and sort it by offset
+    \State merge every extent with a neighbor that begins where it ends
+    \State \textbf{if} the last extent ends at $\var{end}$ \textbf{then} set $\var{end}$ to its offset and remove it
+  \EndFunction
+\end{pseudocode}
+
+\begin{proposition}[No two blocks share space]
+\label{prop:freelist}
+At all times the free extents are sorted and pairwise disjoint, no two of
+them are adjacent, none overlaps an allocated range, and all of them end
+below the end of the file. Consequently two allocated ranges never overlap.
+\end{proposition}
+
+\begin{proof}
+The properties named in the first sentence form an invariant, which is
+shown to hold at the start and after every operation of \cref{alg:alloc}.
+
+\emph{At the start.} There is no free extent and no allocated range, so all
+properties hold.
+
+\emph{An allocation.} The range is taken from the front of a free extent, or
+from the old end of the file upward. In the first case the range was free, so
+by the invariant it overlapped no allocated range and no other free extent,
+and the part of the extent that remains keeps its end, so the list stays
+sorted, disjoint and without adjacent pairs. In the second case the range
+lies above everything, and the end of the file moves up past it.
+
+\emph{A release.} A release adds back a range that was allocated, which by
+the invariant overlapped no free extent, so the free extents stay disjoint.
+The release then sorts the list, merges every pair in which one extent ends
+where the next begins, and, if the last extent ends at the end of the file,
+moves the end of the file down to the start of that extent and drops it.
+Merging and dropping do not change which bytes below the new end are free.
+
+\emph{Conclusion.} In both cases of an allocation the new range is disjoint
+from every allocated range, which gives the final statement.
+\end{proof}
+
+Merging is what allows reuse: two adjacent freed slots of 4 KiB become one
+extent of 8 KiB that can hold a block neither could hold alone.
+
+\begin{proposition}[What the checksum detects]
+\label{prop:crc}
+Let a block be read back with some of its bits changed. The 32-bit cyclic
+redundancy check used by the tier reports the change in each of these cases:
+one bit is changed; two bits are changed, in a block shorter than
+$2^{32} - 1$ bits; or all changed bits lie within four consecutive bytes. If
+instead every pattern of changed bits over the block is equally likely, the
+probability that the block is changed and the change goes unreported is less
+than $2^{-32}$.
+\end{proposition}
+
+\begin{proof}
+\emph{Setting.} Treat the block as a polynomial in a variable $x$ over the
+field with two elements, with one coefficient per bit, so that the bit at
+position $i$ is the coefficient of $x^i$. The check is the remainder of the
+block, multiplied by $x^{32}$, on division by a fixed generator polynomial
+$G$ of degree 32; the constants that the standard adds at the start and the
+end are the same for two blocks of equal length and cancel when they are
+compared. Changing a set of bits adds an error polynomial $E$ to the block,
+whose nonzero coefficients mark the changed bits. The change goes unreported
+exactly when the remainder is unchanged, that is, when $G$ divides
+$x^{32} E$. The constant term of $G$ is $1$, so $G$ and $x$ have no common
+factor, and this happens exactly when $G$ divides $E$.
+
+\emph{One changed bit.} The error is $E = x^i$, which $G$ cannot divide,
+because $G$ has no common factor with $x$ and has degree 32.
+
+\emph{Changes within four consecutive bytes.} The changed bits lie within 32
+consecutive positions, whatever the order of bits inside a byte. They give
+$E = x^i E'$, where $E'$ is nonzero and of degree at most 31, and $G$ divides
+neither factor.
+
+\emph{Two changed bits.} The error is $E = x^i (x^k + 1)$, where $k \ge 1$
+is the distance between the two bits, and $G$ divides it only if $G$ divides
+$x^k + 1$. The smallest such $k$ is the order of $x$ modulo $G$. For this
+generator the order is $2^{32} - 1$: a direct computation shows that
+$x^{2^{32}-1}$ leaves remainder $1$ and that $x^{(2^{32}-1)/p}$ does not for
+each prime $p$ that divides $2^{32} - 1$, namely 3, 5, 17, 257 and 65,537. In
+a block shorter than $2^{32} - 1$ bits, about 512 MiB, two changed bits are
+less than that far apart.
+
+\emph{Random changes.} In a block of at least 32 bits, sending a pattern of
+changed bits to its remainder on division by $G$ is a linear map onto the
+$2^{32}$ possible remainders, so every remainder is the image of equally many
+patterns. The unreported patterns are those with remainder zero, a fraction
+$2^{-32}$ of all patterns, and one of them is the pattern with no change at
+all.
+\end{proof}
+
+The generator has 15 terms. A polynomial that is a multiple of $x + 1$ has an
+even number of terms, so $x + 1$ is not a factor of this generator, and the
+check does not detect every change of an odd number of bits. The checksum is kept in the tier's index in memory,
+not beside the block on the drive, so it protects against a block that comes
+back different from what was written, and not against loss of the index.
+
+\subsection{Batching and a Model of Its Effect}
+
+A flush has a cost that does not depend on how many bytes were written before
+it, and writing several blocks per flush spreads that cost. The simplest
+model is a fixed time per batch and a time per block:
+\mathalt{t batch of n equals t fix plus n times t block, and X of n equals n times s block
+  divided by the quantity t fix plus n times t block, which approaches s block over t block
+  as n grows}{%
+\begin{equation}
+  t_{\text{batch}}(n) = t_{\text{fix}} + n\, t_{\text{blk}},
+  \qquad
+  X(n) = \frac{n\, s_{\text{blk}}}{t_{\text{fix}} + n\, t_{\text{blk}}}
+  \;\longrightarrow\; \frac{s_{\text{blk}}}{t_{\text{blk}}}
+  \quad\text{as } n \text{ grows},
+  \label{eq:coalesce}
+\end{equation}}
+where $n$ is the number of blocks in a batch, $t_{\text{batch}}(n)$ is the
+time to write and flush the batch, $t_{\text{fix}}$ is the part of that time
+which does not depend on $n$ and includes the flush, $t_{\text{blk}}$ is the
+time added by each block, $s_{\text{blk}}$ is the size of a block in bytes,
+and $X(n)$ is the resulting write throughput in bytes per second.
+\Cref{sec:res-nvme} fits this to the measured sweep and finds it adequate for
+batches of ten or more and poor for single writes. The batch size is a tuning value, since a larger batch also delays
+the moment a block is safely on disk, and the read results in that section
+suggest very large batches have a cost of their own.
+
+This completes the description of the components. The next chapter
+describes the machines on which they run and the method by which they are
+measured.

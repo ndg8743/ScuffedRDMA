@@ -1,0 +1,139 @@
+\chapter{Wire Formats}
+\label[appendix]{app:wire}
+
+This appendix gives the byte layouts that the middleware places on the wire and on disk, read
+from the source \citep{scuffedrdma}. Offsets and sizes are in bytes.
+
+\section{Blob Channel Slot}
+
+Each slot begins with the header of \cref{tab:slothdr}, in little-endian
+byte order, followed by the key and the chunk (\cref{fig:slot}). The fields
+take 40 bytes and the header is padded to 64.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Header of a blob channel slot]{Header of a blob channel slot.}
+  \label{tab:slothdr}
+  \small
+  \begin{tabular}{L{1.5cm}L{1.3cm}L{3.2cm}L{7.6cm}}
+    \toprule
+    Offset & Size & Field & Meaning \\
+    \midrule
+    0 & 4 & magic & \code{0x53424C42}, the letters SBLB; checked on receipt \\
+    4 & 4 & blob identifier & counter kept by the sender, the same for every chunk of one blob \\
+    8 & 2 & key length & length of the key that follows the header \\
+    10 & 2 & flags & bit 0 set if the blob was sent on the hot class \\
+    12 & 4 & reserved & zero \\
+    16 & 8 & total length & length of the whole blob \\
+    24 & 8 & chunk offset & position of this chunk in the blob \\
+    32 & 8 & chunk length & length of this chunk \\
+    40 & 24 & padding & unused \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The 32-bit immediate value of each write names what arrived. Its top four
+bits give the kind, 1 for a data chunk and 2 for a credit, and its low 16
+bits give the slot number. A credit is an 8-byte write on the hot endpoint
+whose contents are not read; only its immediate value matters.
+
+\section{Packed Quantizer Batch}
+
+A batch of $n$ packed vectors begins with the 20-byte header of
+\cref{tab:scqhdr}, in little-endian byte order.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Header of a packed quantizer batch]{Header of a packed quantizer batch.}
+  \label{tab:scqhdr}
+  \small
+  \begin{tabular}{L{1.5cm}L{1.3cm}L{3.2cm}L{7.6cm}}
+    \toprule
+    Offset & Size & Field & Meaning \\
+    \midrule
+    0 & 4 & magic & the letters SCQ1 \\
+    4 & 1 & version & 1 \\
+    5 & 1 & bits & bits per coordinate, $b$ \\
+    6 & 2 & sketch bits & $m$ \\
+    8 & 4 & count & number of vectors, $n$ \\
+    12 & 4 & dimension & $d$ \\
+    16 & 4 & padded dimension & $d$ rounded up to a power of two \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Four arrays follow the header in this order: the $n$ vector lengths as 32-bit
+floating point; the $n$ residual lengths as 32-bit floating point; the codes,
+$b$ bits each, packed with the lowest bit first; and the sketch signs, one
+bit each, packed the same way. The two packed arrays are each rounded up to
+a whole byte for the batch, so the size of a batch in bytes is
+\mathalt{s batch equals 20 plus 4 n plus 4 n plus the ceiling of n times d times b over 8, plus
+  the ceiling of n times m over 8}{%
+\begin{equation}
+  s_{\text{batch}} = 20 + 4n + 4n + \left\lceil \frac{n\, d\, b}{8} \right\rceil + \left\lceil \frac{n\, m}{8} \right\rceil ,
+\end{equation}}
+where $20$ is the size of the header, $n$ is the number of vectors, $d$ is
+their dimension, with the padded dimension in its place when the two differ,
+$b$ is the number of bits per coordinate, and $m$ is the number of sign bits
+of the sketch. Per vector and without the shared header this is
+\cref{eq:packed}.
+
+\section{Cache Blob for the Connector}
+
+One blob carries the cache blocks of one layer of one request. Its layout is
+in \cref{tab:skv}.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Layout of a cache blob]{Layout of a cache blob.}
+  \label{tab:skv}
+  \small
+  \begin{tabular}{L{1.5cm}L{2.2cm}L{9.9cm}}
+    \toprule
+    Offset & Size & Content \\
+    \midrule
+    0 & 4 & the letters SKV1 \\
+    4 & 4 & length $h$ of the header, big-endian \\
+    8 & $h$ & header, a JSON object in UTF-8 \\
+    $8 + h$ & rest & the arrays, one after another \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The header holds a format version, the layer name, the axis along which
+blocks are stacked, the block size, the number of tokens, the codec, the
+original data type and shape, and one entry per array with its name, data
+type, shape, offset and length. Data types travel as names, because the
+16-bit format the engine uses has no native type in the array library. With
+the raw codec there is one array, the gathered blocks. With the quantizer
+codec the arrays are those of the packed batch above.
+
+A control message uses the same first eight bytes with a header length of
+zero, followed directly by a small JSON object. The ``done'' message that
+ends a request's layers is one of these and travels on the hot class.
+
+\section{Connection Record of the Python Pool}
+
+The Python implementation of the pool on verbs, which produced the loopback measurement of \cref{sec:res-loopback}, exchanges one fixed record per queue pair over TCP before connecting. It is 64 bytes in network byte order
+(\cref{tab:qpinfo}). The libfabric pool does not use it; its side channel
+exchanges addresses and keys instead.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Connection record of the Python pool]{Connection record of the Python pool.}
+  \label{tab:qpinfo}
+  \small
+  \begin{tabular}{L{1.5cm}L{1.3cm}L{3.2cm}L{7.6cm}}
+    \toprule
+    Offset & Size & Field & Meaning \\
+    \midrule
+    0 & 4 & queue pair number & identifies the queue pair at its owner \\
+    4 & 4 & sequence number & first packet sequence number the owner will send \\
+    8 & 16 & GID & address of the port on the RDMA network \\
+    24 & 4 & IPv4 address & the owner's IP address \\
+    28 & 4 & GID index & which entry of the port's address table was used \\
+    32 & 4 & MTU & RDMA packet size \\
+    36 & 28 & reserved & zero \\
+    \bottomrule
+  \end{tabular}
+\end{table}

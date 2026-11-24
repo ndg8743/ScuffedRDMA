@@ -1,0 +1,40 @@
+\begin{tightblock}
+\begin{longtable}{L{3.3cm}L{11.2cm}}
+  \toprule
+  Term & Meaning \\
+  \midrule
+  \endhead
+  BAR & Base address register: how a PCI device asks the firmware for a region of address space. \\
+  Blob & A named byte string moved by the blob channel, such as one layer of one request's cache. \\
+  Cold & Traffic that is large and that nothing waits on block by block. \\
+  CQ & Completion queue: where the network device reports that an operation finished, with a status. \\
+  Credit & The right to write into one receive slot on the peer. \\
+  Decode & The phase of inference that generates the answer one token at a time. \\
+  DSDT & An ACPI table that describes, among other things, the address ranges a PCI root may hand out. \\
+  Endpoint & The libfabric object through which a program sends and receives; on the verbs provider it is a queue pair. \\
+  GID & The address entry of an RDMA port. On RoCEv2 it corresponds to an IP address. \\
+  GPU & Graphics processing unit. \\
+  Hot & Small traffic on which some part of the system is blocked. \\
+  ITL & Inter-token latency: the gap between successive generated tokens. \\
+  KV cache & Key-value cache: the keys and values that attention has computed for earlier positions. \\
+  LLM & Large language model. \\
+  Marker & A short control blob that closes the layers of one request. \\
+  MTU & Maximum transmission unit: the largest packet a link carries. \\
+  NIC & Network interface card. \\
+  NVMe & A protocol and class of solid-state drives. \\
+  PMP & Pontryagin's principle from optimal control, the basis of the queue controller. \\
+  Prefill & The phase of inference that processes the prompt and fills the cache. \\
+  QJL & A sketch made of the signs of random projections, 256 bits per vector here, used to correct inner products after quantization. \\
+  QP & Queue pair: the endpoint of an RDMA connection. \\
+  OFI & OpenFabrics Interfaces: the interface that the libfabric library implements; the two names are used for the same thing. \\
+  RDMA & Remote direct memory access: a network device reads or writes memory on another machine without that machine's operating system on the data path. \\
+  RoCE, RoCEv2 & RDMA over Converged Ethernet. Version 2 is carried in UDP. \\  Slingshot & The Ethernet-compatible interconnect of HPE Cray supercomputers, programmed through libfabric. \\
+  Slot & A fixed-size receive buffer of the blob channel. \\
+  Soft-RoCE & RoCEv2 implemented in software in the Linux kernel. \\
+  UEC, UET & Ultra Ethernet Consortium, and its Ultra Ethernet Transport: a transport designed to follow RoCE, reached through libfabric. \\
+  TTFT & Time to first token. \\
+  Verbs & The low-level programming interface to RDMA devices. \\
+  WFA & Weighted finite automaton: the form of the per-tensor classifier. \\
+  \bottomrule
+\end{longtable}
+\end{tightblock}

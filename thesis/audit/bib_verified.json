@@ -1,0 +1,4492 @@
+{
+ "vaswani2017": {
+  "kind": "arxiv",
+  "id": "1706.03762",
+  "title": "Attention Is All You Need",
+  "authors": [
+   "Ashish Vaswani",
+   "Noam Shazeer",
+   "Niki Parmar",
+   "Jakob Uszkoreit",
+   "Llion Jones",
+   "Aidan N. Gomez",
+   "Lukasz Kaiser",
+   "Illia Polosukhin"
+  ],
+  "published": "2017-06-12",
+  "updated": "2023-08-02",
+  "version": "v7",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "15 pages, 5 figures"
+ },
+ "shazeer2019mqa": {
+  "kind": "arxiv",
+  "id": "1911.02150",
+  "title": "Fast Transformer Decoding: One Write-Head is All You Need",
+  "authors": [
+   "Noam Shazeer"
+  ],
+  "published": "2019-11-06",
+  "updated": "2019-11-06",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "ainslie2023gqa": {
+  "kind": "arxiv",
+  "id": "2305.13245",
+  "title": "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints",
+  "authors": [
+   "Joshua Ainslie",
+   "James Lee-Thorp",
+   "Michiel de Jong",
+   "Yury Zemlyanskiy",
+   "Federico Lebr\u00f3n",
+   "Sumit Sanghai"
+  ],
+  "published": "2023-05-22",
+  "updated": "2023-12-23",
+  "version": "v3",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "Accepted at EMNLP 2023. Added to related work"
+ },
+ "kwon2023vllm": {
+  "kind": "arxiv",
+  "id": "2309.06180",
+  "title": "Efficient Memory Management for Large Language Model Serving with PagedAttention",
+  "authors": [
+   "Woosuk Kwon",
+   "Zhuohan Li",
+   "Siyuan Zhuang",
+   "Ying Sheng",
+   "Lianmin Zheng",
+   "Cody Hao Yu",
+   "Joseph E. Gonzalez",
+   "Hao Zhang",
+   "Ion Stoica"
+  ],
+  "published": "2023-09-12",
+  "updated": "2023-09-12",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "SOSP 2023"
+ },
+ "zhong2024distserve": {
+  "kind": "arxiv",
+  "id": "2401.09670",
+  "title": "DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving",
+  "authors": [
+   "Yinmin Zhong",
+   "Shengyu Liu",
+   "Junda Chen",
+   "Jianbo Hu",
+   "Yibo Zhu",
+   "Xuanzhe Liu",
+   "Xin Jin",
+   "Hao Zhang"
+  ],
+  "published": "2024-01-18",
+  "updated": "2024-06-06",
+  "version": "v3",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "OSDI 2024"
+ },
+ "qin2024mooncake": {
+  "kind": "arxiv",
+  "id": "2407.00079",
+  "title": "Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving",
+  "authors": [
+   "Ruoyu Qin",
+   "Zheming Li",
+   "Weiran He",
+   "Mingxing Zhang",
+   "Yongwei Wu",
+   "Weimin Zheng",
+   "Xinran Xu"
+  ],
+  "published": "2024-06-24",
+  "updated": "2026-10-08",
+  "version": "v5",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "23 pages, 13 figures"
+ },
+ "dao2022fa1": {
+  "kind": "arxiv",
+  "id": "2205.14135",
+  "title": "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+  "authors": [
+   "Tri Dao",
+   "Daniel Y. Fu",
+   "Stefano Ermon",
+   "Atri Rudra",
+   "Christopher R\u00e9"
+  ],
+  "published": "2022-05-27",
+  "updated": "2022-06-23",
+  "version": "v2",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "dao2023fa2": {
+  "kind": "arxiv",
+  "id": "2307.08691",
+  "title": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+  "authors": [
+   "Tri Dao"
+  ],
+  "published": "2023-07-17",
+  "updated": "2023-07-17",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "shah2024fa3": {
+  "kind": "arxiv",
+  "id": "2407.08608",
+  "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision",
+  "authors": [
+   "Jay Shah",
+   "Ganesh Bikshandi",
+   "Ying Zhang",
+   "Vijay Thakkar",
+   "Pradeep Ramani",
+   "Tri Dao"
+  ],
+  "published": "2024-07-11",
+  "updated": "2024-07-12",
+  "version": "v2",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "zadouri2026fa4": {
+  "kind": "arxiv",
+  "id": "2603.05451",
+  "title": "FlashAttention-4: Algorithm and Kernel Pipelining Co-Design for Asymmetric Hardware Scaling",
+  "authors": [
+   "Ted Zadouri",
+   "Markus Hoehnerbach",
+   "Jay Shah",
+   "Timmy Liu",
+   "Vijay Thakkar",
+   "Tri Dao"
+  ],
+  "published": "2026-03-05",
+  "updated": "2026-03-05",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "shen2026sol": {
+  "kind": "arxiv",
+  "id": "2607.16100",
+  "title": "Every Microsecond Matters: Achieving Near Speed-of-Light Latency in GPU Collectives",
+  "authors": [
+   "Siyuan Shen",
+   "Anton Korzh",
+   "John Bachan",
+   "Tiancheng Chen",
+   "Arnav Goel",
+   "Ludwig Schneider",
+   "Pouya Kousha",
+   "Zhenhao He",
+   "Sylvain Jeaugey",
+   "Kamil Iskra",
+   "Nishank Chandawala",
+   "Jeff R. Hammond",
+   "Torsten Hoefler"
+  ],
+  "published": "2026-07-17",
+  "updated": "2026-07-17",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "licker2026fabriclib": {
+  "kind": "arxiv",
+  "id": "2510.27656",
+  "title": "fabric-lib: RDMA Point-to-Point Communication for LLM Systems",
+  "authors": [
+   "Nandor Licker",
+   "Kevin Hu",
+   "Vladimir Zaytsev",
+   "Lequn Chen"
+  ],
+  "published": "2025-10-31",
+  "updated": "2026-04-13",
+  "version": "v2",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "zandieh2025turboquant": {
+  "kind": "arxiv",
+  "id": "2504.19874",
+  "title": "TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate",
+  "authors": [
+   "Amir Zandieh",
+   "Majid Daliri",
+   "Majid Hadian",
+   "Vahab Mirrokni"
+  ],
+  "published": "2025-04-28",
+  "updated": "2025-04-28",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "25 pages"
+ },
+ "zandieh2024qjl": {
+  "kind": "arxiv",
+  "id": "2406.03482",
+  "title": "QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead",
+  "authors": [
+   "Amir Zandieh",
+   "Majid Daliri",
+   "Insu Han"
+  ],
+  "published": "2024-06-05",
+  "updated": "2024-07-18",
+  "version": "v2",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "13 pages"
+ },
+ "staniszewski2026kvtc": {
+  "kind": "arxiv",
+  "id": "2511.01815",
+  "title": "KV Cache Transform Coding for Compact Storage in LLM Inference",
+  "authors": [
+   "Konrad Staniszewski",
+   "Adrian \u0141a\u0144cucki"
+  ],
+  "published": "2025-11-03",
+  "updated": "2026-03-11",
+  "version": "v2",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "Accepted to ICLR 2026"
+ },
+ "zhang2024lorc": {
+  "kind": "arxiv",
+  "id": "2410.03111",
+  "title": "LoRC: Low-Rank Compression for LLMs KV Cache with a Progressive Compression Strategy",
+  "authors": [
+   "Rongzhi Zhang",
+   "Kuang Wang",
+   "Liyuan Liu",
+   "Shuohang Wang",
+   "Hao Cheng",
+   "Chao Zhang",
+   "Yelong Shen"
+  ],
+  "published": "2024-10-04",
+  "updated": "2024-10-04",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "15 pages, 4 figures"
+ },
+ "gu2023mamba": {
+  "kind": "arxiv",
+  "id": "2312.00752",
+  "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+  "authors": [
+   "Albert Gu",
+   "Tri Dao"
+  ],
+  "published": "2023-12-01",
+  "updated": "2024-05-31",
+  "version": "v2",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "dao2024mamba2": {
+  "kind": "arxiv",
+  "id": "2405.21060",
+  "title": "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality",
+  "authors": [
+   "Tri Dao",
+   "Albert Gu"
+  ],
+  "published": "2024-05-31",
+  "updated": "2024-05-31",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "ICML 2024"
+ },
+ "rouhani2023mx": {
+  "kind": "arxiv",
+  "id": "2310.10537",
+  "title": "Microscaling Data Formats for Deep Learning",
+  "authors": [
+   "Bita Darvish Rouhani",
+   "Ritchie Zhao",
+   "Ankit More",
+   "Mathew Hall",
+   "Alireza Khodamoradi",
+   "Summer Deng",
+   "Dhruv Choudhary",
+   "Marius Cornea",
+   "Eric Dellinger",
+   "Kristof Denolf",
+   "Stosic Dusan",
+   "Venmugil Elango",
+   "Maximilian Golub",
+   "Alexander Heinecke",
+   "Phil James-Roxby",
+   "Dharmesh Jani",
+   "Gaurav Kolhe",
+   "Martin Langhammer",
+   "Ada Li",
+   "Levi Melnick",
+   "Maral Mesmakhosroshahi",
+   "Andres Rodriguez",
+   "Michael Schulte",
+   "Rasoul Shafipour",
+   "Lei Shao",
+   "Michael Siu",
+   "Pradeep Dubey",
+   "Paulius Micikevicius",
+   "Maxim Naumov",
+   "Colin Verrilli",
+   "Ralph Wittig",
+   "Doug Burger",
+   "Eric Chung"
+  ],
+  "published": "2023-10-16",
+  "updated": "2023-10-19",
+  "version": "v3",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "suresh2021wfa": {
+  "kind": "arxiv",
+  "id": "1905.08701",
+  "title": "Approximating probabilistic models as weighted finite automata",
+  "authors": [
+   "Ananda Theertha Suresh",
+   "Brian Roark",
+   "Michael Riley",
+   "Vlad Schogol"
+  ],
+  "published": "2019-05-21",
+  "updated": "2021-01-29",
+  "version": "v3",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "wang2025router": {
+  "kind": "arxiv",
+  "id": "2510.08731",
+  "title": "When to Reason: Semantic Router for vLLM",
+  "authors": [
+   "Chen Wang",
+   "Xunzhuo Liu",
+   "Yuhan Liu",
+   "Yue Zhu",
+   "Xiangxi Mo",
+   "Junchen Jiang",
+   "Huamin Chen"
+  ],
+  "published": "2025-10-09",
+  "updated": "2025-10-09",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "5 pages, excluding references and appendix. To be appeared at Workshop on ML for Systems at NeurIPS 2025, December 6, 2025 https://mlforsystems.org/"
+ },
+ "zhang2025swift": {
+  "kind": "arxiv",
+  "id": "2501.19051",
+  "title": "Swift: Rethinking RDMA Control Plane for Elastic Computing",
+  "authors": [
+   "Junxue Zhang",
+   "Han Tian",
+   "Xinyang Huang",
+   "Wenxue Li",
+   "Kaiqiang Xu",
+   "Dian Shen",
+   "Yong Wang",
+   "Kai Chen"
+  ],
+  "published": "2025-01-31",
+  "updated": "2025-01-31",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "chen2026onepiece": {
+  "kind": "arxiv",
+  "id": "2601.20655",
+  "title": "OnePiece: A Large-Scale Distributed Inference System with RDMA for Complex AI-Generated Content (AIGC) Workflows",
+  "authors": [
+   "June Chen",
+   "Neal Xu",
+   "Gragas Huang",
+   "Bok Zhou",
+   "Stephen Liu"
+  ],
+  "published": "2026-01-28",
+  "updated": "2026-01-28",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "12 pages"
+ },
+ "micikevicius2018": {
+  "kind": "arxiv",
+  "id": "1710.03740",
+  "title": "Mixed Precision Training",
+  "authors": [
+   "Paulius Micikevicius",
+   "Sharan Narang",
+   "Jonah Alben",
+   "Gregory Diamos",
+   "Erich Elsen",
+   "David Garcia",
+   "Boris Ginsburg",
+   "Michael Houston",
+   "Oleksii Kuchaiev",
+   "Ganesh Venkatesh",
+   "Hao Wu"
+  ],
+  "published": "2017-10-10",
+  "updated": "2018-02-15",
+  "version": "v3",
+  "journal_ref": "",
+  "doi": "",
+  "comment": "Published as a conference paper at ICLR 2018"
+ },
+ "lmcache2025": {
+  "kind": "arxiv",
+  "id": "2510.09665",
+  "title": "LMCache: An Efficient KV Cache Layer for Enterprise-Scale LLM Inference",
+  "authors": [
+   "Yuhan Liu",
+   "Yihua Cheng",
+   "Jiayi Yao",
+   "Yuwei An",
+   "Xiaokun Chen",
+   "Shaoting Feng",
+   "Yuyang Huang",
+   "Samuel Shen",
+   "Rui Zhang",
+   "Kuntai Du",
+   "Junchen Jiang"
+  ],
+  "published": "2025-10-08",
+  "updated": "2025-12-05",
+  "version": "v2",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ },
+ "zhu2015dcqcn": {
+  "kind": "crossref",
+  "query": "doi:10.1145/2785956.2787484",
+  "title": "Congestion Control for Large-Scale RDMA Deployments",
+  "subtitle": "",
+  "authors": [
+   "Yibo Zhu",
+   "Haggai Eran",
+   "Daniel Firestone",
+   "Chuanxiong Guo",
+   "Marina Lipshteyn",
+   "Yehonatan Liron",
+   "Jitendra Padhye",
+   "Shachar Raindel",
+   "Mohamad Haj Yahia",
+   "Ming Zhang"
+  ],
+  "container": "Proceedings of the 2015 ACM Conference on Special Interest Group on Data Communication",
+  "year": 2015,
+  "volume": "",
+  "issue": "",
+  "page": "523-536",
+  "doi": "10.1145/2785956.2787484",
+  "type": "proceedings-article",
+  "publisher": "ACM",
+  "editors": [],
+  "alternates": []
+ },
+ "gangidi2024meta": {
+  "kind": "crossref",
+  "query": "doi:10.1145/3651890.3672233",
+  "title": "RDMA over Ethernet for Distributed Training at Meta Scale",
+  "subtitle": "",
+  "authors": [
+   "Adithya Gangidi",
+   "Rui Miao",
+   "Shengbao Zheng",
+   "Sai Jayesh Bondu",
+   "Guilherme Goes",
+   "Hany Morsy",
+   "Rohit Puri",
+   "Mohammad Riftadi",
+   "Ashmitha Jeevaraj Shetty",
+   "Jingyi Yang",
+   "Shuqiang Zhang",
+   "Mikel Jimenez Fernandez",
+   "Shashidhar Gandham",
+   "Hongyi Zeng"
+  ],
+  "container": "Proceedings of the ACM SIGCOMM 2024 Conference",
+  "year": 2024,
+  "volume": "",
+  "issue": "",
+  "page": "57-70",
+  "doi": "10.1145/3651890.3672233",
+  "type": "proceedings-article",
+  "publisher": "ACM",
+  "editors": [],
+  "alternates": []
+ },
+ "grun2015ofi": {
+  "kind": "crossref",
+  "query": "A Brief Introduction to the OpenFabrics Interfaces Grun 2015 Hot Interconnects",
+  "title": "A Brief Introduction to the OpenFabrics Interfaces - A New Network API for Maximizing High Performance Application Efficiency",
+  "subtitle": "",
+  "authors": [
+   "Paul Grun",
+   "Sean Hefty",
+   "Sayantan Sur",
+   "David Goodell",
+   "Robert D. Russell",
+   "Howard Pritchard",
+   "Jeffrey M. Squyres"
+  ],
+  "container": "2015 IEEE 23rd Annual Symposium on High-Performance Interconnects",
+  "year": 2015,
+  "volume": "",
+  "issue": "",
+  "page": "34-39",
+  "doi": "10.1109/hoti.2015.19",
+  "type": "proceedings-article",
+  "publisher": "IEEE",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "Reducing the complexity of ATM Host Interfaces",
+    "subtitle": "",
+    "authors": [
+     "H.H. Houg",
+     "D.L. Tennehouse"
+    ],
+    "container": "Symposium Record Hot Interconnects II",
+    "year": null,
+    "volume": "",
+    "issue": "",
+    "page": "21-27",
+    "doi": "10.1109/conect.1994.765334",
+    "type": "proceedings-article",
+    "publisher": "IEEE",
+    "editors": []
+   },
+   {
+    "title": "Gigabit networking: host interfaces (in particular) research program (in general)",
+    "subtitle": "",
+    "authors": [
+     "W.D. Sincoskie"
+    ],
+    "container": "Symposium Record Hot Interconnects II",
+    "year": null,
+    "volume": "",
+    "issue": "",
+    "page": "1-19",
+    "doi": "10.1109/conect.1994.765333",
+    "type": "proceedings-article",
+    "publisher": "IEEE",
+    "editors": []
+   }
+  ]
+ },
+ "shamis2015ucx": {
+  "kind": "crossref",
+  "query": "UCX: An Open Source Framework for HPC Network APIs and Beyond Shamis 2015",
+  "title": "UCX: An Open Source Framework for HPC Network APIs and Beyond",
+  "subtitle": "",
+  "authors": [
+   "Pavel Shamis",
+   "Manjunath Gorentla Venkata",
+   "M. Graham Lopez",
+   "Matthew B. Baker",
+   "Oscar Hernandez",
+   "Yossi Itigin",
+   "Mike Dubman",
+   "Gilad Shainer",
+   "Richard L. Graham",
+   "Liran Liss",
+   "Yiftah Shahar",
+   "Sreeram Potluri",
+   "Davide Rossetti",
+   "Donald Becker",
+   "Duncan Poole",
+   "Christopher Lamb",
+   "Sameer Kumar",
+   "Craig Stunkel",
+   "George Bosilca",
+   "Aurelien Bouteiller"
+  ],
+  "container": "2015 IEEE 23rd Annual Symposium on High-Performance Interconnects",
+  "year": 2015,
+  "volume": "",
+  "issue": "",
+  "page": "40-43",
+  "doi": "10.1109/hoti.2015.13",
+  "type": "proceedings-article",
+  "publisher": "IEEE",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "The NOESIS Open Source Framework for Network Data Mining",
+    "subtitle": "",
+    "authors": [
+     "V\u00edctor Mart\u00ednez",
+     "Fernando Berzal",
+     "Juan-Carlos Cubero"
+    ],
+    "container": "Proceedings of the 7th International Joint Conference on Knowledge Discovery, Knowledge Engineering and Knowledge Management",
+    "year": 2015,
+    "volume": "",
+    "issue": "",
+    "page": "316-321",
+    "doi": "10.5220/0005610103160321",
+    "type": "proceedings-article",
+    "publisher": "SCITEPRESS - Science and and Technology Publications",
+    "editors": []
+   },
+   {
+    "title": "Dynamic ontologies evaluation framework using quantum perceptron neural network",
+    "subtitle": "",
+    "authors": [
+     "Shahid Naseem"
+    ],
+    "container": "2015 International Conference on Open Source Systems & Technologies (ICOSST)",
+    "year": 2015,
+    "volume": "",
+    "issue": "",
+    "page": "151-157",
+    "doi": "10.1109/icosst.2015.7396419",
+    "type": "proceedings-article",
+    "publisher": "IEEE",
+    "editors": []
+   }
+  ]
+ },
+ "papadopoulou2017ucx": {
+  "kind": "crossref",
+  "query": "A Performance Study of UCX over InfiniBand Papadopoulou 2017",
+  "title": "A Performance Study of UCX over InfiniBand",
+  "subtitle": "",
+  "authors": [
+   "Nikela Papadopoulou",
+   "Lena Oden",
+   "Pavan Balaji"
+  ],
+  "container": "2017 17th IEEE/ACM International Symposium on Cluster, Cloud and Grid Computing (CCGRID)",
+  "year": 2017,
+  "volume": "",
+  "issue": "",
+  "page": "345-354",
+  "doi": "10.1109/ccgrid.2017.149",
+  "type": "proceedings-article",
+  "publisher": "IEEE",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "IP over InfiniBand (IPoIB) Architecture",
+    "subtitle": "",
+    "authors": [
+     "V. Kashyap"
+    ],
+    "container": "",
+    "year": 2006,
+    "volume": "",
+    "issue": "",
+    "page": "",
+    "doi": "10.17487/rfc4392",
+    "type": "report",
+    "publisher": "RFC Editor",
+    "editors": []
+   },
+   {
+    "title": "IP over InfiniBand: Connected Mode",
+    "subtitle": "",
+    "authors": [
+     "V. Kashyap"
+    ],
+    "container": "",
+    "year": 2006,
+    "volume": "",
+    "issue": "",
+    "page": "",
+    "doi": "10.17487/rfc4755",
+    "type": "report",
+    "publisher": "RFC Editor",
+    "editors": []
+   }
+  ]
+ },
+ "tillet2019triton": {
+  "kind": "crossref",
+  "query": "Triton: an intermediate language and compiler for tiled neural network computations Tillet 2019",
+  "title": "Triton: an intermediate language and compiler for tiled neural network computations",
+  "subtitle": "",
+  "authors": [
+   "Philippe Tillet",
+   "H. T. Kung",
+   "David Cox"
+  ],
+  "container": "Proceedings of the 3rd ACM SIGPLAN International Workshop on Machine Learning and Programming Languages",
+  "year": 2019,
+  "volume": "",
+  "issue": "",
+  "page": "10-19",
+  "doi": "10.1145/3315508.3329973",
+  "type": "proceedings-article",
+  "publisher": "ACM",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "Estimation of Time Voting in Elections Using Artificial Neural Network",
+    "subtitle": "",
+    "authors": [
+     "Nur Hidayati",
+     "Muhammad Fachrie",
+     "Adityo Permana Wibowo"
+    ],
+    "container": "Compiler",
+    "year": 2019,
+    "volume": "8",
+    "issue": "2",
+    "page": "",
+    "doi": "10.28989/compiler.v8i2.499",
+    "type": "journal-article",
+    "publisher": "Institut Teknologi Dirgantara Adisutjipto (IDTA)",
+    "editors": []
+   },
+   {
+    "title": "Using Intrinsically-Typed Definitional Interpreters to Verify Compiler Optimizations in a Monadic Intermediate Language",
+    "subtitle": "",
+    "authors": [
+     "",
+     "Dani Barrack"
+    ],
+    "container": "",
+    "year": null,
+    "volume": "",
+    "issue": "",
+    "page": "",
+    "doi": "10.15760/etd.7794",
+    "type": "dissertation",
+    "publisher": "Portland State University Library",
+    "editors": []
+   }
+  ]
+ },
+ "bellman1956": {
+  "kind": "crossref",
+  "query": "On the bang-bang control problem Bellman Glicksberg Gross 1956 Quarterly of Applied Mathematics",
+  "title": "On the \u201cbang-bang\u201d control problem",
+  "subtitle": "",
+  "authors": [
+   "R. Bellman",
+   "I. Glicksberg",
+   "O. Gross"
+  ],
+  "container": "Quarterly of Applied Mathematics",
+  "year": 1956,
+  "volume": "14",
+  "issue": "1",
+  "page": "11-18",
+  "doi": "10.1090/qam/78516",
+  "type": "journal-article",
+  "publisher": "American Mathematical Society (AMS)",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "On Bene?' bang-bang control problem",
+    "subtitle": "",
+    "authors": [
+     "N. Christopeit",
+     "K. Helmes"
+    ],
+    "container": "Applied Mathematics & Optimization",
+    "year": 1982,
+    "volume": "9",
+    "issue": "1",
+    "page": "163-176",
+    "doi": "10.1007/bf01460123",
+    "type": "journal-article",
+    "publisher": "Springer Science and Business Media LLC",
+    "editors": []
+   },
+   {
+    "title": "A Posteriori Error Estimates for a Bang\u2013Bang Optimal Control Problem",
+    "subtitle": "",
+    "authors": [
+     "Francisco Fuica"
+    ],
+    "container": "Applied Mathematics & Optimization",
+    "year": 2025,
+    "volume": "91",
+    "issue": "3",
+    "page": "",
+    "doi": "10.1007/s00245-025-10276-0",
+    "type": "journal-article",
+    "publisher": "Springer Science and Business Media LLC",
+    "editors": []
+   }
+  ]
+ },
+ "shannon1948": {
+  "kind": "crossref",
+  "query": "doi:10.1002/j.1538-7305.1948.tb01338.x",
+  "title": "A Mathematical Theory of Communication",
+  "subtitle": "",
+  "authors": [
+   "C. E. Shannon"
+  ],
+  "container": "Bell System Technical Journal",
+  "year": 1948,
+  "volume": "27",
+  "issue": "3",
+  "page": "379-423",
+  "doi": "10.1002/j.1538-7305.1948.tb01338.x",
+  "type": "journal-article",
+  "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+  "editors": [],
+  "alternates": []
+ },
+ "vonneumann1945": {
+  "kind": "crossref",
+  "query": "doi:10.1109/85.238389",
+  "title": "First draft of a report on the EDVAC",
+  "subtitle": "",
+  "authors": [
+   "J. von Neumann"
+  ],
+  "container": "IEEE Annals of the History of Computing",
+  "year": 1993,
+  "volume": "15",
+  "issue": "4",
+  "page": "27-75",
+  "doi": "10.1109/85.238389",
+  "type": "journal-article",
+  "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+  "editors": [],
+  "alternates": []
+ },
+ "goldstine1946eniac": {
+  "kind": "crossref",
+  "query": "The Electronic Numerical Integrator and Computer (ENIAC) Goldstine 1946 Mathematical Tables and Other Aids to Computation",
+  "title": "The Electronic Numerical Integrator and Computer (ENIAC)",
+  "subtitle": "",
+  "authors": [
+   "H. H. Goldstine",
+   "Adele Goldstine"
+  ],
+  "container": "Mathematical Tables and Other Aids to Computation",
+  "year": 1946,
+  "volume": "2",
+  "issue": "15",
+  "page": "97",
+  "doi": "10.2307/2002620",
+  "type": "journal-article",
+  "publisher": "JSTOR",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "The electronic numerical integrator and computer (ENIAC)",
+    "subtitle": "",
+    "authors": [
+     "H. H. Goldstine",
+     "Adele Goldstine"
+    ],
+    "container": "Mathematics of Computation",
+    "year": 1946,
+    "volume": "2",
+    "issue": "15",
+    "page": "97-110",
+    "doi": "10.1090/s0025-5718-1946-0018977-0",
+    "type": "journal-article",
+    "publisher": "American Mathematical Society (AMS)",
+    "editors": []
+   },
+   {
+    "title": "The Electronic Numerical Integrator and Computer (ENIAC)",
+    "subtitle": "",
+    "authors": [
+     "H. H. Goldstine",
+     "Adele Goldstine"
+    ],
+    "container": "The Origins of Digital Computers",
+    "year": 1982,
+    "volume": "",
+    "issue": "",
+    "page": "359-373",
+    "doi": "10.1007/978-3-642-61812-3_29",
+    "type": "book-chapter",
+    "publisher": "Springer Berlin Heidelberg",
+    "editors": []
+   }
+  ]
+ },
+ "bardeen1948": {
+  "kind": "crossref",
+  "query": "doi:10.1103/PhysRev.74.230",
+  "title": "The Transistor, A Semi-Conductor Triode",
+  "subtitle": "",
+  "authors": [
+   "J. Bardeen",
+   "W. H. Brattain"
+  ],
+  "container": "Physical Review",
+  "year": 1948,
+  "volume": "74",
+  "issue": "2",
+  "page": "230-231",
+  "doi": "10.1103/physrev.74.230",
+  "type": "journal-article",
+  "publisher": "American Physical Society (APS)",
+  "editors": [],
+  "alternates": []
+ },
+ "kilby1976": {
+  "kind": "crossref",
+  "query": "doi:10.1109/T-ED.1976.18467",
+  "title": "Invention of the integrated circuit",
+  "subtitle": "",
+  "authors": [
+   "J.S. Kilby"
+  ],
+  "container": "IEEE Transactions on Electron Devices",
+  "year": 1976,
+  "volume": "23",
+  "issue": "7",
+  "page": "648-654",
+  "doi": "10.1109/t-ed.1976.18467",
+  "type": "journal-article",
+  "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+  "editors": [],
+  "alternates": []
+ },
+ "faggin1996": {
+  "kind": "crossref",
+  "query": "doi:10.1109/40.546561",
+  "title": "The history of the 4004",
+  "subtitle": "",
+  "authors": [
+   "F. Faggin",
+   "M.E. Hoff",
+   "S. Mazor",
+   "M. Shima"
+  ],
+  "container": "IEEE Micro",
+  "year": 1996,
+  "volume": "16",
+  "issue": "6",
+  "page": "10-20",
+  "doi": "10.1109/40.546561",
+  "type": "journal-article",
+  "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+  "editors": [],
+  "alternates": []
+ },
+ "moore1965": {
+  "kind": "crossref",
+  "query": "Cramming more components onto integrated circuits Moore",
+  "title": "Cramming More Components Onto Integrated Circuits",
+  "subtitle": "",
+  "authors": [
+   "G.E. Moore"
+  ],
+  "container": "Proceedings of the IEEE",
+  "year": 1998,
+  "volume": "86",
+  "issue": "1",
+  "page": "82-85",
+  "doi": "10.1109/jproc.1998.658762",
+  "type": "journal-article",
+  "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "Cramming More Components onto Integrated Circuits (1965)",
+    "subtitle": "",
+    "authors": [
+     "Gordon Moore"
+    ],
+    "container": "Ideas That Created the Future",
+    "year": 2021,
+    "volume": "",
+    "issue": "",
+    "page": "261-266",
+    "doi": "10.7551/mitpress/12274.003.0027",
+    "type": "book-chapter",
+    "publisher": "The MIT Press",
+    "editors": []
+   },
+   {
+    "title": "Cramming more components onto integrated circuits, Reprinted from Electronics, volume 38, number 8, April 19, 1965, pp.114 ff.",
+    "subtitle": "",
+    "authors": [
+     "Gordon E. Moore"
+    ],
+    "container": "IEEE Solid-State Circuits Society Newsletter",
+    "year": 2006,
+    "volume": "11",
+    "issue": "3",
+    "page": "33-35",
+    "doi": "10.1109/n-ssc.2006.4785860",
+    "type": "journal-article",
+    "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+    "editors": []
+   }
+  ]
+ },
+ "russell1978cray": {
+  "kind": "crossref",
+  "query": "doi:10.1145/359327.359336",
+  "title": "The CRAY-1 computer system",
+  "subtitle": "",
+  "authors": [
+   "Richard M. Russell"
+  ],
+  "container": "Communications of the ACM",
+  "year": 1978,
+  "volume": "21",
+  "issue": "1",
+  "page": "63-72",
+  "doi": "10.1145/359327.359336",
+  "type": "journal-article",
+  "publisher": "Association for Computing Machinery (ACM)",
+  "editors": [],
+  "alternates": []
+ },
+ "sterling1995beowulf": {
+  "kind": "crossref-query",
+  "raw": [
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2025,
+       7,
+       12
+      ]
+     ],
+     "date-time": "2025-07-12T22:47:47Z",
+     "timestamp": 1752360467001
+    },
+    "reference-count": 14,
+    "publisher": "IEEE Comput. Soc. Press",
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "DOI": "10.1109/hpdc.1995.518691",
+    "type": "proceedings-article",
+    "created": {
+     "date-parts": [
+      [
+       2002,
+       11,
+       19
+      ]
+     ],
+     "date-time": "2002-11-19T22:29:21Z",
+     "timestamp": 1037744961000
+    },
+    "page": "23-30",
+    "source": "Crossref",
+    "is-referenced-by-count": 24,
+    "title": [
+     "Communication overhead for space science applications on the Beowulf parallel workstation"
+    ],
+    "prefix": "10.1109",
+    "author": [
+     {
+      "given": "T.",
+      "family": "Sterling",
+      "sequence": "first",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "D.",
+      "family": "Savarese",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "D.J.",
+      "family": "Becker",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "B.",
+      "family": "Fryxell",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "K.",
+      "family": "Olson",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     }
+    ],
+    "member": "263",
+    "reference": [
+     {
+      "key": "ref10",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/HPCA.1995.386544"
+     },
+     {
+      "key": "ref11",
+      "article-title": "An Empirical Evaluation of the Convex SPP-1000 Hierarchical Shared Memory System",
+      "author": "sterling",
+      "year": "1995",
+      "journal-title": "Proceedings of the International Conference on Parallel Architectures and Compilation Techniques"
+     },
+     {
+      "key": "ref12",
+      "article-title": "BEOWULF: A Parallel Workstation for Scientific Computation",
+      "author": "sterling",
+      "year": "1995",
+      "journal-title": "Proceedings of the International Conference on Parallel Processing"
+     },
+     {
+      "key": "ref13",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1002/cpe.4330020404"
+     },
+     {
+      "journal-title": "Connection Machine CM-5 Technical Summary",
+      "year": "1992",
+      "key": "ref14"
+     },
+     {
+      "key": "ref4",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1016/0021-9991(84)90143-8"
+     },
+     {
+      "journal-title": "Cray T3D System Architecture Overview",
+      "year": "0",
+      "key": "ref3"
+     },
+     {
+      "journal-title": "DX4 Processor Data Book",
+      "year": "1993",
+      "key": "ref6"
+     },
+     {
+      "journal-title": "Hydrodynamics and Nuclear Burning",
+      "year": "0",
+      "author": "fryxell",
+      "key": "ref5"
+     },
+     {
+      "journal-title": "Accessible on the Internet at World Wide Web",
+      "year": "0",
+      "key": "ref8"
+     },
+     {
+      "journal-title": "Paragon User s Guide",
+      "year": "1993",
+      "key": "ref7"
+     },
+     {
+      "key": "ref2",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/ISCA.1994.288154"
+     },
+     {
+      "key": "ref1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1038/324446a0"
+     },
+     {
+      "key": "ref9",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1086/192074"
+     }
+    ],
+    "event": {
+     "name": "Fourth IEEE International Symposium on High Performance Distributed Computing",
+     "acronym": "HPDC-95",
+     "location": "Washington, DC, USA"
+    },
+    "container-title": [
+     "Proceedings of the Fourth IEEE International Symposium on High Performance Distributed Computing"
+    ],
+    "link": [
+     {
+      "URL": "http://xplorestaging.ieee.org/ielx3/3962/11444/00518691.pdf?arnumber=518691",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+     }
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2017,
+       3,
+       10
+      ]
+     ],
+     "date-time": "2017-03-10T00:31:14Z",
+     "timestamp": 1489105874000
+    },
+    "score": 52.991203,
+    "resource": {
+     "primary": {
+      "URL": "http://ieeexplore.ieee.org/document/518691/"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       null
+      ]
+     ]
+    },
+    "references-count": 14,
+    "URL": "https://doi.org/10.1109/hpdc.1995.518691"
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2024,
+       10,
+       30
+      ]
+     ],
+     "date-time": "2024-10-30T06:25:56Z",
+     "timestamp": 1730269556167,
+     "version": "3.28.0"
+    },
+    "reference-count": 7,
+    "publisher": "IEEE Comput. Soc. Press",
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "DOI": "10.1109/ipps.1996.508045",
+    "type": "proceedings-article",
+    "created": {
+     "date-parts": [
+      [
+       2002,
+       12,
+       23
+      ]
+     ],
+     "date-time": "2002-12-23T23:08:12Z",
+     "timestamp": 1040684892000
+    },
+    "page": "104-108",
+    "source": "Crossref",
+    "is-referenced-by-count": 6,
+    "title": [
+     "Achieving a balanced low-cost architecture for mass storage management through multiple fast Ethernet channels on the Beowulf parallel workstation"
+    ],
+    "prefix": "10.1109",
+    "author": [
+     {
+      "given": "T.",
+      "family": "Sterling",
+      "sequence": "first",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "D.J.",
+      "family": "Becker",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "M.R.",
+      "family": "Berry",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "D.",
+      "family": "Savarese",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "C.",
+      "family": "Reschke",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     }
+    ],
+    "member": "263",
+    "reference": [
+     {
+      "journal-title": "Linux Documentation Project Accessible on the Internet at World Wide Web URL",
+      "year": "0",
+      "key": "ref4"
+     },
+     {
+      "key": "ref3",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/SUPERC.1994.344328"
+     },
+     {
+      "key": "ref6",
+      "first-page": "11",
+      "article-title": "BEOWULF: A Parallel Workstation for Scientific Computation",
+      "volume": "1",
+      "author": "sterling",
+      "year": "1995",
+      "journal-title": "Proceedings of the 1995 International Conference on Parallel Processing (ICPP)"
+     },
+     {
+      "journal-title": "PCI System Architecture",
+      "year": "1992",
+      "author": "shanely",
+      "key": "ref5"
+     },
+     {
+      "key": "ref7",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/HPDC.1995.518691"
+     },
+     {
+      "key": "ref2",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1145/52324.52347"
+     },
+     {
+      "key": "ref1",
+      "first-page": "16",
+      "article-title": "Parallel I/O Workload Characteristics Using Vesta",
+      "author": "baylor",
+      "year": "1995",
+      "journal-title": "Proceedings of the Workshop on Input/Output in Parallel and Distributed Systems"
+     }
+    ],
+    "event": {
+     "name": "International Conference on Parallel Processing",
+     "acronym": "IPPS-96",
+     "location": "Honolulu, HI, USA"
+    },
+    "container-title": [
+     "Proceedings of International Conference on Parallel Processing"
+    ],
+    "link": [
+     {
+      "URL": "http://xplorestaging.ieee.org/ielx5/3743/10941/00508045.pdf?arnumber=508045",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+     }
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2017,
+       3,
+       10
+      ]
+     ],
+     "date-time": "2017-03-10T03:43:32Z",
+     "timestamp": 1489117412000
+    },
+    "score": 52.619987,
+    "resource": {
+     "primary": {
+      "URL": "http://ieeexplore.ieee.org/document/508045/"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       null
+      ]
+     ]
+    },
+    "references-count": 7,
+    "URL": "https://doi.org/10.1109/ipps.1996.508045"
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       10,
+       25
+      ]
+     ],
+     "date-time": "2026-10-25T16:58:03Z",
+     "timestamp": 1792947483484,
+     "version": "4.5.0"
+    },
+    "reference-count": 11,
+    "publisher": "IEEE",
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       1996
+      ]
+     ]
+    },
+    "DOI": "10.1109/hpdc.1996.546233",
+    "type": "proceedings-article",
+    "created": {
+     "date-parts": [
+      [
+       2005,
+       8,
+       24
+      ]
+     ],
+     "date-time": "2005-08-24T14:47:54Z",
+     "timestamp": 1124894874000
+    },
+    "page": "626-635",
+    "source": "Crossref",
+    "is-referenced-by-count": 22,
+    "title": [
+     "A design study of alternative network topologies for the Beowulf parallel workstation"
+    ],
+    "prefix": "10.1109",
+    "author": [
+     {
+      "given": "C.",
+      "family": "Reschke",
+      "sequence": "first",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     },
+     {
+      "given": "T.",
+      "family": "Sterling",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     },
+     {
+      "given": "D.",
+      "family": "Ridge",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     },
+     {
+      "given": "D.",
+      "family": "Savarese",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     },
+     {
+      "given": "D.",
+      "family": "Becker",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     },
+     {
+      "given": "P.",
+      "family": "Merkey",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     }
+    ],
+    "member": "263",
+    "reference": [
+     {
+      "key": "ref4",
+      "year": "0",
+      "journal-title": "Cray T3D System Architecture Overview"
+     },
+     {
+      "key": "ref3",
+      "author": "castagnera",
+      "year": "1994",
+      "journal-title": "Clustered Workstations and their Potential Role as High Speed Compute Processors"
+     },
+     {
+      "key": "ref10",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/IPPS.1996.508045"
+     },
+     {
+      "key": "ref6",
+      "year": "0",
+      "journal-title": "The Linux Documentation Project"
+     },
+     {
+      "key": "ref11",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1002/cpe.4330020404"
+     },
+     {
+      "key": "ref5",
+      "year": "1993",
+      "journal-title": "Paragon User s Guide"
+     },
+     {
+      "key": "ref8",
+      "first-page": "11",
+      "article-title": "BEOWULF: A Parallel Workstation for Scientific Computation",
+      "volume": "1",
+      "author": "sterling",
+      "year": "1995",
+      "journal-title": "Proceedings of the 1995 International Conference on Parallel Processing (ICPP)"
+     },
+     {
+      "key": "ref7",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/MPIDC.1996.534093"
+     },
+     {
+      "key": "ref2",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1145/52324.52347"
+     },
+     {
+      "key": "ref9",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/HPDC.1995.518691"
+     },
+     {
+      "key": "ref1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/ISCA.1994.288154"
+     }
+    ],
+    "event": {
+     "name": "Proceedings of 5th IEEE International Symposium on High Performance Distributed Computing",
+     "location": "Syracuse, NY, USA",
+     "start": {
+      "date-parts": [
+       [
+        1996,
+        8,
+        6
+       ]
+      ]
+     },
+     "end": {
+      "date-parts": [
+       [
+        1996,
+        8,
+        9
+       ]
+      ]
+     }
+    },
+    "container-title": [
+     "Proceedings of 5th IEEE International Symposium on High Performance Distributed Computing HPDC-96"
+    ],
+    "link": [
+     {
+      "URL": "http://xplorestaging.ieee.org/ielx3/3985/11475/00546233.pdf?arnumber=546233",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+     }
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2017,
+       3,
+       10
+      ]
+     ],
+     "date-time": "2017-03-10T03:23:59Z",
+     "timestamp": 1489116239000
+    },
+    "score": 49.905785,
+    "resource": {
+     "primary": {
+      "URL": "http://ieeexplore.ieee.org/document/546233/"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       1996
+      ]
+     ]
+    },
+    "references-count": 11,
+    "URL": "https://doi.org/10.1109/hpdc.1996.546233",
+    "published": {
+     "date-parts": [
+      [
+       1996
+      ]
+     ]
+    }
+   }
+  ]
+ },
+ "mpi1994": {
+  "kind": "crossref-query",
+  "raw": [
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       13
+      ]
+     ],
+     "date-time": "2026-11-13T16:24:32Z",
+     "timestamp": 1794587072354,
+     "version": "4.9.1"
+    },
+    "reference-count": 0,
+    "publisher": "The MIT Press",
+    "isbn-type": [
+     {
+      "value": "9780262256285",
+      "type": "electronic"
+     }
+    ],
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       1999
+      ]
+     ]
+    },
+    "DOI": "10.7551/mitpress/7056.003.0008",
+    "type": "book-chapter",
+    "created": {
+     "date-parts": [
+      [
+       2019,
+       1,
+       11
+      ]
+     ],
+     "date-time": "2019-01-11T08:47:24Z",
+     "timestamp": 1547196444000
+    },
+    "source": "Crossref",
+    "is-referenced-by-count": 2,
+    "title": [
+     "5 - Advanced Message Passing in MPI"
+    ],
+    "prefix": "10.7551",
+    "member": "281",
+    "container-title": [
+     "Using MPI"
+    ],
+    "language": "en",
+    "deposited": {
+     "date-parts": [
+      [
+       2019,
+       1,
+       11
+      ]
+     ],
+     "date-time": "2019-01-11T08:47:27Z",
+     "timestamp": 1547196447000
+    },
+    "score": 82.851944,
+    "resource": {
+     "primary": {
+      "URL": "https://direct.mit.edu/books/book/3812/chapter/125094/5-advanced-message-passing-in-mpi"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       1999
+      ]
+     ]
+    },
+    "ISBN": [
+     "9780262256285"
+    ],
+    "references-count": 0,
+    "URL": "https://doi.org/10.7551/mitpress/7056.003.0008",
+    "relation": {
+     "is-part-of": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.7551/mitpress/7056.001.0001",
+       "asserted-by": "object"
+      }
+     ]
+    },
+    "published": {
+     "date-parts": [
+      [
+       1999
+      ]
+     ]
+    }
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       13
+      ]
+     ],
+     "date-time": "2026-11-13T16:24:09Z",
+     "timestamp": 1794587049958,
+     "version": "4.9.1"
+    },
+    "reference-count": 0,
+    "publisher": "The MIT Press",
+    "isbn-type": [
+     {
+      "value": "9780262256285",
+      "type": "electronic"
+     }
+    ],
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       1999
+      ]
+     ]
+    },
+    "DOI": "10.7551/mitpress/7056.003.0013",
+    "type": "book-chapter",
+    "created": {
+     "date-parts": [
+      [
+       2019,
+       1,
+       11
+      ]
+     ],
+     "date-time": "2019-01-11T08:47:24Z",
+     "timestamp": 1547196444000
+    },
+    "source": "Crossref",
+    "is-referenced-by-count": 0,
+    "title": [
+     "10 - Beyond Message Passing"
+    ],
+    "prefix": "10.7551",
+    "member": "281",
+    "container-title": [
+     "Using MPI"
+    ],
+    "language": "en",
+    "deposited": {
+     "date-parts": [
+      [
+       2019,
+       1,
+       11
+      ]
+     ],
+     "date-time": "2019-01-11T08:47:30Z",
+     "timestamp": 1547196450000
+    },
+    "score": 81.258316,
+    "resource": {
+     "primary": {
+      "URL": "https://direct.mit.edu/books/book/3812/chapter/125101/10-beyond-message-passing"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       1999
+      ]
+     ]
+    },
+    "ISBN": [
+     "9780262256285"
+    ],
+    "references-count": 0,
+    "URL": "https://doi.org/10.7551/mitpress/7056.003.0013",
+    "relation": {
+     "is-part-of": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.7551/mitpress/7056.001.0001",
+       "asserted-by": "object"
+      }
+     ]
+    },
+    "published": {
+     "date-parts": [
+      [
+       1999
+      ]
+     ]
+    }
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       12
+      ]
+     ],
+     "date-time": "2026-11-12T11:02:26Z",
+     "timestamp": 1794481346547,
+     "version": "4.9.1"
+    },
+    "reference-count": 0,
+    "publisher": "OLDENBOURG WISSENSCHAFTSVERLAG",
+    "isbn-type": [
+     {
+      "value": "9783486580686",
+      "type": "print"
+     }
+    ],
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       2007,
+       12,
+       31
+      ]
+     ]
+    },
+    "DOI": "10.1524/9783486841008.107",
+    "type": "book-chapter",
+    "created": {
+     "date-parts": [
+      [
+       2014,
+       7,
+       22
+      ]
+     ],
+     "date-time": "2014-07-22T16:05:18Z",
+     "timestamp": 1406045118000
+    },
+    "page": "107-150",
+    "source": "Crossref",
+    "is-referenced-by-count": 0,
+    "title": [
+     "5 Weitergehende Details zum Message-Passing mit MPI"
+    ],
+    "prefix": "10.1524",
+    "member": "374",
+    "container-title": [
+     "MPI - Eine Einf\u00fchrung"
+    ],
+    "link": [
+     {
+      "URL": "https://www.degruyter.com/view/book/9783486841008/10.1524/9783486841008.107.xml",
+      "content-type": "text/html",
+      "content-version": "vor",
+      "intended-application": "text-mining"
+     },
+     {
+      "URL": "https://www.degruyter.com/document/doi/10.1524/9783486841008.107/xml",
+      "content-type": "application/xml",
+      "content-version": "vor",
+      "intended-application": "text-mining"
+     },
+     {
+      "URL": "https://www.degruyter.com/document/doi/10.1524/9783486841008.107/pdf",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+     }
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2021,
+       12,
+       24
+      ]
+     ],
+     "date-time": "2021-12-24T02:52:37Z",
+     "timestamp": 1640314357000
+    },
+    "score": 78.191734,
+    "resource": {
+     "primary": {
+      "URL": "https://www.degruyter.com/document/doi/10.1524/9783486841008.107/html"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       2007,
+       12,
+       31
+      ]
+     ]
+    },
+    "ISBN": [
+     "9783486580686"
+    ],
+    "references-count": 0,
+    "alternative-id": [
+     "10.1524/9783486841008.107",
+     "10.1524/9783486841008"
+    ],
+    "URL": "https://doi.org/10.1524/9783486841008.107",
+    "relation": {
+     "is-part-of": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1524/9783486841008",
+       "asserted-by": "object"
+      }
+     ]
+    },
+    "published": {
+     "date-parts": [
+      [
+       2007,
+       12,
+       31
+      ]
+     ]
+    }
+   }
+  ]
+ },
+ "lindholm2001": {
+  "kind": "crossref",
+  "query": "doi:10.1145/383259.383274",
+  "title": "A user-programmable vertex engine",
+  "subtitle": "",
+  "authors": [
+   "Erik Lindholm",
+   "Mark J. Kilgard",
+   "Henry Moreton"
+  ],
+  "container": "Proceedings of the 28th annual conference on Computer graphics and interactive techniques",
+  "year": 2001,
+  "volume": "",
+  "issue": "",
+  "page": "149-158",
+  "doi": "10.1145/383259.383274",
+  "type": "proceedings-article",
+  "publisher": "ACM",
+  "editors": [],
+  "alternates": []
+ },
+ "owens2007": {
+  "kind": "crossref",
+  "query": "doi:10.1111/j.1467-8659.2007.01012.x",
+  "title": "A Survey of General\u2010Purpose Computation on Graphics Hardware",
+  "subtitle": "",
+  "authors": [
+   "John D. Owens",
+   "David Luebke",
+   "Naga Govindaraju",
+   "Mark Harris",
+   "Jens Kr\u00fcger",
+   "Aaron E. Lefohn",
+   "Timothy J. Purcell"
+  ],
+  "container": "Computer Graphics Forum",
+  "year": 2007,
+  "volume": "26",
+  "issue": "1",
+  "page": "80-113",
+  "doi": "10.1111/j.1467-8659.2007.01012.x",
+  "type": "journal-article",
+  "publisher": "Wiley",
+  "editors": [],
+  "alternates": []
+ },
+ "nickolls2008": {
+  "kind": "crossref",
+  "query": "doi:10.1145/1365490.1365500",
+  "title": "Scalable Parallel Programming with CUDA",
+  "subtitle": "Is CUDA the parallel programming model that application developers have been waiting for?",
+  "authors": [
+   "John Nickolls",
+   "Ian Buck",
+   "Michael Garland",
+   "Kevin Skadron"
+  ],
+  "container": "Queue",
+  "year": 2008,
+  "volume": "6",
+  "issue": "2",
+  "page": "40-53",
+  "doi": "10.1145/1365490.1365500",
+  "type": "journal-article",
+  "publisher": "Association for Computing Machinery (ACM)",
+  "editors": [],
+  "alternates": []
+ },
+ "krizhevsky2012": {
+  "kind": "crossref",
+  "query": "doi:10.1145/3065386",
+  "title": "ImageNet classification with deep convolutional neural networks",
+  "subtitle": "",
+  "authors": [
+   "Alex Krizhevsky",
+   "Ilya Sutskever",
+   "Geoffrey E. Hinton"
+  ],
+  "container": "Communications of the ACM",
+  "year": 2017,
+  "volume": "60",
+  "issue": "6",
+  "page": "84-90",
+  "doi": "10.1145/3065386",
+  "type": "journal-article",
+  "publisher": "Association for Computing Machinery (ACM)",
+  "editors": [],
+  "alternates": []
+ },
+ "amdahl1967": {
+  "kind": "crossref",
+  "query": "doi:10.1145/1465482.1465560",
+  "title": "Validity of the single processor approach to achieving large scale computing capabilities",
+  "subtitle": "",
+  "authors": [
+   "Gene M. Amdahl"
+  ],
+  "container": "Proceedings of the April 18-20, 1967, spring joint computer conference on - AFIPS '67 (Spring)",
+  "year": 1967,
+  "volume": "",
+  "issue": "",
+  "page": "483",
+  "doi": "10.1145/1465482.1465560",
+  "type": "proceedings-article",
+  "publisher": "ACM Press",
+  "editors": [],
+  "alternates": []
+ },
+ "cobham1954": {
+  "kind": "crossref",
+  "query": "doi:10.1287/opre.2.1.70",
+  "title": "Priority Assignment in Waiting Line Problems",
+  "subtitle": "",
+  "authors": [
+   "Alan Cobham"
+  ],
+  "container": "Journal of the Operations Research Society of America",
+  "year": 1954,
+  "volume": "2",
+  "issue": "1",
+  "page": "70-76",
+  "doi": "10.1287/opre.2.1.70",
+  "type": "journal-article",
+  "publisher": "Institute for Operations Research and the Management Sciences (INFORMS)",
+  "editors": [],
+  "alternates": []
+ },
+ "johnson1984": {
+  "kind": "crossref",
+  "query": "doi:10.1090/conm/026/737400",
+  "title": "Extensions of Lipschitz mappings into a Hilbert space",
+  "subtitle": "",
+  "authors": [
+   "William B. Johnson",
+   "Joram Lindenstrauss"
+  ],
+  "container": "Contemporary Mathematics",
+  "year": 1984,
+  "volume": "",
+  "issue": "",
+  "page": "189-206",
+  "doi": "10.1090/conm/026/737400",
+  "type": "other",
+  "publisher": "American Mathematical Society",
+  "editors": [],
+  "alternates": []
+ },
+ "lloyd1982": {
+  "kind": "crossref",
+  "query": "doi:10.1109/TIT.1982.1056489",
+  "title": "Least squares quantization in PCM",
+  "subtitle": "",
+  "authors": [
+   "S. Lloyd"
+  ],
+  "container": "IEEE Transactions on Information Theory",
+  "year": 1982,
+  "volume": "28",
+  "issue": "2",
+  "page": "129-137",
+  "doi": "10.1109/tit.1982.1056489",
+  "type": "journal-article",
+  "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+  "editors": [],
+  "alternates": []
+ },
+ "max1960": {
+  "kind": "crossref",
+  "query": "doi:10.1109/TIT.1960.1057548",
+  "title": "Quantizing for minimum distortion",
+  "subtitle": "",
+  "authors": [
+   "J. Max"
+  ],
+  "container": "IEEE Transactions on Information Theory",
+  "year": 1960,
+  "volume": "6",
+  "issue": "1",
+  "page": "7-12",
+  "doi": "10.1109/tit.1960.1057548",
+  "type": "journal-article",
+  "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+  "editors": [],
+  "alternates": []
+ },
+ "hollerith1894": {
+  "kind": "crossref",
+  "query": "The Electrical Tabulating Machine Hollerith 1894 Journal of the Royal Statistical Society",
+  "title": "The Electrical Tabulating Machine",
+  "subtitle": "",
+  "authors": [
+   "Herman Hollerith"
+  ],
+  "container": "Journal of the Royal Statistical Society",
+  "year": 1894,
+  "volume": "57",
+  "issue": "4",
+  "page": "678",
+  "doi": "10.2307/2979610",
+  "type": "journal-article",
+  "publisher": "JSTOR",
+  "editors": [],
+  "alternates": [
+   {
+    "title": "The Application of the Hollerith Tabulating Machine to Brown's Tables of the Moon. (Plates 11\u201313.)",
+    "subtitle": "",
+    "authors": [
+     "L. J. Comrie"
+    ],
+    "container": "Monthly Notices of the Royal Astronomical Society",
+    "year": 1932,
+    "volume": "92",
+    "issue": "7",
+    "page": "694-701",
+    "doi": "10.1093/mnras/92.7.694",
+    "type": "journal-article",
+    "publisher": "Oxford University Press (OUP)",
+    "editors": []
+   },
+   {
+    "title": "The Relations Between Morals, Economics, and Statistics. Inaugural Address of the Right Hon. Lord Farrer, President of the Royal Statistical Society, Session 1894-95, Delivered 20th November, 1894",
+    "subtitle": "",
+    "authors": [
+     "Lord Farrer"
+    ],
+    "container": "Journal of the Royal Statistical Society",
+    "year": 1894,
+    "volume": "57",
+    "issue": "4",
+    "page": "595",
+    "doi": "10.2307/2979605",
+    "type": "journal-article",
+    "publisher": "JSTOR",
+    "editors": []
+   }
+  ]
+ },
+ "pontryagin1962": {
+  "kind": "crossref-doi",
+  "raw": {
+   "indexed": {
+    "date-parts": [
+     [
+      2026,
+      11,
+      23
+     ]
+    ],
+    "date-time": "2026-11-23T19:43:07Z",
+    "timestamp": 1795462987447,
+    "version": "4.11.0"
+   },
+   "edition-number": "1",
+   "reference-count": 0,
+   "publisher": "Routledge",
+   "isbn-type": [
+    {
+     "value": "9780203749319",
+     "type": "electronic"
+    }
+   ],
+   "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+   },
+   "short-container-title": [],
+   "DOI": "10.1201/9780203749319",
+   "type": "book",
+   "created": {
+    "date-parts": [
+     [
+      2018,
+      5,
+      4
+     ]
+    ],
+    "date-time": "2018-05-04T06:30:43Z",
+    "timestamp": 1525415443000
+   },
+   "source": "Crossref",
+   "is-referenced-by-count": 630,
+   "title": [
+    "Mathematical Theory of Optimal Processes"
+   ],
+   "prefix": "10.1201",
+   "author": [
+    {
+     "given": "L.S.",
+     "family": "Pontryagin",
+     "sequence": "first",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "author"
+      }
+     ]
+    }
+   ],
+   "member": "301",
+   "published-online": {
+    "date-parts": [
+     [
+      2018,
+      5,
+      3
+     ]
+    ]
+   },
+   "container-title": [],
+   "original-title": [],
+   "language": "en",
+   "deposited": {
+    "date-parts": [
+     [
+      2018,
+      7,
+      23
+     ]
+    ],
+    "date-time": "2018-07-23T15:43:22Z",
+    "timestamp": 1532360602000
+   },
+   "score": 1,
+   "resource": {
+    "primary": {
+     "URL": "https://www.taylorfrancis.com/books/9780203749319"
+    }
+   },
+   "subtitle": [],
+   "short-title": [],
+   "issued": {
+    "date-parts": [
+     [
+      2018,
+      5,
+      3
+     ]
+    ]
+   },
+   "ISBN": [
+    "9780203749319"
+   ],
+   "references-count": 0,
+   "URL": "https://doi.org/10.1201/9780203749319",
+   "relation": {},
+   "subject": [],
+   "published": {
+    "date-parts": [
+     [
+      2018,
+      5,
+      3
+     ]
+    ]
+   }
+  }
+ },
+ "liberzon2012": {
+  "kind": "crossref-query",
+  "raw": [
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       14
+      ]
+     ],
+     "date-time": "2026-11-14T08:58:28Z",
+     "timestamp": 1794646708741,
+     "version": "4.9.1"
+    },
+    "reference-count": 0,
+    "publisher": "Princeton University Press",
+    "isbn-type": [
+     {
+      "value": "9781400842643",
+      "type": "electronic"
+     }
+    ],
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       2012,
+       1,
+       1
+      ]
+     ]
+    },
+    "DOI": "10.1515/9781400842643",
+    "type": "monograph",
+    "created": {
+     "date-parts": [
+      [
+       2019,
+       10,
+       15
+      ]
+     ],
+     "date-time": "2019-10-15T05:02:09Z",
+     "timestamp": 1571115729000
+    },
+    "source": "Crossref",
+    "is-referenced-by-count": 365,
+    "title": [
+     "Calculus of Variations and Optimal Control Theory"
+    ],
+    "prefix": "10.1515",
+    "author": [
+     {
+      "given": "Daniel",
+      "family": "Liberzon",
+      "sequence": "first",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     }
+    ],
+    "member": "374",
+    "link": [
+     {
+      "URL": "https://princetonup.degruyter.com/view/title/563087",
+      "content-type": "text/html",
+      "content-version": "vor",
+      "intended-application": "text-mining"
+     },
+     {
+      "URL": "https://www.degruyter.com/document/doi/10.1515/9781400842643/pdf",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+     }
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2021,
+       4,
+       20
+      ]
+     ],
+     "date-time": "2021-04-20T06:05:36Z",
+     "timestamp": 1618898736000
+    },
+    "score": 70.08608,
+    "resource": {
+     "primary": {
+      "URL": "https://www.degruyter.com/document/doi/10.1515/9781400842643/html"
+     }
+    },
+    "subtitle": [
+     "A Concise Introduction"
+    ],
+    "issued": {
+     "date-parts": [
+      [
+       2012,
+       1,
+       1
+      ]
+     ]
+    },
+    "ISBN": [
+     "9781400842643"
+    ],
+    "references-count": 0,
+    "URL": "https://doi.org/10.1515/9781400842643",
+    "relation": {
+     "is-identical-to": [
+      {
+       "id-type": "doi",
+       "id": "10.2307/j.ctvcm4g0s",
+       "asserted-by": "subject"
+      }
+     ],
+     "has-part": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-008",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-010",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-fm",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-003",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-009",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-007",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-004",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-toc",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-005",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-002",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-006",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1515/9781400842643-001",
+       "asserted-by": "subject"
+      }
+     ]
+    },
+    "published": {
+     "date-parts": [
+      [
+       2012,
+       1,
+       1
+      ]
+     ]
+    }
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       14
+      ]
+     ],
+     "date-time": "2026-11-14T02:00:53Z",
+     "timestamp": 1794621653492,
+     "version": "4.9.1"
+    },
+    "reference-count": 0,
+    "publisher": "Princeton University Press",
+    "isbn-type": [
+     {
+      "value": "9781400842643",
+      "type": "electronic"
+     },
+     {
+      "value": "1400842646",
+      "type": "electronic"
+     },
+     {
+      "value": "9780691151878",
+      "type": "print"
+     }
+    ],
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       2011,
+       12,
+       19
+      ]
+     ]
+    },
+    "DOI": "10.2307/j.ctvcm4g0s",
+    "type": "monograph",
+    "created": {
+     "date-parts": [
+      [
+       2019,
+       2,
+       25
+      ]
+     ],
+     "date-time": "2019-02-25T12:22:37Z",
+     "timestamp": 1551097357000
+    },
+    "source": "Crossref",
+    "is-referenced-by-count": 342,
+    "title": [
+     "Calculus of Variations and Optimal Control Theory"
+    ],
+    "prefix": "10.2307",
+    "author": [
+     {
+      "given": "Daniel",
+      "family": "Liberzon",
+      "sequence": "first",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     }
+    ],
+    "member": "1121",
+    "deposited": {
+     "date-parts": [
+      [
+       2019,
+       2,
+       25
+      ]
+     ],
+     "date-time": "2019-02-25T16:40:35Z",
+     "timestamp": 1551112835000
+    },
+    "score": 67.92562,
+    "resource": {
+     "primary": {
+      "URL": "http://www.jstor.org/stable/10.2307/j.ctvcm4g0s"
+     }
+    },
+    "subtitle": [
+     "A Concise Introduction"
+    ],
+    "issued": {
+     "date-parts": [
+      [
+       2011,
+       12,
+       19
+      ]
+     ]
+    },
+    "ISBN": [
+     "9781400842643",
+     "1400842646",
+     "9780691151878"
+    ],
+    "references-count": 0,
+    "URL": "https://doi.org/10.2307/j.ctvcm4g0s",
+    "relation": {
+     "has-part": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.10",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.9",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.2",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.3",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.1",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.7",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.6",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.4",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.11",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.5",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.8",
+       "asserted-by": "subject"
+      },
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s.12",
+       "asserted-by": "subject"
+      }
+     ],
+     "is-identical-to": [
+      {
+       "id-type": "doi",
+       "id": "10.1515/9781400842643",
+       "asserted-by": "object"
+      }
+     ]
+    },
+    "published": {
+     "date-parts": [
+      [
+       2011,
+       12,
+       19
+      ]
+     ]
+    }
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       13
+      ]
+     ],
+     "date-time": "2026-11-13T17:29:42Z",
+     "timestamp": 1794590982009,
+     "version": "4.9.1"
+    },
+    "reference-count": 0,
+    "publisher": "Princeton University Press",
+    "isbn-type": [
+     {
+      "value": "9781400842643",
+      "type": "electronic"
+     },
+     {
+      "value": "1400842646",
+      "type": "electronic"
+     },
+     {
+      "value": "9780691151878",
+      "type": "print"
+     }
+    ],
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       2011,
+       12,
+       19
+      ]
+     ]
+    },
+    "DOI": "10.2307/j.ctvcm4g0s.3",
+    "type": "book-chapter",
+    "created": {
+     "date-parts": [
+      [
+       2019,
+       2,
+       25
+      ]
+     ],
+     "date-time": "2019-02-25T12:22:37Z",
+     "timestamp": 1551097357000
+    },
+    "page": "xiii-xviii",
+    "source": "Crossref",
+    "is-referenced-by-count": 0,
+    "title": [
+     "Preface"
+    ],
+    "prefix": "10.2307",
+    "author": [
+     {
+      "given": "Daniel",
+      "family": "Liberzon",
+      "sequence": "first",
+      "affiliation": [],
+      "role": [
+       {
+        "vocabulary": "crossref",
+        "role": "author"
+       }
+      ]
+     }
+    ],
+    "member": "1121",
+    "container-title": [
+     "Calculus of Variations and Optimal Control Theory"
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2019,
+       2,
+       25
+      ]
+     ],
+     "date-time": "2019-02-25T16:40:37Z",
+     "timestamp": 1551112837000
+    },
+    "score": 64.64946,
+    "resource": {
+     "primary": {
+      "URL": "http://www.jstor.org/stable/10.2307/j.ctvcm4g0s.3"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       2011,
+       12,
+       19
+      ]
+     ]
+    },
+    "ISBN": [
+     "9781400842643",
+     "1400842646",
+     "9780691151878"
+    ],
+    "references-count": 0,
+    "URL": "https://doi.org/10.2307/j.ctvcm4g0s.3",
+    "relation": {
+     "is-identical-to": [
+      {
+       "id-type": "doi",
+       "id": "10.1515/9781400842643-001",
+       "asserted-by": "object"
+      }
+     ],
+     "is-part-of": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.2307/j.ctvcm4g0s",
+       "asserted-by": "object"
+      }
+     ]
+    },
+    "published": {
+     "date-parts": [
+      [
+       2011,
+       12,
+       19
+      ]
+     ]
+    }
+   }
+  ]
+ },
+ "goldstine1972": {
+  "kind": "crossref-doi",
+  "raw": {
+   "indexed": {
+    "date-parts": [
+     [
+      2026,
+      11,
+      12
+     ]
+    ],
+    "date-time": "2026-11-12T21:58:29Z",
+    "timestamp": 1794520709381,
+    "version": "4.9.1"
+   },
+   "reference-count": 0,
+   "publisher": "Princeton University Press",
+   "isbn-type": [
+    {
+     "value": "9781400820139",
+     "type": "electronic"
+    }
+   ],
+   "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+   },
+   "short-container-title": [],
+   "published-print": {
+    "date-parts": [
+     [
+      2008,
+      12,
+      31
+     ]
+    ]
+   },
+   "DOI": "10.1515/9781400820139",
+   "type": "edited-book",
+   "created": {
+    "date-parts": [
+     [
+      2014,
+      12,
+      8
+     ]
+    ],
+    "date-time": "2014-12-08T10:45:08Z",
+    "timestamp": 1418035508000
+   },
+   "source": "Crossref",
+   "is-referenced-by-count": 15,
+   "title": [
+    "The Computer from Pascal to von Neumann"
+   ],
+   "prefix": "10.1515",
+   "author": [
+    {
+     "given": "Herman H.",
+     "family": "Goldstine",
+     "sequence": "first",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "author"
+      }
+     ]
+    }
+   ],
+   "member": "374",
+   "published-online": {
+    "date-parts": [
+     [
+      2008,
+      12,
+      31
+     ]
+    ]
+   },
+   "container-title": [],
+   "original-title": [],
+   "link": [
+    {
+     "URL": "http://www.degruyter.com/view/books/9781400820139/9781400820139/9781400820139.xml",
+     "content-type": "text/html",
+     "content-version": "vor",
+     "intended-application": "text-mining"
+    },
+    {
+     "URL": "https://www.degruyter.com/document/doi/10.1515/9781400820139/pdf",
+     "content-type": "unspecified",
+     "content-version": "vor",
+     "intended-application": "similarity-checking"
+    }
+   ],
+   "deposited": {
+    "date-parts": [
+     [
+      2025,
+      6,
+      3
+     ]
+    ],
+    "date-time": "2025-06-03T11:55:30Z",
+    "timestamp": 1748951730000
+   },
+   "score": 1,
+   "resource": {
+    "primary": {
+     "URL": "https://www.degruyterbrill.com/document/doi/10.1515/9781400820139/html"
+    }
+   },
+   "subtitle": [
+    ""
+   ],
+   "short-title": [],
+   "issued": {
+    "date-parts": [
+     [
+      2008,
+      12,
+      31
+     ]
+    ]
+   },
+   "ISBN": [
+    "9781400820139"
+   ],
+   "references-count": 0,
+   "alternative-id": [
+    "10.1515/9781400820139"
+   ],
+   "URL": "https://doi.org/10.1515/9781400820139",
+   "relation": {
+    "has-part": [
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.321",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.39",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.72",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.306",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.27",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.349",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.52",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.363",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.211",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.167",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.fm",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.157",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.204",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.239",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.286",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.225",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.333",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.325",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.65",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.31",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.148",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.127",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.140",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.84",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.115",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.342",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.10",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.106",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.184",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.271",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.ix",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.60",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.300",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.xi",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.252",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.vii",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.toc",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.3",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1515/9781400820139.123",
+      "asserted-by": "subject"
+     }
+    ]
+   },
+   "subject": [],
+   "published": {
+    "date-parts": [
+     [
+      2008,
+      12,
+      31
+     ]
+    ]
+   }
+  }
+ },
+ "droste2009wfa": {
+  "kind": "crossref-doi",
+  "raw": {
+   "indexed": {
+    "date-parts": [
+     [
+      2026,
+      11,
+      20
+     ]
+    ],
+    "date-time": "2026-11-20T01:11:33Z",
+    "timestamp": 1795137093352,
+    "version": "4.10.3"
+   },
+   "publisher-location": "Berlin, Heidelberg",
+   "reference-count": 0,
+   "publisher": "Springer Berlin Heidelberg",
+   "isbn-type": [
+    {
+     "value": "9783642014918",
+     "type": "print"
+    },
+    {
+     "value": "9783642014925",
+     "type": "electronic"
+    }
+   ],
+   "license": [
+    {
+     "start": {
+      "date-parts": [
+       [
+        2009,
+        1,
+        1
+       ]
+      ],
+      "date-time": "2009-01-01T00:00:00Z",
+      "timestamp": 1230768000000
+     },
+     "content-version": "tdm",
+     "delay-in-days": 0,
+     "URL": "https://www.springernature.com/gp/researchers/text-and-data-mining"
+    },
+    {
+     "start": {
+      "date-parts": [
+       [
+        2009,
+        1,
+        1
+       ]
+      ],
+      "date-time": "2009-01-01T00:00:00Z",
+      "timestamp": 1230768000000
+     },
+     "content-version": "vor",
+     "delay-in-days": 0,
+     "URL": "https://www.springernature.com/gp/researchers/text-and-data-mining"
+    }
+   ],
+   "content-domain": {
+    "domain": [],
+    "crossmark-restriction": false
+   },
+   "short-container-title": [],
+   "published-print": {
+    "date-parts": [
+     [
+      2009
+     ]
+    ]
+   },
+   "DOI": "10.1007/978-3-642-01492-5",
+   "type": "book",
+   "created": {
+    "date-parts": [
+     [
+      2009,
+      10,
+      23
+     ]
+    ],
+    "date-time": "2009-10-23T13:22:28Z",
+    "timestamp": 1256304148000
+   },
+   "source": "Crossref",
+   "is-referenced-by-count": 276,
+   "title": [
+    "Handbook of Weighted Automata"
+   ],
+   "prefix": "10.1007",
+   "member": "297",
+   "container-title": [
+    "Monographs in Theoretical Computer Science. An EATCS Series"
+   ],
+   "original-title": [],
+   "language": "en",
+   "link": [
+    {
+     "URL": "https://link.springer.com/content/pdf/10.1007/978-3-642-01492-5.pdf",
+     "content-type": "application/pdf",
+     "content-version": "vor",
+     "intended-application": "text-mining"
+    },
+    {
+     "URL": "https://link.springer.com/content/pdf/10.1007/978-3-642-01492-5",
+     "content-type": "unspecified",
+     "content-version": "vor",
+     "intended-application": "similarity-checking"
+    }
+   ],
+   "deposited": {
+    "date-parts": [
+     [
+      2024,
+      3,
+      20
+     ]
+    ],
+    "date-time": "2024-03-20T06:28:41Z",
+    "timestamp": 1710916121000
+   },
+   "score": 1,
+   "resource": {
+    "primary": {
+     "URL": "https://link.springer.com/10.1007/978-3-642-01492-5"
+    }
+   },
+   "subtitle": [],
+   "editor": [
+    {
+     "ORCID": "https://orcid.org/0000-0001-9128-8844",
+     "authenticated-orcid": false,
+     "given": "Manfred",
+     "family": "Droste",
+     "sequence": "first",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "editor"
+      }
+     ]
+    },
+    {
+     "given": "Werner",
+     "family": "Kuich",
+     "sequence": "additional",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "editor"
+      }
+     ]
+    },
+    {
+     "given": "Heiko",
+     "family": "Vogler",
+     "sequence": "additional",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "editor"
+      }
+     ]
+    }
+   ],
+   "short-title": [],
+   "issued": {
+    "date-parts": [
+     [
+      2009
+     ]
+    ]
+   },
+   "ISBN": [
+    "9783642014918",
+    "9783642014925"
+   ],
+   "references-count": 0,
+   "URL": "https://doi.org/10.1007/978-3-642-01492-5",
+   "relation": {
+    "has-part": [
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_3",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_8",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_7",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_13",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_14",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_4",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_6",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_10",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_2",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_5",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_9",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_12",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_11",
+      "asserted-by": "subject"
+     },
+     {
+      "id-type": "doi",
+      "id": "https://doi.org/10.1007/978-3-642-01492-5_1",
+      "asserted-by": "subject"
+     }
+    ]
+   },
+   "ISSN": [
+    "1431-2654"
+   ],
+   "issn-type": [
+    {
+     "value": "1431-2654",
+     "type": "print"
+    }
+   ],
+   "subject": [],
+   "published": {
+    "date-parts": [
+     [
+      2009
+     ]
+    ]
+   }
+  }
+ },
+ "mittal2018irn": {
+  "kind": "crossref",
+  "query": "doi:10.1145/3230543.3230557",
+  "title": "Revisiting network support for RDMA",
+  "subtitle": "",
+  "authors": [
+   "Radhika Mittal",
+   "Alexander Shpiner",
+   "Aurojit Panda",
+   "Eitan Zahavi",
+   "Arvind Krishnamurthy",
+   "Sylvia Ratnasamy",
+   "Scott Shenker"
+  ],
+  "container": "Proceedings of the 2018 Conference of the ACM Special Interest Group on Data Communication",
+  "year": 2018,
+  "volume": "",
+  "issue": "",
+  "page": "313-326",
+  "doi": "10.1145/3230543.3230557",
+  "type": "proceedings-article",
+  "publisher": "ACM",
+  "editors": [],
+  "alternates": []
+ },
+ "nixl": {
+  "kind": "web",
+  "url": "https://github.com/ai-dynamo/nixl",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "dynamo": {
+  "kind": "web",
+  "url": "https://github.com/ai-dynamo/dynamo",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "lmcache_blog": {
+  "kind": "web",
+  "url": "https://blog.lmcache.ai/2025-04-11-lmcache-vllmv1-nixl/",
+  "http": "200",
+  "title": "Shaping NIXL-based PD Disaggregation in vLLM V1 \u2013 LMCache Blog",
+  "og_title": "Shaping NIXL-based PD Disaggregation in vLLM V1",
+  "description": "Highlights: Today, LMCache shares two key designs in LLM infrastructure for disaggregated prefill and more: LMCache x vLLM V1: The first PD disaggregation for vLLM V1. Link to PR LMCache x NIXL: Suppo"
+ },
+ "llmd": {
+  "kind": "web",
+  "url": "https://llm-d.ai/docs/architecture",
+  "http": "200",
+  "title": "Architecture | llm-d",
+  "og_title": "Architecture | llm-d",
+  "description": "High-level guide to llm-d architecture. The llm-d architecture is organized into seven core functional areas:"
+ },
+ "vllm_disagg": {
+  "kind": "web",
+  "url": "https://docs.vllm.ai/en/latest/features/disagg_prefill/",
+  "http": "200",
+  "title": "Disaggregated Prefilling (experimental) - vLLM",
+  "og_title": "",
+  "description": ""
+ },
+ "vllm_gptoss": {
+  "kind": "web",
+  "url": "https://blog.vllm.ai/2025/08/05/gpt-oss.html",
+  "http": "200",
+  "title": "vLLM Now Supports gpt-oss | vLLM Blog",
+  "og_title": "vLLM Now Supports gpt-oss",
+  "description": "How vLLM supports gpt-oss 20B and 120B on NVIDIA Blackwell, Hopper, and AMD GPUs, with MXFP4 MoE kernels, efficient attention, hybrid KV cache allocation, and b"
+ },
+ "vllm_issue22279": {
+  "kind": "web",
+  "url": "https://github.com/vllm-project/vllm/issues/22279",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "patel2025tensorcore": {
+  "kind": "web",
+  "url": "https://newsletter.semianalysis.com/p/nvidia-tensor-core-evolution-from-volta-to-blackwell",
+  "http": "200",
+  "title": "NVIDIA Tensor Core Evolution: From Volta To Blackwell",
+  "og_title": "NVIDIA Tensor Core Evolution: From Volta To Blackwell",
+  "description": "Amdahl\u2019s Law, Strong Scaling, Asynchronous Execution, Blackwell, Hopper, Ampere, Turing, Volta, TMA"
+ },
+ "flashinfer": {
+  "kind": "web",
+  "url": "https://github.com/flashinfer-ai/flashinfer",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "rdmacore": {
+  "kind": "web",
+  "url": "https://github.com/linux-rdma/rdma-core",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "perftest": {
+  "kind": "web",
+  "url": "https://github.com/linux-rdma/perftest",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "barak_rdmamojo": {
+  "kind": "web",
+  "url": "https://www.rdmamojo.com/2013/06/08/tips-and-tricks-to-optimize-your-rdma-code/",
+  "http": "500",
+  "title": "Tips and tricks to optimize your RDMA code \u00ab RDMAmojo",
+  "og_title": "",
+  "description": ""
+ },
+ "chen2024efa": {
+  "kind": "web",
+  "url": "https://le.qun.ch/en/blog/2024/12/25/libfabric-efa-1-rdma/",
+  "http": "200",
+  "title": "Harnessing 3200 Gbps Network (1): RDMA and EFA",
+  "og_title": "Harnessing 3200 Gbps Network (1): RDMA and EFA",
+  "description": "Before we start writing code to operate the 3200 Gbps network, let\u2019s understand the hardware, software, and system design philosophy required to drive this high-performance network. RDMA Most netwo..."
+ },
+ "libfabric_man": {
+  "kind": "web",
+  "url": "https://ofiwg.github.io/libfabric/",
+  "http": "200",
+  "title": "Libfabric",
+  "og_title": "",
+  "description": ""
+ },
+ "ucx_faq": {
+  "kind": "web",
+  "url": "https://github.com/openucx/ucx/blob/master/docs/source/faq.md",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "mistral2025leak": {
+  "kind": "web",
+  "url": "https://mistral.ai/news/debugging-memory-leak-in-vllm",
+  "http": "200",
+  "title": "Heaps do lie: debugging a memory leak in vLLM. | Mistral AI",
+  "og_title": "Heaps do lie: debugging a memory leak in vLLM. | Mistral AI",
+  "description": "The most powerful AI platform for enterprises. Customize, fine-tune, and deploy AI assistants, autonomous agents, and multimodal AI with open models."
+ },
+ "zambre2018novice": {
+  "kind": "web",
+  "url": "https://www.rohitzambre.com/blog/2018/2/9/for-the-rdma-novice-libfabric-libibverbs-infiniband-ofed-mofed",
+  "http": "200",
+  "title": "For the RDMA novice: libfabric, libibverbs, InfiniBand, OFED, MOFED? \u2014 Rohit Zambre",
+  "og_title": "For the RDMA novice: libfabric, libibverbs, InfiniBand, OFED, MOFED? \u2014 Rohit Zambre",
+  "description": "Prior to entering the high-performance, user-level networking space in April 2017, I wasn't even aware of the existence of the field of high-performance interconnects. I barely knew the sockets interf"
+ },
+ "gpudirect": {
+  "kind": "web",
+  "url": "https://docs.nvidia.com/cuda/gpudirect-rdma/index.html",
+  "http": "200",
+  "title": "1. Overview \u2014 GPUDirect RDMA 13.5 documentation",
+  "og_title": "",
+  "description": ""
+ },
+ "alvarez2026flashblade": {
+  "kind": "web",
+  "url": "https://blog.purestorage.com/purely-technical/up-to-10x-faster-kv-cache-restore-turboquant-meets-flashblade/",
+  "http": "200",
+  "title": "Up to 10X Faster KV Cache Restore: TurboQuant Meets FlashBlade | Everpure Blog",
+  "og_title": "Up to 10X Faster KV Cache Restore: TurboQuant Meets FlashBlade",
+  "description": "TurboQuant on FlashBlade can deliver up to 10X faster KV cache restores with 5X compression, enabling scalable LLM inference for long-context AI workloads."
+ },
+ "hsu2026kv": {
+  "kind": "web",
+  "url": "https://community.ibm.com/community/user/blogs/anthony-hsu/2026/02/06/rethinking-llm-inference-economics",
+  "http": "200",
+  "title": "Rethinking LLM Inference Economics with llm-d, LMCache, and IBM Storage Scale",
+  "og_title": "Rethinking LLM Inference Economics with llm-d, LMCache, and IBM Storage Scale",
+  "description": ""
+ },
+ "hsu2026fourtier": {
+  "kind": "web",
+  "url": "https://community.ibm.com/community/user/blogs/vincent-hsu/2026/01/05/accelerating-nvidia-dynamo-with-ibm-storage-scale",
+  "http": "200",
+  "title": "Accelerating NVIDIA Dynamo with IBM Storage Scale and NVIDIA BlueField\u20114\u2011Powered Inference Context Memory Storage Platform",
+  "og_title": "Accelerating NVIDIA Dynamo with IBM Storage Scale and NVIDIA BlueField\u20114\u2011Powered Inference Context Memory Storage Platform",
+  "description": "IBM is working with NVIDIA to combine advanced storage and networking technologies to unlock scalable, high-performance LLM inference. By integrating IBM Storage Scale\u2019s global namespace and locality-"
+ },
+ "ibm2024storage": {
+  "kind": "web",
+  "url": "https://research.ibm.com/blog/accelerating-ai-inference-with-ibm-storage-scale",
+  "http": "200",
+  "title": "Accelerating AI inference with IBM Storage Scale - IBM Research",
+  "og_title": "Accelerating AI inference with IBM Storage Scale",
+  "description": "IBM Storage Scale is ideal for providing persistent space for KV data, storing it for a virtually unlimited number of active users and agent sessions."
+ },
+ "ray_rdt": {
+  "kind": "web",
+  "url": "https://docs.ray.io/en/master/ray-core/direct-transport.html",
+  "http": "404",
+  "title": "Page not found \u2014 Ray 3.0.0.dev0",
+  "og_title": "Page not found",
+  "description": "The requested page could not be found."
+ },
+ "rocm_ernic": {
+  "kind": "web",
+  "url": "https://github.com/ROCm/rocm-ernic",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "uccl": {
+  "kind": "web",
+  "url": "https://github.com/uccl-project/uccl",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "libmesh": {
+  "kind": "web",
+  "url": "https://github.com/autoscriptlabs/libmesh-rdma",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "ttpoe": {
+  "kind": "web",
+  "url": "https://github.com/teslamotors/ttpoe",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "scuffedrdma": {
+  "kind": "web",
+  "url": "https://github.com/ndg8743/ScuffedRDMA",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "x99rebar": {
+  "kind": "web",
+  "url": "https://github.com/ndg8743/x99-udp4-rebar",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "rebaruefi": {
+  "kind": "web",
+  "url": "https://github.com/xCuri0/ReBarUEFI",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "level1techs_thread": {
+  "kind": "web",
+  "url": "https://forum.level1techs.com/t/v100-rdma-x99-issues/244397",
+  "http": "200",
+  "title": "V100+RDMA+X99 issues - Hardware Hub - Level1Techs Forums",
+  "og_title": "V100+RDMA+X99 issues",
+  "description": "So i have an E5 2697-v4, 128gb DDR4, 2x V100 from ebay with the conversion cards. \nIt wont boot, does with just an rx560 tho. Psu is fine and cards are as well as i tested it in my other system. \nEven"
+ },
+ "newpaltz_library": {
+  "kind": "web",
+  "url": "https://library.newpaltz.edu/?p=174",
+  "http": "200",
+  "title": "Guidelines for Submission of Master\u2019s Theses to the Library \u2013 SUNY New Paltz Library",
+  "og_title": "",
+  "description": "Guidelines for Submission of Master s Theses to the Library M A   amp M S  Students M F A  Students FOR GRADUATING M A   amp M S  STUDENTS These guidelines"
+ },
+ "top500": {
+  "kind": "web",
+  "url": "https://www.top500.org/lists/top500/2022/06/",
+  "http": "200",
+  "title": "June 2022 | TOP500",
+  "og_title": "",
+  "description": ""
+ },
+ "cuda_gpus": {
+  "kind": "web",
+  "url": "https://developer.nvidia.com/cuda-gpus",
+  "http": "200",
+  "title": "CUDA GPU Compute Capability | NVIDIA Developer",
+  "og_title": "NVIDIA CUDA GPU Compute Capability",
+  "description": "Compute capability defines the hardware features and supported instructions for each NVIDIA GPU architecture."
+ },
+ "granite33": {
+  "kind": "web",
+  "url": "https://huggingface.co/ibm-granite/granite-3.3-2b-instruct",
+  "http": "200",
+  "title": "ibm-granite/granite-3.3-2b-instruct \u00b7 Hugging Face",
+  "og_title": "ibm-granite/granite-3.3-2b-instruct \u00b7 Hugging Face",
+  "description": "Text Generation model with 3B parameters. Download, explore files and run it on Hugging Face."
+ },
+ "gptoss": {
+  "kind": "web",
+  "url": "https://huggingface.co/openai/gpt-oss-120b",
+  "http": "200",
+  "title": "openai/gpt-oss-120b \u00b7 Hugging Face",
+  "og_title": "openai/gpt-oss-120b \u00b7 Hugging Face",
+  "description": "Text Generation model with 117B parameters. Download, explore files and run it on Hugging Face."
+ },
+ "vllm_repo": {
+  "kind": "web",
+  "url": "https://github.com/vllm-project/vllm",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "ucx_repo": {
+  "kind": "web",
+  "url": "https://github.com/openucx/ucx",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "ollama": {
+  "kind": "web",
+  "url": "https://github.com/ollama/ollama",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "mstflint": {
+  "kind": "web",
+  "url": "https://github.com/Mellanox/mstflint",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "nccl": {
+  "kind": "web",
+  "url": "https://github.com/NVIDIA/nccl",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "pve_kernel": {
+  "kind": "web",
+  "url": "https://git.proxmox.com/?p=pve-kernel.git",
+  "http": "200",
+  "title": "git.proxmox.com Git - pve-kernel.git/summary",
+  "og_title": "",
+  "description": ""
+ },
+ "bareford2022": {
+  "kind": "web",
+  "url": "https://github.com/ARCHER2-HPC/performance_ofi-ucx",
+  "http": "403",
+  "title": "",
+  "og_title": "",
+  "description": ""
+ },
+ "schmuck2002gpfs": {
+  "kind": "crossref-query",
+  "raw": [
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       11
+      ]
+     ],
+     "date-time": "2026-11-11T10:45:53Z",
+     "timestamp": 1794393953481,
+     "version": "4.9.0"
+    },
+    "publisher-location": "Berlin/Heidelberg",
+    "reference-count": 0,
+    "publisher": "Springer-Verlag",
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "DOI": "10.1007/springerreference_65766",
+    "type": "reference-entry",
+    "created": {
+     "date-parts": [
+      [
+       2011,
+       8,
+       29
+      ]
+     ],
+     "date-time": "2011-08-29T12:57:47Z",
+     "timestamp": 1314622667000
+    },
+    "source": "Crossref",
+    "is-referenced-by-count": 0,
+    "title": [
+     "Shared-Disk File System"
+    ],
+    "prefix": "10.1007",
+    "member": "297",
+    "container-title": [
+     "SpringerReference"
+    ],
+    "language": "en",
+    "deposited": {
+     "date-parts": [
+      [
+       2011,
+       8,
+       29
+      ]
+     ],
+     "date-time": "2011-08-29T13:07:29Z",
+     "timestamp": 1314623249000
+    },
+    "score": 41.30834,
+    "resource": {
+     "primary": {
+      "URL": "http://www.springerreference.com/index/doi/10.1007/SpringerReference_65766"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       null
+      ]
+     ]
+    },
+    "references-count": 0,
+    "URL": "https://doi.org/10.1007/springerreference_65766",
+    "relation": {
+     "is-part-of": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1007/springerreference",
+       "asserted-by": "object"
+      }
+     ]
+    }
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2025,
+       4,
+       20
+      ]
+     ],
+     "date-time": "2025-04-20T04:43:02Z",
+     "timestamp": 1745124182181
+    },
+    "reference-count": 7,
+    "publisher": "IEEE Comput. Soc. Press",
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "DOI": "10.1109/cmpcon.1996.501773",
+    "type": "proceedings-article",
+    "created": {
+     "date-parts": [
+      [
+       2002,
+       12,
+       23
+      ]
+     ],
+     "date-time": "2002-12-23T22:28:04Z",
+     "timestamp": 1040682484000
+    },
+    "page": "226-231",
+    "source": "Crossref",
+    "is-referenced-by-count": 21,
+    "title": [
+     "The Tiger Shark file system"
+    ],
+    "prefix": "10.1109",
+    "author": [
+     {
+      "given": "R.L.",
+      "family": "Haskin",
+      "sequence": "first",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     },
+     {
+      "given": "F.B.",
+      "family": "Schmuck",
+      "sequence": "additional",
+      "affiliation": [],
+      "role": [
+       {
+        "role": "author",
+        "vocabulary": "crossref"
+       }
+      ]
+     }
+    ],
+    "member": "263",
+    "reference": [
+     {
+      "key": "ref4",
+      "first-page": "20",
+      "article-title": "Hong Kong Telecom, IBM Map Video Effort",
+      "author": "patterson",
+      "year": "1994",
+      "journal-title": "Electronic Engineering Times"
+     },
+     {
+      "journal-title": "Argonne National Lab Video Server",
+      "year": "0",
+      "key": "ref3"
+     },
+     {
+      "journal-title": "Basic Plan for the Multimedia Experiments at the Tokyo Metropolitan Waterfront Subcenter Multimedia Experiments",
+      "year": "0",
+      "key": "ref6"
+     },
+     {
+      "key": "ref5",
+      "article-title": "Bell Atlantic Demonstrates Video on Demand over Existing Telephone Network",
+      "author": "plumb",
+      "year": "1993",
+      "journal-title": "Bell Atlantic"
+     },
+     {
+      "journal-title": "World News Today",
+      "article-title": "IBM Announce Agreement for Video on Demand Server",
+      "year": "1993",
+      "key": "ref7"
+     },
+     {
+      "key": "ref2",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/CMPCON.1995.512388"
+     },
+     {
+      "key": "ref1",
+      "doi-asserted-by": "publisher",
+      "DOI": "10.1109/CMPCON.1993.289624"
+     }
+    ],
+    "event": {
+     "name": "COMPCON '96. Technologies for the Information Superhighway Digest of Papers",
+     "acronym": "CMPCON-96",
+     "location": "Santa Clara, CA, USA"
+    },
+    "container-title": [
+     "COMPCON '96. Technologies for the Information Superhighway Digest of Papers"
+    ],
+    "link": [
+     {
+      "URL": "http://xplorestaging.ieee.org/ielx3/3582/10694/00501773.pdf?arnumber=501773",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+     }
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2017,
+       3,
+       10
+      ]
+     ],
+     "date-time": "2017-03-10T07:31:30Z",
+     "timestamp": 1489131090000
+    },
+    "score": 41.124115,
+    "resource": {
+     "primary": {
+      "URL": "http://ieeexplore.ieee.org/document/501773/"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       null
+      ]
+     ]
+    },
+    "references-count": 7,
+    "URL": "https://doi.org/10.1109/cmpcon.1996.501773"
+   },
+   {
+    "indexed": {
+     "date-parts": [
+      [
+       2026,
+       11,
+       11
+      ]
+     ],
+     "date-time": "2026-11-11T03:04:26Z",
+     "timestamp": 1794366266312,
+     "version": "4.9.0"
+    },
+    "publisher-location": "Boston, MA",
+    "reference-count": 0,
+    "publisher": "Springer US",
+    "isbn-type": [
+     {
+      "value": "9780387355443",
+      "type": "print"
+     },
+     {
+      "value": "9780387399409",
+      "type": "electronic"
+     }
+    ],
+    "license": [
+     {
+      "start": {
+       "date-parts": [
+        [
+         2009,
+         1,
+         1
+        ]
+       ],
+       "date-time": "2009-01-01T00:00:00Z",
+       "timestamp": 1230768000000
+      },
+      "content-version": "tdm",
+      "delay-in-days": 0,
+      "URL": "http://www.springer.com/tdm"
+     },
+     {
+      "start": {
+       "date-parts": [
+        [
+         2009,
+         1,
+         1
+        ]
+       ],
+       "date-time": "2009-01-01T00:00:00Z",
+       "timestamp": 1230768000000
+      },
+      "content-version": "vor",
+      "delay-in-days": 0,
+      "URL": "http://www.springer.com/tdm"
+     }
+    ],
+    "content-domain": {
+     "domain": [],
+     "crossmark-restriction": false
+    },
+    "published-print": {
+     "date-parts": [
+      [
+       2009
+      ]
+     ]
+    },
+    "DOI": "10.1007/978-0-387-39940-9_3599",
+    "type": "book-chapter",
+    "created": {
+     "date-parts": [
+      [
+       2009,
+       9,
+       16
+      ]
+     ],
+     "date-time": "2009-09-16T04:05:42Z",
+     "timestamp": 1253073942000
+    },
+    "page": "2637-2637",
+    "source": "Crossref",
+    "is-referenced-by-count": 0,
+    "title": [
+     "Shared-Disk File System"
+    ],
+    "prefix": "10.1007",
+    "member": "297",
+    "container-title": [
+     "Encyclopedia of Database Systems"
+    ],
+    "language": "en",
+    "link": [
+     {
+      "URL": "https://link.springer.com/content/pdf/10.1007/978-0-387-39940-9_3599",
+      "content-type": "unspecified",
+      "content-version": "vor",
+      "intended-application": "similarity-checking"
+     }
+    ],
+    "deposited": {
+     "date-parts": [
+      [
+       2026,
+       10,
+       14
+      ]
+     ],
+     "date-time": "2026-10-14T14:11:28Z",
+     "timestamp": 1791987088000
+    },
+    "score": 35.233536,
+    "resource": {
+     "primary": {
+      "URL": "https://link.springer.com/10.1007/978-0-387-39940-9_3599"
+     }
+    },
+    "issued": {
+     "date-parts": [
+      [
+       2009
+      ]
+     ]
+    },
+    "ISBN": [
+     "9780387355443",
+     "9780387399409"
+    ],
+    "references-count": 0,
+    "URL": "https://doi.org/10.1007/978-0-387-39940-9_3599",
+    "relation": {
+     "is-part-of": [
+      {
+       "id-type": "doi",
+       "id": "https://doi.org/10.1007/978-0-387-39940-9",
+       "asserted-by": "object"
+      }
+     ]
+    },
+    "published": {
+     "date-parts": [
+      [
+       2009
+      ]
+     ]
+    }
+   }
+  ]
+ },
+ "pope2023": {
+  "kind": "arxiv",
+  "id": "2211.05102",
+  "title": "Efficiently Scaling Transformer Inference",
+  "authors": [
+   "Reiner Pope",
+   "Sholto Douglas",
+   "Aakanksha Chowdhery",
+   "Jacob Devlin",
+   "James Bradbury",
+   "Anselm Levskaya",
+   "Jonathan Heek",
+   "Kefan Xiao",
+   "Shivani Agrawal",
+   "Jeff Dean"
+  ],
+  "published": "2022-11-09",
+  "updated": "2022-11-09",
+  "version": "v1",
+  "comment": ""
+ },
+ "patel2024splitwise": {
+  "kind": "arxiv",
+  "id": "2311.18677",
+  "title": "Splitwise: Efficient generative LLM inference using phase splitting",
+  "authors": [
+   "Pratyush Patel",
+   "Esha Choukse",
+   "Chaojie Zhang",
+   "Aashaka Shah",
+   "\u00cd\u00f1igo Goiri",
+   "Saeed Maleki",
+   "Ricardo Bianchini"
+  ],
+  "published": "2023-11-30",
+  "updated": "2024-05-20",
+  "version": "v2",
+  "comment": "12 pages, 19 figures"
+ },
+ "liu2024kivi": {
+  "kind": "arxiv",
+  "id": "2402.02750",
+  "title": "KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache",
+  "authors": [
+   "Zirui Liu",
+   "Jiayi Yuan",
+   "Hongye Jin",
+   "Shaochen Zhong",
+   "Zhaozhuo Xu",
+   "Vladimir Braverman",
+   "Beidi Chen",
+   "Xia Hu"
+  ],
+  "published": "2024-02-05",
+  "updated": "2024-07-25",
+  "version": "v2",
+  "comment": "ICML2024"
+ },
+ "liu2026router": {
+  "kind": "arxiv",
+  "id": "2603.04444",
+  "title": "vLLM Semantic Router: Signal Driven Decision Routing for Mixture-of-Modality Models",
+  "authors": [
+   "Xunzhuo Liu",
+   "Huamin Chen",
+   "Samzong Lu",
+   "Yossi Ovadia",
+   "Guohong Wen",
+   "Hao Wu",
+   "Zhengda Tan",
+   "Jintao Zhang",
+   "Senan Zedan",
+   "Yehudit Kerido",
+   "Liav Weiss",
+   "Haichen Zhang",
+   "Bishen Yu",
+   "Asaad Balum",
+   "Noa Limoy",
+   "Abdallah Samara",
+   "Baofa Fan",
+   "Brent Salisbury",
+   "Ryan Cook",
+   "Zhijie Wang",
+   "Qiping Pan",
+   "Rehan Khan",
+   "Avishek Goswami",
+   "Houston H. Zhang",
+   "Shuyi Wang",
+   "Ziang Tang",
+   "Fang Han",
+   "Zohaib Hassan",
+   "Jianqiao Zheng",
+   "Avinash Changrani",
+   " Xue",
+   " Liu",
+   "Bowei He"
+  ],
+  "published": "2026-02-23",
+  "updated": "2026-06-03",
+  "version": "v4",
+  "comment": "Technical Report"
+ },
+ "hoefler2025ue": {
+  "kind": "arxiv",
+  "id": "2508.08906",
+  "title": "Ultra Ethernet's Design Principles and Architectural Innovations",
+  "authors": [
+   "Torsten Hoefler",
+   "Karen Schramm",
+   "Eric Spada",
+   "Keith Underwood",
+   "Cedell Alexander",
+   "Bob Alverson",
+   "Paul Bottorff",
+   "Adrian Caulfield",
+   "Mark Handley",
+   "Cathy Huang",
+   "Costin Raiciu",
+   "Abdul Kabbani",
+   "Eugene Opsasnick",
+   "Rong Pan",
+   "Adee Ran",
+   "Rip Sohan"
+  ],
+  "published": "2025-08-12",
+  "updated": "2025-08-12",
+  "version": "v1",
+  "journal_ref": "",
+  "doi": "",
+  "comment": ""
+ }
+}

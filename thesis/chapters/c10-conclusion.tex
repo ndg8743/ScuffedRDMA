@@ -1,0 +1,147 @@
+\chapter{Conclusion and Future Work}
+\label{ch:conclusion}
+
+With the related systems in view, we return to the research questions,
+describe future work, and close with what the work has shown and where it
+stands in relation to high-performance computing.
+
+\section{Answers to the Research Questions}
+\label{sec:answers}
+
+We asked whether treating the traffic of split inference as mixed, that is,
+as small urgent messages and large patient ones, helps on commodity hardware.
+The three research questions that made this precise are repeated here as
+posed, each with its answer, the evidence for it, and its limit.
+
+The first question concerned the separation itself. \emph{\rqone}
+\waiting{results from E3 and E4: state the answer for each stack in one
+sentence and fill the blanks} Part of the evidence needs no measurement,
+since with one endpoint per class no cold message is ever ahead of a hot
+message in the send queue of the hot class (\cref{sec:pool}). The rest is
+measured, as the packets of both endpoints still meet on one device and one
+cable. On the lab
+pair, the 99th percentile of a 64-byte round trip under a stream of 1 MiB
+writes is \blank\us{} with one endpoint per class and \blank\us{} on a shared
+endpoint, against \blank\us{} with no stream, and on the home pair the three
+values are \blank, \blank{} and \blank\us{} (\cref{tab:e3,tab:e4}). The
+answer is limited to
+one pair of machines on one cable, with one sender and without a switch or
+packet loss, and it is an answer for the pool: on the serving path the sender
+of the connector still serializes both classes in one queue
+(\cref{sec:connector}).
+
+The second question concerned the price of portability. \emph{\rqtwo}
+\waiting{results from E1, E2 and E5: state the answer in one sentence and
+fill the blanks} The comparison is a controlled one, as the two implementations stand behind
+one interface and are measured by the same benchmark source
+(\cref{sec:pool,sec:sfbench}). On the lab pair, a 64-byte write takes
+\blank\us{} at the median on raw verbs and \blank\us{} on libfabric with
+connected endpoints, and the cold class reaches \blank{} and \blank{} MB/s on
+the two stacks for 1 MB writes (\cref{tab:e1,tab:e2}), while \cref{tab:e5}
+gives the cost of each completion signal in instructions per operation. The
+answer holds for one version of the library and for its verbs provider on
+these two pairs of machines.
+
+The third question concerned the request as a user sees it. \emph{\rqthree}
+Arithmetic bounds the transfer at no less than 134 ms for a 2,048-token prompt on the laboratory link
+(\cref{eq:wiretime}), and for that prompt the measured transfer takes
+\blank{} ms, which is \blank{} percent of the time to first token
+(\cref{tab:e8split}). \waiting{results from E8: state the answer to the
+first half and fill the blanks} Its second half is answered for
+each component separately and not for the three together, as the components
+that decide on routing, compression and spilling are evaluated outside the
+serving path (\cref{sec:overview}). The quantizer halves the number of bytes
+at a measured cost in attention agreement (\cref{sec:res-quant}), host
+staging is a small share of the wire time at this link speed under an
+assumed copy rate (\cref{eq:staging}), and the storage tier is measured on
+its own (\cref{sec:res-nvme}). This answer has the widest limit, as it
+rests on one model, on random prompts, and on a serving path in which the
+class of a transfer follows from its size.
+
+\section{Future Work}
+
+The work can be extended in four directions, given here from the nearest to
+the furthest. The nearest is to complete the serving path. The decision of the rule tree
+can be passed to the sender as the class of each blob and to the storage
+tier as its spill decision, so that E8 can compare routing, compression and
+spilling against the size-based path measured first (\cref{sec:overview}).
+The sender of the connector serializes both classes in one queue, and a
+queue per class would carry the separation of the pool up to the connector
+(\cref{sec:connector}).
+
+The second direction is to repair and tune the components that decide. The
+switching rule of the controller should be replaced with the
+routing-consistent one, or the controller turned into a service allocator,
+and then measured. The classifier should be retrained on the signal log from
+the cluster, labeled by measured latency, and the thresholds of the default
+policy, which are initial values, should be set from measured traffic. The
+sketch should be either used or removed: either the receiving side applies
+the correction, or the sender stops sending 32 bytes per vector that nothing
+reads, with the quality of each choice measured on generated text.
+
+The third direction is the hardware. On server 4, installing the rebuilt
+kernel and loading the peer memory module would open the GPU-direct path,
+and the cost of staging could then be measured by removing it on the one
+machine where that is possible. Beyond one pair of machines, the design has
+to be tested with a switch, with several senders and with packet loss, and a
+parallel file system reached over the same transport would add a tier below
+local flash.
+
+The furthest direction is the next transport. The pool can be built against
+libfabric 2.x with per-endpoint memory registration, and, once an Ultra
+Ethernet device is available, it can be tested whether separate endpoints
+help over a transport that spreads packets across paths
+(\cref{sec:uec-port}).
+
+\section{Conclusion}
+
+The limit on computing has moved from arithmetic, to memory, to the path
+between machines, and high-performance computing is the industry that grew
+up around the third limit. Its largest machines come from a handful of
+builders, most of their interconnects come from two companies, and their
+networks are engineered to keep one kind of traffic from delaying another
+(\cref{sec:history}). Language-model inference reached the same limit within
+a few years, and most work on it assumes the network of a data center.
+
+This work asked what can be done without any of that. The laboratory pair
+has no RDMA hardware, three of the four servers carry consumer GPUs that no
+network card can reach directly, one board would not start with its
+accelerators until its firmware and an ACPI table had been changed, and the
+fastest network cards arrived configured for a different network. Despite these conditions, persistence prevailed. Each
+of these obstacles was addressed in turn (\cref{ch:bringup}), with the
+GPU-direct path the one that remains closed, and on machines that were never meant for the task we built
+in software what larger systems obtain from dedicated hardware: a transport
+with separate traffic classes on two libraries behind one interface and a
+flow-controlled channel whose properties are proved, together with a
+connector into a production serving engine and a method in which every
+number carries the commands that produced it.
+
+Performance followed. In the bytes that are sent, the quantizer halves a
+real cache relative to 16-bit floating point while the eight most-attended
+positions agree 91 percent of the time, and batching raises the write
+throughput of the storage tier by 25 percent. In the order in which they
+are sent, a 64-byte message under a stream of 1 MiB writes has a 99th
+percentile of \blank\us{} with one endpoint per class against \blank\us{} on
+a shared endpoint on the laboratory pair, and the cache of a 2,048-token
+prompt, which cannot cross the laboratory link in less than 134 ms, reaches
+the decode server in \blank{} ms. \waiting{results from E3 and E8:
+fill the blanks, and keep the opening sentence of this paragraph only if
+they support it} The analysis also removed
+two components from the list of those that can be trusted, as we proved that
+a classifier built on size thresholds cannot recognize decode traffic and
+showed that the switching rule of the controller contradicts its own
+derivation.
+
+High-performance computing is the reference for this work in both
+directions. The design borrows what that field already practices, namely
+one-sided access to remote memory, which Cray built into the T3D, and the
+separation of traffic classes, which Slingshot provides inside the network.
+In return, the middleware is written against libfabric, the interface
+through which Slingshot is programmed and which Ultra Ethernet has adopted,
+so a design that is proved on two ordinary servers and one cable speaks the
+interface of the largest machines. For a laboratory with the same hardware
+and the same question, the library, the benchmark, the proofs and the record
+of what it took to make the machines work are meant to serve as a reference
+in turn. The idea itself is simple: a message of eight bytes should not
+wait behind a block of four megabytes. \waiting{results from E3: close with
+what the software network card allowed}

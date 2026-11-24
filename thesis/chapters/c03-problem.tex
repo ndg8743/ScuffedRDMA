@@ -1,0 +1,240 @@
+\chapter{Problem Statement: Mixed Cache Traffic on One Link}
+\label{ch:problem}
+
+When inference is split between a prefill server and a decode server, a
+single link between them carries everything: hundreds of megabytes of cache,
+and messages of a few bytes that tell the other side that the cache is ready.
+An inventory of that traffic comes first. Arithmetic and a queueing model
+then show why the small messages suffer when they share a queue with the
+large ones, existing systems are examined for how they treat the two kinds,
+and the research questions follow from what those systems leave open.
+
+\section{Traffic on the Link}
+\label{sec:traffic}
+
+\Cref{ch:inference} showed that the cache built during prefill is a pure
+function of the prompt and the weights, so it can be built on one machine and
+used on another. In Granite 3.3 2B \citep{granite33} each layer stores a
+key vector and a value vector per token for each of its key-value heads, so
+the cache of one layer and the cache of the whole model occupy
+\mathalt{s layer equals 2 times h times d times w times T, and s cache equals L times
+  s layer}{%
+\begin{equation}
+  s_{\text{layer}} = 2\, h\, d\, w\, T
+  \qquad\text{and}\qquad
+  s_{\text{cache}} = L\, s_{\text{layer}}
+  \label{eq:kvsize}
+\end{equation}}
+bytes, where the factor $2$ counts the key and the value, $h = 8$ is the
+number of key-value heads of a layer, $d = 64$ is the number of entries of
+each key and each value, $w = 2$ is the number of bytes of one entry in the
+16-bit format, $T$ is the number of tokens of the prompt, and $L = 40$ is the
+number of layers. One token therefore occupies
+$2 \times 8 \times 64 \times 2 = 2{,}048$ bytes, or 2 KiB, in each layer and
+80 KiB over all layers, and a prompt of $T = 2{,}048$ tokens produces 4 MiB
+per layer and 160 MiB in total. On the laboratory link the payload alone
+needs the time
+\mathalt{t wire equals 8 times s cache divided by C, which is 8 times 160 times 2 to the 20
+  bits, divided by 10 to the 10 bits per second, which equals 134.2 milliseconds}{%
+\begin{equation}
+  t_{\text{wire}} = \frac{8\, s_{\text{cache}}}{C}
+  = \frac{8 \times 160 \times 2^{20}\ \text{bits}}{10^{10}\ \text{bits/s}} = 134.2\ \text{ms},
+  \label{eq:wiretime}
+\end{equation}}
+where $C$ is the rate of the link in bits per second, here 10 gigabits per
+second, and the factor $8$ converts bytes to bits.
+Each RoCEv2 packet adds 82 bytes of headers, trailer and inter-frame gap, so
+the wire time is about 137 ms with 4,096-byte RDMA packets and 145 ms with
+1,024-byte packets. These are lower bounds from arithmetic, not measurements.
+
+The cache is not the only traffic on the link. \Cref{tab:traffic} lists the
+classes that occur in split serving, and \cref{sec:overview} states which of
+them the connector built here sends.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Traffic between a prefill server and a decode server]{Traffic between a prefill server and a decode server in split serving, with sizes for Granite 3.3 2B.}
+  \label{tab:traffic}
+  \small
+  \begin{tabular}{L{4.1cm}L{3.6cm}L{6.4cm}}
+    \toprule
+    Message & Size & What waits on it \\
+    \midrule
+    Prefill cache, one layer & 4 MiB for 2,048 tokens & nothing until the whole request has arrived \\
+    End-of-request marker & under 100 bytes & the decode server, in a design that starts on its arrival \\
+    Flow-control credit & 8 bytes & the sender's next block \\
+    Token identifiers and request metadata & tens of bytes & the request itself \\
+    Decode-side cache update & 2 KiB per token per layer & the next token of a running request \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The classes differ in two ways that matter. The large ones are measured in
+megabytes and no part of the system waits on any single block. The small ones are
+measured in bytes and some part of the system is blocked until each arrives. We call the first kind cold and the second kind hot.
+
+\section{Head-of-Line Blocking}
+\label{sec:hol}
+
+If hot and cold messages share one first-in first-out queue, a hot message
+that arrives behind $k$ cold messages waits for all of them, for the time
+\mathalt{W equals 8 over C, times the sum of s i for i from 1 to k}{%
+\begin{equation}
+  W = \frac{8}{C} \sum_{i=1}^{k} s_i ,
+  \label{eq:fifo}
+\end{equation}}
+where $s_i$ is the size of the $i$th cold message in bytes and $C$ is the
+rate of the link as before, so that each term $8 s_i / C$ is the time for
+which one of these messages occupies the link.
+Behind four 1 MiB blocks at that rate the wait is 3.36 ms, for a
+message whose own transmission takes a few microseconds. \Cref{fig:hol} shows
+the two arrangements.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Two panels compare two ways to queue messages for one link. Panel a, one shared
+        queue: a large cold block is at the head of the queue and three small hot messages wait
+        behind it. Panel b, one queue per class: the three hot messages sit in their own queue
+        and the cold block sits in a second queue, so the hot messages reach the link without
+        waiting for the block. Hot messages are small plain squares; the cold block is a wide
+        hatched rectangle.},
+      panel/.style={draw=dGray, fill=dGray!6, line width=0.6pt, rounded corners=6pt},
+      queue/.style={draw=dInk, fill=white, line width=0.8pt, rounded corners=3pt},
+      small item/.style={draw=dBlue, fill=dBlue!12, line width=0.8pt},
+      large item/.style={draw=dOrange, fill=white, line width=0.8pt,
+                         postaction={pattern=north east lines, pattern color=dOrange}},
+      link/.style={tint=dGreen, minimum width=13mm, minimum height=13mm, inner sep=2pt}]
+    \draw[panel] (-0.4,-2.0) rectangle (6.95,2.3);
+    \node[heading, anchor=west] at (-0.1,1.85) {(a) One shared queue};
+    \draw[queue] (0,-0.35) rectangle (4.7,0.65);
+    \foreach \x in {0.35,1.05,1.75} { \draw[small item] (\x,-0.13) rectangle ++(0.56,0.56); }
+    \draw[large item] (2.5,-0.13) rectangle (4.45,0.43);
+    \node[link] (linkA) at (6.0,0.15) {Link};
+    \draw[flow] (4.7,0.15) -- (linkA.west);
+    \node[small text, anchor=west] at (-0.1,-1.55) {Hot messages wait behind the block.};
+    \begin{scope}[xshift=7.85cm]
+      \draw[panel] (-0.4,-2.0) rectangle (6.95,2.3);
+      \node[heading, anchor=west] at (-0.1,1.85) {(b) One queue per class};
+      \draw[queue] (0,0.35) rectangle (4.7,1.35);
+      \foreach \x in {2.49,3.19,3.89} { \draw[small item] (\x,0.57) rectangle ++(0.56,0.56); }
+      \draw[queue] (0,-1.05) rectangle (4.7,-0.05);
+      \draw[large item] (2.5,-0.83) rectangle (4.45,-0.27);
+      \node[link] (linkB) at (6.0,0.15) {Link};
+      \draw[flow] (4.7,0.85)  -- (linkB.north west);
+      \draw[flow] (4.7,-0.55) -- (linkB.south west);
+      \node[small text, anchor=west] at (-0.1,-1.55) {Hot messages do not wait for the block.};
+    \end{scope}
+    \draw[small item] (4.3,-2.85) rectangle ++(0.42,0.42);
+    \node[small text, anchor=west] at (4.85,-2.64) {Hot message};
+    \draw[large item] (7.6,-2.85) rectangle ++(1.1,0.42);
+    \node[small text, anchor=west] at (8.85,-2.64) {Cold block};
+  \end{tikzpicture}
+  \caption[Head-of-line blocking in a shared queue and with one queue per class]{Head-of-line blocking in a shared queue, and the same traffic with one queue per class.}
+  \label{fig:hol}
+\end{figure}
+
+A queueing model gives the average case. Treat the link as one server at
+which messages arrive at random, as a Poisson process, and are sent one at a
+time. The mean wait in a first-in first-out queue is then given by the
+Pollaczek-Khinchine formula,
+\mathalt{W bar equals lambda times the expected value of S squared, divided by 2 times
+  1 minus rho}{%
+\begin{equation}
+  \overline{W} = \frac{\lambda\, \mathrm{E}[S^2]}{2(1-\rho)},
+  \label{eq:pk}
+\end{equation}}
+where $\overline{W}$ is the mean wait of a message before its transmission
+begins, $\lambda$ is the arrival rate in messages per second, $S$ is the
+service time, which is $8s/C$ seconds for a message of $s$ bytes,
+$\mathrm{E}[S^2]$ is the mean of its square, and
+$\rho = \lambda\, \mathrm{E}[S]$ is the fraction of time for which the link is
+busy. The second moment is the damaging term: a few very large messages raise
+the wait of every message. With
+two queues and a rule that the hot queue is served first whenever the link
+becomes free, the hot wait drops to the residual of whatever is in service
+\citep{cobham1954}; and if hot packets can be interleaved between the packets
+of a cold message, it drops again.
+
+\Cref{tab:holmodel} evaluates the three cases for one illustrative load. The load and the Poisson arrivals are assumptions, so the numbers are model
+output: they show the size of the effect that \cref{sec:res-e3} is to measure
+and are not that measurement.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Mean wait of a hot message in a queueing model]{Mean wait of a hot message in a queueing model. Assumed load: a 10 Gb/s link; cold 1 MiB messages at 60 percent load; hot 4 KiB messages at 10,000 per second.}
+  \label{tab:holmodel}
+  \small
+  \begin{tabular}{L{8.6cm}L{3.2cm}}
+    \toprule
+    Arrangement & Mean hot wait (model) \\
+    \midrule
+    One first-in first-out queue for both classes & 0.69 ms \\
+    Two queues, hot served first, cold messages not interrupted & 0.26 ms \\
+    Two queues, hot packets interleaved between cold packets & 1.07\us \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The design presented here guarantees the step from the first row to the
+second: with a separate queue pair per class, no cold message is ever ahead of
+a hot one in its own send queue. The step from the second row to the third depends on what sits below the
+queue pairs: a hardware network card arbitrates between queue pairs packet by
+packet, whereas the software RoCE driver processes all queue pairs of a
+device in kernel context, and whether it interleaves them finely enough is
+the open question that experiment E3 answers.
+
+\section{Existing Systems}
+
+Disaggregated serving is established. DistServe \citep{zhong2024distserve} and
+Splitwise \citep{patel2024splitwise} showed that prefill and decode have
+different bottlenecks and gain from running on separate machines, and Mooncake
+\citep{qin2024mooncake} built a serving architecture around the cache. The
+open-source engine used here, vLLM \citep{kwon2023vllm,vllm_repo}, supports
+the split through a connector interface, with NVIDIA's NIXL \citep{nixl} as
+the usual transport, and LMCache \citep{lmcache_blog} and llm-d \citep{llmd}
+build on the same engine. A review of these systems and their documentation identified five gaps.
+
+First, the transports are built for bulk. They move a cache as fast as
+possible, and none of them distinguishes the 8-byte credit from the 4 MiB
+block when choosing a queue. Second, the portable path is shaped for one kind
+of adapter. In the NIXL revision read for this work, the libfabric back end
+looks first for the provider of HPE's Slingshot network, then for that of a
+cloud vendor's adapter, and then falls back to TCP \citep{nixl}; the verbs
+provider that would serve RoCE on commodity cards is not in its list, and its
+documentation asks for a newer libfabric and for GPUDirect. Third, transport
+libraries have side effects. An engineering report from a model provider
+traced a memory leak of hundreds of megabytes per minute in a production
+split-serving deployment to the memory hooks of the transport library under
+the connector \citep{mistral2026leak}. Fourth, RDMA paths fail quietly. A
+production parallel file system that uses RDMA has reported such issues,
+including a race that returned incorrect file data \citep{ibm_ij44629} and a
+reconnection fault \citep{ibm_iv61625}. Fifth, completions go unchecked. A
+benchmark that counts completions without reading their status records a
+failed operation as a very fast one (\cref{sec:rules}).
+
+Work on the collective side of GPU communication has reached the same
+conclusion from the other direction: for small messages the time is in the
+software path and the queueing, not on the wire \citep{shen2026sol}. In addition, a library for point-to-point RDMA in language-model systems,
+fabric-lib \citep{licker2026fabriclib}, treats the completion signal as a first-class design choice.
+
+\section{The Gap and the Research Questions}
+\label{sec:rq}
+
+No system studied here treats the traffic between the two halves of a split
+inference server as mixed, on commodity Ethernet with software RoCE and with the cache staged through host memory. That
+setting is the subject of this work, and the intended contribution is the
+classification and scheduling of mixed traffic, not a faster bulk path.
+Three questions follow.
+
+\begin{enumerate}
+  \item[RQ1.] \rqone{} (E3, E4)
+  \item[RQ2.] \rqtwo{} (E1, E2, E5)
+  \item[RQ3.] \rqthree{} (E6, E7, E8)
+\end{enumerate}
+
+The first half of RQ3 is measured on the serving path, whereas the decisions
+named in its second half are made by components that are evaluated
+separately (\cref{sec:overview}). All three questions concern what happens
+between a program and its network card, so the next chapter describes that
+interface from the bottom up.

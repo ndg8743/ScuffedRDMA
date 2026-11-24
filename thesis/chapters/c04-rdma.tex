@@ -1,0 +1,638 @@
+\chapter{RDMA at a Low Level}
+\label{ch:lowlevel}
+
+The history in \cref{sec:history} ended with a programming model that
+outlived the fabric it was designed for, and the research questions of the
+previous chapter depend on what that model allows. It is explained here from
+the bottom up, because every design decision in the next chapter depends on what the network card does with a request and in which order. We
+begin with the cost of an ordinary socket and arrive at remote direct memory
+access and the verbs interface (\cref{ch:rdma}). We then introduce
+libfabric, the portable interface on which the middleware is written,
+together with its origins and the organizations behind it
+(\cref{ch:libfabric}), follow a single transfer step by step in both
+interfaces (\cref{ch:process}), and close with Ultra Ethernet, the transport
+that has adopted the same interface (\cref{sec:uec}).
+
+\section{From Sockets to RDMA and Verbs}
+\label{ch:rdma}
+
+The middleware moves data by remote direct memory access. The path to RDMA
+starts at the ordinary socket, passes through the objects that a program
+must create, and ends at three facts about ordering on which every later
+design decision depends.
+
+\subsection{The Cost of a Socket}
+
+A program that sends data through a TCP socket hands a buffer to the kernel
+with a system call. The kernel copies the bytes into its own buffers, cuts
+them into segments, adds headers, and gives them to the network card's
+driver. On the other machine an interrupt wakes the kernel, which checks the
+segments, reorders them, copies the bytes into the receiving program's buffer
+and wakes the program. Every message pays for two transitions into the
+kernel, at least two copies, and the scheduler on the receiving side. For a
+4 MiB block these costs are small next to the wire time. For an 8-byte credit
+they are nearly all of the cost.
+
+\subsection{Remote Direct Memory Access}
+
+RDMA removes those costs by changing who does the work. The application
+registers a region of its own memory with the network card and receives a key
+for it. A peer that holds the key and the address can ask its own card to
+write into that region, or read from it. The transfer is carried out by the
+two cards. The kernel is not entered on the data path, the data is not copied
+on the way, and for these one-sided operations the receiving application does
+not run at all \citep{snia2025rdma,mellanox_ibwp}.
+
+The idea is older than the network on which it became standard: the SHMEM
+routines of the CRAY T3D already let one processor read or write the memory
+of another without the remote processor taking part
+\citep{feind1995shmem}, and InfiniBand, which was developed with the Virtual
+Interface Architecture in mind, made that operation a service of the network
+adapter \citep{mellanox_ibwp}. RoCE carries the
+InfiniBand transport over Ethernet, and its second version, RoCEv2, wraps each
+packet in UDP so that it can be routed like any other traffic
+\citep{zhu2015dcqcn}. Soft-RoCE implements the RoCEv2 transport in software,
+in the kernel, on top of any Ethernet card \citep{ibta_softroce2015}. It keeps
+the programming interface and the semantics, and gives up the hardware
+offload: the kernel builds and parses the packets after all. The lab pair runs on Soft-RoCE, and the home pair on cards that implement
+RoCEv2 in hardware (\cref{ch:servers}).
+
+\subsection{Objects}
+
+The programming interface to RDMA on Linux is the verbs interface, provided
+by rdma-core \citep{rdmacore}. A program creates five kinds of object before
+a byte moves. The \emph{device context} is an open handle on one RDMA device, such as
+\code{rxe0}. The \emph{protection domain} is a container that ties memory
+regions and queue pairs together, so that a key from one domain is useless in
+another. A \emph{memory region} is a registered range of the program's
+memory: registering pins the pages and returns a local key and a remote key,
+and a peer needs the remote key and the address to reach the region. A
+\emph{queue pair} is the endpoint of a connection and consists of a send
+queue and a receive queue. Work requests posted to the send queue are carried
+out in order, and a reliable connected queue pair, the only kind used here,
+retransmits lost packets and delivers in order. Finally, the
+\emph{completion queue} is where the card reports that a work request
+finished, with a status, and a program learns the outcome of every operation
+by reading this queue.
+
+A queue pair is created in a reset state and has to be walked through three
+transitions before it can send: to an initialized state, in which its port and
+access rights are set; to ready-to-receive, in which it learns the peer's
+queue pair number, address and starting sequence number; and to
+ready-to-send. The two sides need each other's numbers to make these
+transitions, and RDMA has no way to exchange them before the connection
+exists, so they travel over an ordinary TCP connection first. In this
+project that exchange is a fixed 64-byte record
+(\cref{sec:reused}). \Cref{fig:qpstates} shows the states.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={State diagram of a queue pair. Four states in a row joined by arrows left to right:
+        reset, initialized, ready to receive, ready to send. The arrow from reset to initialized
+        is labeled set port and access rights. The arrow from initialized to ready to receive
+        is labeled learn the peer's queue pair number, address and sequence number. The arrow
+        from ready to receive to ready to send is labeled set timeouts and retry counts. A
+        fifth state, error, sits below; dashed arrows lead to it from ready to receive and ready
+        to send, labeled on a failed operation, and a dashed arrow leads from error back to
+        reset.},
+      st/.style={tint=#1, minimum width=25mm, minimum height=11mm, font=\footnotesize, align=center}]
+    \node[st=dGray]   (r)   at (0,0)    {Reset};
+    \node[st=dBlue]   (i)   at (4.4,0)  {Initialized};
+    \node[st=dBlue]   (rtr) at (8.8,0)  {Ready to\\receive};
+    \node[st=dGreen]  (rts) at (13.2,0) {Ready to\\send};
+    \node[st=dOrange] (e)   at (11.0,-2.8) {Error};
+    \draw[flow] (r) -- (i) node[midway, above=3pt, small text, align=center] {port,\\access};
+    \draw[flow] (i) -- (rtr) node[midway, above=3pt, small text, align=center] {peer's\\numbers};
+    \draw[flow] (rtr) -- (rts) node[midway, above=3pt, small text, align=center] {timeouts,\\retries};
+    \draw[reply] (rtr.south) -- (e.north west);
+    \draw[reply] (rts.south) -- (e.north east) node[midway, right=4pt, small text] {failed operation};
+    \draw[reply] (e.west) -| (r.south);
+  \end{tikzpicture}
+  \caption[States of a queue pair]{States of a queue pair. Solid arrows are the path to a working connection; dashed arrows are failure and recovery.}
+  \label{fig:qpstates}
+\end{figure}
+
+\subsection{Operations}
+
+Four operations matter here. \emph{Send and receive} form the two-sided
+pair: the receiver must have posted a receive buffer in advance, the send
+consumes it, and both sides receive a completion. An \emph{RDMA write} is
+one-sided. The sender names a remote address and key, and the data lands
+there, while the receiving program receives no completion and is not informed
+that anything arrived. An \emph{RDMA write with immediate data} is a write
+that also carries 32 bits chosen by the sender. It consumes a posted receive
+on the target, so the target receives a completion that carries those 32
+bits, and it is the operation on which the blob channel is built: the data
+goes directly to its slot, and the 32 bits identify the slot. An
+\emph{RDMA read} is one-sided in the other direction, as the initiator pulls
+bytes from a remote region.
+
+RDMA write and read exist only on connected, reliable queue pairs. The
+unreliable datagram service has neither. This is why both traffic classes in
+the design use reliable connections (\cref{ch:compat}).
+
+\subsection{Three Facts About Ordering}
+\label{sec:ordering}
+
+For a reliable connected queue pair, three facts about ordering follow from the specification, and the following chapters refer to them by number.
+
+\begin{enumerate}
+  \item Operations execute in order. Work requests posted to one send
+        queue are carried out at the target in the order they were posted.
+  \item Placement within one message is not ordered. A large write is
+        split into packets, and nothing promises that the bytes of the message
+        are placed in memory front to back. A reader that looks at the target
+        memory while a write is in progress can see the end of the message
+        before the middle.
+  \item A completion follows placement. When the target receives the
+        completion of a write with immediate data, all bytes of that write are
+        in place.
+\end{enumerate}
+
+Fact 2 is the one most easily overlooked, as it means that the receiver must
+not decide that a block has arrived by inspecting the block. The receiver
+needs a signal that comes after the data, and facts 1 and 3 provide two ways
+of obtaining one, of which \cref{sec:signals} compares five variants.
+
+\subsection{Failure Modes, with a Production Reference}
+
+RDMA moves the difficult parts of networking into the application's hands: memory
+lifetimes, keys, connection state and completion handling. A parallel file
+system is a useful reference for the consequences at scale. IBM Storage Scale,
+the file system that began as GPFS \citep{schmuck2002gpfs}, uses RDMA on its
+data path \citep{wuerthner2021gpfsrdma}, and its published issues include
+a race between the RDMA layer and the file system that returned incorrect
+data to a client \citep{ibm_ij44629} and a fault in reconnecting after a
+failure \citep{ibm_iv61625}. Three rules follow from these reports, and the middleware applies each of
+them: every completion is checked, a connection that enters the error state
+is treated as lost and reported, and the arrival of data is never inferred
+from anything except a signal that the transport orders after the data.
+
+\section{libfabric}
+\label{ch:libfabric}
+
+The verbs interface serves RDMA devices and nothing else. Code written
+against it cannot run on a laptop, cannot fall back to TCP, and cannot be
+compared with a transport used by the connector of the serving engine itself.
+The middleware is therefore written against libfabric
+\citep{grun2015ofi,libfabric_repo}, the library of the OpenFabrics
+Interfaces, and retains a second implementation on raw verbs so that the cost
+of the portable layer can be measured. Its origins and the organizations
+that contribute to it come first, then the reasons for adopting it, and
+finally a map of its objects onto those of verbs.
+
+\subsection{Origins of libfabric}
+\label{sec:ofi-history}
+
+The verbs interface predates the problem addressed here. It came
+out of the InfiniBand specification, and the software stack of the
+OpenFabrics Alliance began as an implementation of it, then grew to cover
+iWARP and RoCE as those appeared \citep{grun2015ofi}. By the early 2010s the
+users of that stack were no longer only people programming InfiniBand cards.
+Libraries for message passing, for partitioned global address spaces, for
+databases and for non-volatile memory all sat on top of verbs, and each had
+to translate what it wanted into queue pairs and work requests.
+
+A meeting at the Supercomputing conference in 2013 led to the OpenFabrics
+Interfaces Working Group. The group asked those communities what they needed
+from a network interface and collected 168 requirements. The design that came
+out of the exercise divides the world in two: applications, which state what they need, and providers, which state what they can do, with a discovery step
+that matches one to the other \citep{grun2015ofi}. The library that carries that interface is libfabric. It was designed under the alliance by companies, universities and national
+laboratories together, and it remains a project of the alliance, maintained
+by the working group \citep{grun2015ofi,xiong2025ofaue}.
+
+\Cref{tab:ofi-timeline} places the versions relevant to this work in that
+history, with release dates from the release notes in the repository of the
+library \citep{libfabric_repo}.
+
+\begin{table}[htbp]
+  \centering
+  \caption[libfabric from its start to the versions used here]{libfabric from its start to the versions used here.}
+  \label{tab:ofi-timeline}
+  \small
+  \begin{tabular}{L{3.3cm}L{10.9cm}}
+    \toprule
+    Date & Event \\
+    \midrule
+    2013 & a meeting at the Supercomputing conference leads to the working group \\
+    May 3, 2015 & libfabric 1.0.0 \\
+    November 22, 2019 & libfabric 1.9.0, the oldest interface version the pool accepts \\
+    December 16, 2022 & libfabric 1.17.0, the version on the development machine \\
+    December 13, 2024 & libfabric 2.0.0, the version the Ultra Ethernet specification maps \\
+    June 11, 2025 & Ultra Ethernet Specification 1.0 names libfabric as its interface (\cref{sec:uec}) \\
+    September 18, 2026 & libfabric 2.7.0, the latest release when the repository was read \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Providers and the Organizations Behind Them}
+\label{sec:ofi-providers}
+
+The clearest record of who takes part in libfabric is the list of providers
+in its source tree, because most providers are written by the maker or the
+operator of the network they serve. \Cref{tab:providers} lists the providers
+that the repository's description file presents, in the terms it uses
+\citep{libfabric_repo}. Two further directories of the provider tree,
+\code{coll} and \code{util}, are not described there and are left out.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Providers in the libfabric source tree]{Providers described in the libfabric source tree, and their role in this work.}
+  \label{tab:providers}
+  \small
+  \begin{tabular}{L{2.9cm}L{6.6cm}L{4.7cm}}
+    \toprule
+    Provider & Network served & Role in this work \\
+    \midrule
+    verbs & InfiniBand, iWARP and RoCE devices, through the Linux verbs interface & the provider for both pairs on the cluster \\
+    tcp, udp & any machine with sockets & tcp for development and tests \\
+    sockets & a general provider over sockets, now deprecated in favor of tcp, udp and the utility providers & not used \\
+    shm, sm2 & shared memory on one machine & shm for tests and for E7 \\
+    rxm, rxd & utility providers that offer reliable-datagram endpoints over connected or datagram ones & rxm in E4 \\
+    efa & Amazon EC2 Elastic Fabric Adapter & not used \\
+    cxi & the Cray Slingshot network & not used here; the first choice of NIXL \\
+    opx, psm2 & Omni-Path fabrics & not used \\
+    psm3 & Ethernet and verbs datagram devices, with extra features on Intel E810 cards & not used \\
+    usnic & Cisco VIC hardware in Cisco UCS servers & not used \\
+    ucx & the UCX library, on NVIDIA InfiniBand fabrics & not used \\
+    lpp & FabreX PCIe networks & not used \\
+    mrail, lnx, hook & utility providers for several rails, for linking providers, and for intercepting calls & not used \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Three rows bear on the comparisons made in later chapters. UCX is both a
+library in its own right, the one NIXL uses by default, and a provider
+underneath libfabric. The cxi provider is the native interface of Slingshot, an Ethernet-compliant
+network built from the Rosetta switch and the Cassini network card
+\citep{libfabric_repo}, so a program written against libfabric runs on the
+network of the largest supercomputers with no verbs layer in between.
+Conversely, a library written for those networks may know nothing about the
+verbs provider that commodity RoCE cards need: the libfabric back end of NIXL
+looks for cxi first, then for efa, and then falls back to TCP \citep{nixl}.
+
+\subsection{Reasons for a Second Interface}
+
+Three reasons led to a second interface beside raw verbs. The first is
+development without RDMA hardware. The library has providers, which are back
+ends that implement the same calls over different transports, and its TCP and
+shared-memory providers run anywhere, so the whole test suite runs on
+machines with no RDMA device (\cref{ch:compat}). The second is a
+like-for-like baseline: the transport library that the serving engine's
+standard connector uses, NIXL \citep{nixl}, has a libfabric back end, and
+building on the same library places the two on a common footing. The third is
+that published comparisons exist on which to stand. UCX, the other portable
+interface, is described by its designers \citep{shamis2015ucx}, its cost over
+InfiniBand has been measured per operation \citep{papadopoulou2017ucx}, and
+libfabric and UCX have been compared on a production system
+\citep{bareford2022} and discussed by an adapter vendor
+\citep{smith2023opx}.
+
+\subsection{Objects and Their Verbs Counterparts}
+
+The names in libfabric differ from those in verbs, and most of its objects
+have a direct counterpart. \Cref{tab:fimap} gives the mapping
+\citep{libfabric_man}.
+
+\begin{table}[htbp]
+  \centering
+  \caption[libfabric objects and calls beside their verbs counterparts]{libfabric objects and calls beside their verbs counterparts.}
+  \label{tab:fimap}
+  \small
+  \begin{tabular}{L{4.0cm}L{4.6cm}L{5.6cm}}
+    \toprule
+    Purpose & Verbs & libfabric \\
+    \midrule
+    Find a device & device list, open device & \code{fi_getinfo}, \code{fi_fabric}, \code{fi_domain} \\
+    Group resources & protection domain & domain \\
+    Register memory & \code{ibv_reg_mr}, local and remote key & \code{fi_mr_reg}, descriptor and key \\
+    Connection endpoint & queue pair & endpoint (\code{fi_endpoint}) \\
+    Connection events & a separate connection manager, or keys exchanged by hand & event queue (\code{fi_eq_open}), \code{fi_connect}, \code{fi_listen}, \code{fi_accept} \\
+    Report completions & completion queue, \code{ibv_poll_cq} & completion queue, \code{fi_cq_read}, \code{fi_cq_sread} \\
+    Count completions & none & counter (\code{fi_cntr_open}) \\
+    One-sided write & post send with a write opcode & \code{fi_write}, \code{fi_writedata} \\
+    One-sided read & post send with a read opcode & \code{fi_read} \\
+    Two-sided message & post send, post receive & \code{fi_send}, \code{fi_inject}, \code{fi_recv} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Two differences from verbs are worth stating. The first is the type of
+endpoint. A message endpoint is connected to one peer, like a reliable
+connected queue pair, whereas a reliable-datagram endpoint is not connected to
+anyone, and the caller names the destination on each call. On RDMA hardware
+libfabric offers the second kind through a utility layer, called rxm, that
+manages connected endpoints underneath. The pool supports both, and E4 asks
+which is better for each traffic class.
+
+The second difference is the counter, a number that the provider increments
+when an operation completes. Reading it costs less than taking an entry off a
+completion queue, and it can be configured to count writes that arrive from a
+remote peer. It reports how many completed, not which. The next chapter uses this as one of five completion signals.
+
+\section{The RDMA Process Step by Step}
+\label{ch:process}
+
+The previous two sections named the objects, and what remains is to see
+them act. A single transfer is followed from a cold start to a completed
+write and back again, one step at a time, first in libfabric and then in raw verbs, as the reference for
+what the pool does on every call.
+
+\subsection{Phase 0: A Link and a Device}
+
+Before any library call there must be an RDMA device on a link that is up,
+which means that four conditions hold. The cable is connected and both
+interfaces have addresses on the same subnet. An RDMA device exists on that
+interface: on the home pair the ConnectX-4 provides it, and on the lab pair
+it is created in software (\cref{ch:bringup}). The port of the device is
+active and has a RoCEv2 address entry for the interface's IP address, and
+this entry, the GID, is what a peer will use to reach it. Finally, the
+firewall admits UDP port 4791.
+
+Every failure in this phase shows up later as a connection that never
+completes, so the first notebook checks all four before anything else runs.
+
+\subsection{Phase A: Opening the Pool}
+
+Opening the pool builds, for each of the two classes, everything in
+\cref{tab:fimap}. The thirteen steps below are the libfabric sequence for one
+class on the connecting side. The listening side differs in step 10.
+
+\begin{enumerate}
+  \item \code{fi_getinfo} asks what is available. It is called with hints,
+        namely the provider, the endpoint type, and the capabilities needed
+        (messages, one-sided access, remote completion data), and it returns
+        descriptions of matching interfaces.
+  \item \code{fi_fabric} opens the network to which the chosen description
+        belongs.
+  \item \code{fi_domain} opens the device, to which memory registrations and
+        endpoints will belong.
+  \item \code{fi_eq_open} creates the event queue, where connection events
+        will be reported.
+  \item \code{fi_cq_open} creates the completion queue for this class, with
+        the format that carries remote data, and with a wait object for the
+        cold class.
+  \item \code{fi_endpoint} creates the endpoint with this class's queue
+        depths.
+  \item \code{fi_ep_bind} attaches the event queue and the completion queue
+        to the endpoint, for transmit and for receive.
+  \item \code{fi_enable} makes the endpoint usable.
+  \item \code{fi_mr_reg} registers the pool's buffer arena for local use and
+        for remote write and read, and returns a descriptor for local use and
+        a key for the peer.
+  \item The connecting side calls \code{fi_connect} with the peer's address.
+        The listening side has opened a passive endpoint, called
+        \code{fi_listen}, received a connection request on its event queue,
+        created an endpoint from the request and called \code{fi_accept}.
+  \item Both sides read their event queue until it reports
+        \code{FI_CONNECTED}. Underneath, the provider has walked a queue pair
+        through the states of \cref{fig:qpstates}.
+  \item Each side sends the other the base address and key of its arena,
+        over a small out-of-band TCP connection.
+  \item Each side posts receive buffers, because every write with immediate
+        data will consume one at the target.
+\end{enumerate}
+
+The steps run once per class. After them the pool holds two connected
+endpoints, two completion queues and one registered arena that both use.
+
+\subsection{Phase B: One Write}
+
+\Cref{fig:writeseq} follows one write with immediate data from the sender's
+call to both completions.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Sequence diagram with four vertical lifelines, left to right: sender application,
+        sender network device, target network device, target application. Message 1, sender
+        application to sender device: post a write with immediate data. Message 2, sender device
+        to target device: data packets, first, middle and last, the last one carrying the
+        immediate value. Message 3, inside the target device: check the key and bounds, place
+        the bytes in memory, consume one posted receive. Message 4, target device to sender
+        device, dashed: acknowledgment. Message 5, sender device to sender application,
+        dashed: completion with status. Message 6, target device to target application, dashed:
+        completion with the immediate value. A note under the diagram says the target
+        application does nothing until message 6.},
+      life/.style={draw=dGray, line width=0.6pt, dashed},
+      actor/.style={tint=#1, minimum width=27mm, minimum height=10mm, font=\footnotesize, align=center}]
+    \foreach \x/\c/\n/\t in {0/dBlue/a/{Sender\\application}, 3.9/dBlue/b/{Sender\\device}, 7.8/dGreen/c/{Target\\device}, 11.7/dGreen/d/{Target\\application}} {
+      \node[actor=\c] (\n) at (\x,0) {\t};
+      \draw[life] (\x,-0.5) -- (\x,-7.2);
+    }
+    \draw[flow] (0,-1.2) -- (3.9,-1.2) node[midway, above, small text] {1. post write + immediate};
+    \draw[flow] (3.9,-2.3) -- (7.8,-2.3) node[midway, above, small text] {2. data packets};
+    \node[small text, align=center, fill=white] at (7.8,-3.3) {3. check key, place bytes,\\consume one receive};
+    \draw[reply] (7.8,-4.4) -- (3.9,-4.4) node[midway, above, small text] {4. acknowledgment};
+    \draw[reply] (3.9,-5.5) -- (0,-5.5) node[midway, above, small text] {5. completion, status};
+    \draw[reply] (7.8,-6.4) -- (11.7,-6.4) node[midway, above, small text] {6. completion, immediate};
+  \end{tikzpicture}
+  \caption[One RDMA write with immediate data]{One RDMA write with immediate data. The target application does nothing until step 6.}
+  \label{fig:writeseq}
+\end{figure}
+
+In detail, the steps are the following, each with the layer that acts.
+
+\begin{enumerate}
+  \item The application places the data in a buffer inside the registered
+        arena.
+  \item The pool chooses the class. For the hot class a payload under the
+        provider's inject limit is copied at the call.
+  \item The pool posts the write through libfabric with \code{fi_writemsg}
+        and the flag for remote completion data, the general form of
+        \code{fi_writedata}, and gives it the buffer, its descriptor, the
+        32-bit immediate value, the remote address and the remote key.
+  \item In the provider, the call becomes a work request on the queue pair's
+        send queue. If the queue is full the call returns ``try again'' and
+        the pool makes progress on completions before retrying.
+  \item On the sender's device, the work request reaches the head of the
+        send queue. Work requests on one queue pair are served in order,
+        which is fact 1 of \cref{sec:ordering}.
+  \item The device cuts the message into packets no larger than the path's
+        RDMA packet size, each with a transport header that carries the
+        destination queue pair and a sequence number.
+  \item On the wire, each packet travels as a UDP datagram inside an IP
+        packet inside an Ethernet frame. On Soft-RoCE the kernel builds each
+        of these, and on the ConnectX-4 the card does.
+  \item For the first packet, the target's device checks that the key is
+        valid, that the address range lies inside the registered region, and
+        that the region allows remote writes.
+  \item The target's device places the payload bytes directly into the
+        target's memory. The target application is not scheduled.
+  \item The last packet carries the immediate value. The target's device
+        takes one posted receive off the receive queue and writes a
+        completion that carries the value.
+  \item The target's device returns acknowledgments to the sender. A missing
+        packet is retransmitted, and after too many retries the queue pair
+        enters the error state.
+  \item The sender's device writes a completion for the work request. The
+        pool reads it with \code{fi_cq_read}, or \code{fi_cq_sread} for the
+        cold class, and checks its status.
+  \item The target application reads its completion, takes the immediate
+        value, and now knows that the bytes are in place (fact 3) and which
+        buffer they are in.
+\end{enumerate}
+
+Steps 5 to 11 involve no application code on either machine and, on hardware,
+no kernel code. That is the whole advantage of RDMA. On Soft-RoCE the same
+steps run in the kernel of each machine, which is why the semantics carry over
+and the timings do not.
+
+\subsection{Phase C: Read and Send}
+
+An RDMA read runs the same way with the data flowing toward the initiator:
+the request goes out, the target's device checks the key and returns the
+bytes, and only the initiator receives a completion. By fact 1 a read posted
+after a write on the same queue pair is executed after that write, so its
+completion proves the write was applied. A send is the two-sided case: the
+bytes land in whichever receive buffer the target posted next, and both sides receive a completion. The pool uses send for the hot class's small control
+messages and write with immediate data for everything that has a designated
+place to land.
+
+\subsection{Phase D: Failure and Teardown}
+
+A queue pair that exhausts its retries, receives a bad key, or loses its peer
+enters the error state, and every outstanding work request completes with a
+flush status. The pool treats any completion whose status is not success as a
+failure of the transfer. It raises an error, records an event in the
+telemetry, and never reports a latency for that operation. The connector
+above it can fall back to TCP, and records that too (\cref{sec:connector}). Teardown closes objects in the reverse order of Phase A:
+endpoints, memory registration, completion and event queues, domain, fabric.
+
+\subsection{The Same Sequence in Raw Verbs}
+
+The verbs implementation performs the same phases with different calls and
+with the connection handshake done by hand.
+
+\begin{enumerate}
+  \item Open the device and allocate a protection domain.
+  \item Register the arena (\code{ibv_reg_mr}).
+  \item Create a completion queue and a reliable connected queue pair per
+        class.
+  \item Pick the address entry on the port that maps to the interface's IPv4
+        address.
+  \item Exchange queue pair number, starting sequence number, address entry
+        and the arena's key with the peer over TCP.
+  \item Move the queue pair to initialized, ready-to-receive and
+        ready-to-send (\code{ibv_modify_qp}, three times).
+  \item Post receives. Post a write with an immediate value
+        (\code{ibv_post_send}).
+  \item Poll the completion queue (\code{ibv_poll_cq}) and check the status
+        of every entry.
+\end{enumerate}
+
+Steps 4 to 6 are what libfabric's \code{fi_connect} and its event queue hide,
+and they contain a trap on Soft-RoCE: a connection between two machines needs
+the address entry that corresponds to a routable address, whereas the default
+entry is link-local and works only on a loopback.
+
+\subsection{A Worked Example: One Layer and One Credit}
+
+Take one layer of a 2,048-token prompt, 4 MiB by \cref{eq:kvsize}, moving
+from server 1 to server 2 over the direct cable, followed by the 8-byte
+credit that server 2 returns. The cold endpoint carries the layer. At the
+rate of that link its bytes need 3.36 ms on the wire, and with
+4,096-byte RDMA packets it is about a thousand packets (steps 6 to 9, a
+thousand times). Server 2's application learns of it once, at step 13.
+
+The credit is an 8-byte write on the hot endpoint, a single packet. If it shared the
+cold endpoint and its completion queue, it could be posted behind the next
+layer that server 2 is itself sending, and wait milliseconds
+(\cref{eq:fifo}). On its own endpoint it is at the head of an empty send
+queue. What that is worth in measured microseconds on each pair is reported
+in \cref{tab:e3}.
+
+\section{Ultra Ethernet}
+\label{sec:uec}
+
+RoCE, the transport of both server pairs, carries InfiniBand's
+transport over Ethernet almost unchanged. It expects packets in order and, as
+usually deployed, a network that does not drop them, which is obtained with
+priority flow control. Flow control of that kind spreads congestion and
+blocks traffic behind a paused queue inside the network, and strict ordering
+limits the choice of paths \citep{hoefler2025ue}.
+
+The Ultra Ethernet Consortium was formed to replace that transport. A first
+group of five companies, AMD, Broadcom, HPE, Intel and Microsoft, began work
+in early 2022 \citep{hoefler2025ue}. The consortium was announced on July 19,
+2023, as a project of the Joint Development Foundation hosted by the Linux
+Foundation, with nine founding members: AMD, Arista, Broadcom, Cisco, Eviden,
+HPE, Intel, Meta and Microsoft \citep{uec2023launch}. It had more than 100
+member companies by the end of 2024 \citep{hoefler2025ue}. Version 1.0 of its specification was released on June 11, 2025
+\citep{uec2025spec10}, and the text consulted here is version 1.0.1, of
+September 2025 \citep{uecspec}.
+
+The specification covers the stack from the physical layer to the software
+interface. Its center is a new transport, the Ultra Ethernet Transport (UET),
+which differs from RoCE in six ways that matter for large clusters
+\citep{hoefler2025ue,uecspec,xiong2025ofaue}. It has no connections: a
+sender creates the state for a destination with its first data packet, with
+no handshake and no queue pair. It offers four kinds of delivery, which are
+reliable and ordered; reliable and unordered, the kind meant for bulk data;
+reliable and unordered for operations that can safely be applied twice; and
+unreliable datagrams. It uses many paths at once, as the sender changes a
+field in the header from packet to packet, and switches that hash on that
+field spread the packets of one message over many paths. It has two
+congestion controls, a sender-based scheme that every device must have and an
+optional scheme in which the receiver hands out credits. It defines three
+profiles, AI Base, AI Full and HPC, in rising order of features, so that a
+device can implement only what its workload needs. Finally, it receives help
+from the lower layers, in the form of retry and credit-based flow control on
+a single link, optional trimming of packets in switches instead of dropping
+them, and optional security.
+
+The part relevant here is the top of that stack. The specification adopts
+libfabric as its communication abstraction layer and defines how the calls of
+libfabric 2.0 are carried out on UET. It expects each maker of an Ultra
+Ethernet endpoint to supply a libfabric provider for it \citep{uecspec}. The
+person who chairs the libfabric working group and maintains the library also
+takes part in the consortium's software and transport groups
+\citep{xiong2025ofaue}. One interface, libfabric, therefore reaches both the
+RDMA networks of today, through its verbs provider, and the transport that
+the largest network vendors and operators have designed to follow RoCE.
+
+Ultra Ethernet also continues the supercomputing line of \cref{sec:history}:
+its specification states that the products which seeded the effort were
+inspired by Portals 4, the interface after which libfabric itself was
+modeled, and it cites Slingshot for the flow control with which
+high-performance networks isolate traffic \citep{uecspec}. Slingshot
+separates traffic classes inside the network \citep{desensi2020slingshot},
+whereas two servers on one cable have no switch that could do so, which is
+why the middleware pursues the same separation at the endpoints.
+
+The next steps that the consortium has announced include
+programmable congestion management, congestion signaling carried in packets,
+a smaller header, a transport for links inside a system, and collective
+operations carried out in switches \citep{uec2024update,uec2025vision}.
+
+\subsection{Requirements for Running the Middleware on Ultra Ethernet}
+\label{sec:uec-port}
+
+None of the software described here has run on Ultra Ethernet. No Ultra Ethernet device was
+available, and the libfabric tree consulted contains no Ultra Ethernet provider \citep{libfabric_repo}. What can be said, from the
+specification and from the pool's source, is what would have to change, and
+there are four such points.
+
+The first is the endpoint type. The mapping lists reliable-datagram and
+datagram endpoints, and connected endpoints, which the pool uses by default,
+do not appear in it. The pool already has a reliable-datagram mode, and E4
+compares the two, so E4 is also a first look at the mode Ultra Ethernet would
+require. The second is memory registration. The specification requires an
+application to register memory with an endpoint, whereas the pool registers
+one arena for a whole domain and refuses a provider that asks for
+registration per endpoint, which makes this the one change to the code that
+is certain. The third is the write with completion data, from which the blob
+channel learns of an arrival. The specification requires that call in the AI
+Full and HPC profiles and not in AI Base, so the channel would need a device
+of one of the two larger profiles, or one of the other signals of
+\cref{tab:signals}. The fourth is the library version. The pool asks for
+interface version 1.9 and was developed against 1.17, while the mapping is
+written against 2.0, so a port begins with a build of the pool against the
+2.x series.
+
+A larger question sits behind these four points. Ultra Ethernet removes ordering and
+blocking inside the network, whereas the middleware separates traffic classes
+at the endpoints, above the transport, so whether separate endpoints still
+matter over a transport that sprays packets across paths is an experiment
+for future work. With the interface and its ordering rules in place, the next chapter builds the middleware on them.

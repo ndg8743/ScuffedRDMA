@@ -1,0 +1,129 @@
+\chapter{libfabric and Verbs Call Reference}
+\label[appendix]{app:calls}
+
+This appendix lists the pool's own interface and the library calls behind
+it, read from the source of the two implementations \citep{scuffedrdma}. It
+is a reference for \cref{ch:libfabric,ch:process}.
+
+\section{The Interface of the Pool}
+
+One C header declares the interface. \Cref{tab:sfapi} gives its calls. A
+class is hot or cold, and offsets are positions inside the registered arena.
+
+\begin{tightblock}
+\begin{longtable}{L{4.1cm}L{10.3cm}}
+  \caption[The pool's interface]{The pool's interface.}\label{tab:sfapi}\\
+  \toprule
+  Call & What it does \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Call & What it does \\
+  \midrule
+  \endhead
+  \code{sf_opts_default} & fills the options with defaults: provider and endpoint type per class, queue depths, arena size, completion method for the hot class, blocking wait for the cold class \\
+  \code{sf_open} & opens the fabric, domain, endpoints and queues for both classes and registers the arena \\
+  \code{sf_listen} & server side: waits for one peer on a TCP side channel, exchanges addresses and keys, accepts the connections \\
+  \code{sf_connect} & client side: connects the side channel and both endpoints \\
+  \code{sf_close} & closes everything in reverse order \\
+  \code{sf_buf}, \code{sf_buf_len} & start and length of the data region of the arena \\
+  \code{sf_write} & one-sided write from a local offset to a remote offset on one class; flags ask for immediate data, for a copy at the call when the payload is small, or hint that more operations follow \\
+  \code{sf_read} & one-sided read from a remote offset into a local offset \\
+  \code{sf_send} & small two-sided message, with or without immediate data \\
+  \code{sf_poll_rx} & returns arrivals on a class: immediate values of writes, and messages that landed in receive slots; posts the consumed receives again \\
+  \code{sf_progress} & reads the transmit completion queue or counter of a class without blocking \\
+  \code{sf_wait_tx} & waits until the number of completed operations on a class reaches a target, or a timeout \\
+  \code{sf_tx_posted}, \code{sf_tx_done} & operations posted and completed on a class so far \\
+  \code{sf_rma_events} & number of remote writes that have landed, where the provider counts them \\
+  \code{sf_inject_size} & largest payload the provider copies at the call \\
+  \code{sf_cq_data_size} & bytes of immediate data the provider carries \\
+  \code{sf_describe} & text description of what was opened for a class: provider, endpoint type, device \\
+  \code{sf_capable} & whether a class supports a counter, remote-write events, ordered writes, or a blocking wait \\
+  \code{sf_oob_barrier}, \code{sf_oob_xchg}, \code{sf_oob_fd} & helpers for benchmarks on the side channel: a barrier, an exchange of one 64-bit value, and the socket itself \\
+  \code{sf_strerror}, \code{sf_now_ns} & error text, and a clock in nanoseconds \\
+  \bottomrule
+\end{longtable}
+\end{tightblock}
+
+\section{Library Calls by Step}
+
+\Cref{tab:calls} follows the phases of \cref{ch:process} and names the calls
+each implementation makes.
+
+\begin{tightblock}
+\begin{longtable}{L{2.9cm}L{5.7cm}L{5.6cm}}
+  \caption[Library calls made by the two implementations, by step]{Library calls made by the two implementations, by step.}\label{tab:calls}\\
+  \toprule
+  Step & libscuffedfabric (libfabric) & libscuffedverbs (verbs) \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Step & libscuffedfabric (libfabric) & libscuffedverbs (verbs) \\
+  \midrule
+  \endhead
+  Find and open the device & \code{fi_allocinfo}, \code{fi_getinfo}, \code{fi_fabric}, \code{fi_domain}, \code{fi_freeinfo} & \code{ibv_get_device_list}, \code{ibv_open_device}, \code{ibv_query_port}, \code{ibv_query_gid}, \code{ibv_alloc_pd} \\
+  Register the arena & \code{fi_mr_reg}; \code{fi_mr_bind} and \code{fi_mr_enable} where the provider asks; \code{fi_mr_desc}, \code{fi_mr_key} & \code{ibv_reg_mr} \\
+  Completion queues and counters & \code{fi_cq_open}, \code{fi_cntr_open} & \code{ibv_create_cq}, \code{ibv_create_comp_channel} \\
+  Endpoints & \code{fi_endpoint}, \code{fi_ep_bind}, \code{fi_enable} & \code{ibv_create_qp} \\
+  Connect, connected endpoints & \code{fi_eq_open}, \code{fi_passive_ep}, \code{fi_pep_bind}, \code{fi_listen}, \code{fi_connect}, \code{fi_accept}, \code{fi_eq_sread} & \code{ibv_modify_qp} three times, to initialized, ready to receive and ready to send, with the peer's values from the side channel \\
+  Connect, datagram endpoints & \code{fi_av_open}, \code{fi_av_insert}, \code{fi_getname} & not offered \\
+  Post receives & \code{fi_recv} & \code{ibv_post_recv} \\
+  Write, read, send & \code{fi_writemsg}, \code{fi_readmsg}, \code{fi_sendmsg}, with flags for immediate data, a copy at the call, and batching & \code{ibv_post_send} with the opcode for a write, a write with immediate data, a read or a send \\
+  Poll for completions & \code{fi_cq_read}, \code{fi_cntr_read} & \code{ibv_poll_cq} \\
+  Blocking wait & \code{fi_cq_sread} & \code{ibv_req_notify_cq}, \code{ibv_get_cq_event}, \code{ibv_ack_cq_events} \\
+  Errors & \code{fi_cq_readerr}, \code{fi_eq_readerr}, \code{fi_cntr_readerr}, and the matching text calls & the status field of every completion, \code{ibv_wc_status_str} \\
+  Close & \code{fi_close} on every object & \code{ibv_destroy_qp}, \code{ibv_destroy_cq}, \code{ibv_destroy_comp_channel}, \code{ibv_dereg_mr}, \code{ibv_dealloc_pd}, \code{ibv_close_device} \\
+  \bottomrule
+\end{longtable}
+\end{tightblock}
+
+Three details of the libfabric implementation are easily overlooked. Classes that
+use the same provider and endpoint type share one fabric, one domain and one
+memory registration, which is the libfabric form of two queue pairs on one
+protection domain. With the counter selected for the hot class, the endpoint
+is bound for selective completion and operations are posted without the
+completion flag, so the provider increments the counter and writes no queue
+entry. In addition, the server's connected endpoints listen on the port after the one
+used by the side channel.
+
+\section{Options of the Benchmark}
+
+The benchmark of \cref{sec:sfbench} is linked against either library. Its
+options are listed in \cref{tab:sfbench-opts}.
+
+\begin{tightblock}
+\begin{longtable}{L{3.4cm}L{11.0cm}}
+  \caption[Options of the benchmark]{Options of the benchmark.}\label{tab:sfbench-opts}\\
+  \toprule
+  Option & Meaning \\
+  \midrule
+  \endfirsthead
+  \toprule
+  Option & Meaning \\
+  \midrule
+  \endhead
+  \code{-r} & role, server or client \\
+  \code{-H}, \code{-P} & the peer's address, or the address to bind on the server; and the port (19870 by default) \\
+  \code{-m} & mode: \code{sig} for the completion signals, \code{bw} for throughput, \code{hol} for the head-of-line experiment \\
+  \code{-p}, \code{--hot-prov}, \code{--cold-prov} & provider for both classes, or for one \\
+  \code{-t}, \code{--hot-ep}, \code{--cold-ep} & endpoint type, connected or datagram, for both classes or for one \\
+  \code{-d} & restrict to one device \\
+  \code{-s} & one endpoint for both classes: the head-of-line baseline \\
+  \code{--hot-cntr} & hot completions through a counter \\
+  \code{--cold-wait} & blocking wait on the cold completion queue \\
+  \code{-M} & signal for \code{sig} mode: \code{cq}, \code{flag}, \code{sentinel}, \code{cntr} or \code{read} \\
+  \code{--rma-event} & ask the provider to count remote writes \\
+  \code{-S} & list of sizes in bytes (8 to 65,536 by default) \\
+  \code{-n}, \code{-w}, \code{-W} & iterations (10,000), warm-up iterations (500), and window of outstanding operations (16) \\
+  \code{--hot-size}, \code{--cold-size} & sizes of the two streams in \code{hol} mode (64 bytes and 1 MiB) \\
+  \code{--hot-gap-us} & pause between hot messages \\
+  \code{--no-cold} & run the hot stream alone \\
+  \code{--bw-class} & class used in \code{bw} mode \\
+  \code{--arena-mb} & size of the registered arena (64 MiB) \\
+  \code{--hot-cpu}, \code{--cold-cpu} & processor core for the hot loop and for the cold thread \\
+  \code{--perf} & record processor counters \\
+  \code{--timeout-ms} & timeout for waits (60,000) \\
+  \code{-j} & write results to a JSON file \\
+  \bottomrule
+\end{longtable}
+\end{tightblock}

@@ -1,0 +1,290 @@
+\chapter{Introduction}
+\label{ch:intro}
+
+A large language model answers a prompt in two phases. In the first, it reads
+the entire prompt and builds a working state, the key-value cache, and in the
+second it generates the answer one token at a time from that state. The two
+phases load a GPU in different ways, so serving systems increasingly run them
+on different machines, which means that the cache must cross a network
+between them. In a data center that network is built for the purpose, with
+hundred-gigabit links, network cards that move data without involving the
+operating system, and GPUs into which those cards can write directly. A
+university laboratory with two GPU machines and ordinary Ethernet has none
+of these, and in this thesis we ask what can be achieved in less ideal
+network situations.
+
+The question has a history, as each mechanism used in the later chapters
+removes a limit that an earlier generation of machines exposed, and that
+history comes first.
+
+\section{History}
+\label{sec:history}
+
+The history of computing can be read as the history of one bottleneck that
+keeps moving: first the arithmetic itself, then the memory that feeds the
+arithmetic, and then the path between one machine and another. We follow
+that movement through four names that return in the chapters that follow,
+ENIAC, IBM, Sun and Cray, and through the interconnects that grew out of
+their work. \Cref{fig:timeline} places the events in order and marks where the limit sat in each era.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Timeline drawn as a grid of five eras, from top to bottom, against three columns:
+        arithmetic, memory and storage, and the path between machines. In each era one cell is
+        shaded and framed to show where the limit sat. Era 1890 to 1944, tabulating, limit in
+        arithmetic: 1890, Hollerith's tabulators count the United States census; 1924, the
+        company is renamed IBM. Memory and storage: the punched card. Path: cards fed and sorted
+        by hand. Era 1945 to 1979, electronic computers, limit in memory and storage: 1945,
+        report on the stored program; 1956, first commercial disk drive, the RAMAC; 1964,
+        System/360. Arithmetic: 1946, ENIAC announced; 1976, CRAY-1. Path: 1967, Amdahl's limit
+        on parallel speed-up. Era 1980 to 1999, workstations and clusters, limit in the path
+        between machines: 1994, MPI 1.0; 1999, InfiniBand Trade Association. Arithmetic: 1993,
+        CRAY T3D; 1994, first Beowulf cluster. Memory and storage: 1985, Sun Network
+        Filesystem. Era 2000 to 2018, InfiniBand clusters, limit in the path: 2002, Intel drops
+        its InfiniBand hardware; 2015, libfabric 1.0. Memory and storage: 2002, GPFS presented.
+        Arithmetic: no entry. Era 2019 to 2026, Ethernet returns, limit in the path: 2019, HPE
+        acquires Cray, the maker of Slingshot; 2020, NVIDIA buys Mellanox; 2023, Ultra
+        Ethernet Consortium; 2025, its specification 1.0. Arithmetic: 2026, five exascale
+        systems. Memory and storage: 2023, GPFS is named IBM Storage Scale.},
+      cell/.style={draw=dGray, line width=0.5pt, fill=white, anchor=north west, align=flush left,
+        font=\footnotesize, inner xsep=5pt, inner ysep=4pt},
+      e/.style={fill=dBlue!10, text width=26mm, minimum width=29.5mm},
+      a/.style={text width=36mm, minimum width=39.5mm},
+      s/.style={text width=39.5mm, minimum width=43mm},
+      p/.style={text width=46mm, minimum width=49.5mm},
+      lim/.style={draw=dOrange, line width=1.1pt, fill=dOrange!12},
+      hd/.style={fill=dGray!18, font=\footnotesize, align=center, minimum height=8mm}]
+    % column positions: era 0, arithmetic 3.05, storage 7.1, path 11.5; rows 17 mm, last row 21 mm
+    \node[cell, e, hd] at (0,0) {Era};
+    \node[cell, a, hd] at (3.05,0) {Arithmetic};
+    \node[cell, s, hd] at (7.1,0) {Memory and storage};
+    \node[cell, p, hd] at (11.5,0) {The path between machines};
+    % era 1
+    \node[cell, e, minimum height=17mm] at (0,-0.9) {1890 to 1944\\Tabulating};
+    \node[cell, a, lim, minimum height=17mm] at (3.05,-0.9) {1890 tabulators count the census\\1924 renamed IBM};
+    \node[cell, s, minimum height=17mm] at (7.1,-0.9) {the punched card};
+    \node[cell, p, minimum height=17mm] at (11.5,-0.9) {cards fed and sorted by hand};
+    % era 2
+    \node[cell, e, minimum height=17mm] at (0,-2.7) {1945 to 1979\\Electronic computers};
+    \node[cell, a, minimum height=17mm] at (3.05,-2.7) {1946 ENIAC announced\\1976 CRAY-1};
+    \node[cell, s, lim, minimum height=17mm] at (7.1,-2.7) {1945 stored program\\1956 RAMAC disk drive\\1964 System/360};
+    \node[cell, p, minimum height=17mm] at (11.5,-2.7) {1967 Amdahl's limit on parallel speed-up};
+    % era 3
+    \node[cell, e, minimum height=17mm] at (0,-4.5) {1980 to 1999\\Workstations and clusters};
+    \node[cell, a, minimum height=17mm] at (3.05,-4.5) {1993 CRAY T3D\\1994 first Beowulf cluster};
+    \node[cell, s, minimum height=17mm] at (7.1,-4.5) {1985 Sun Network Filesystem};
+    \node[cell, p, lim, minimum height=17mm] at (11.5,-4.5) {1994 MPI 1.0\\1999 InfiniBand Trade Association};
+    % era 4
+    \node[cell, e, minimum height=17mm] at (0,-6.3) {2000 to 2018\\InfiniBand clusters};
+    \node[cell, a, minimum height=17mm] at (3.05,-6.3) {};
+    \node[cell, s, minimum height=17mm] at (7.1,-6.3) {2002 GPFS presented};
+    \node[cell, p, lim, minimum height=17mm] at (11.5,-6.3) {2002 Intel drops its InfiniBand hardware\\2015 libfabric 1.0};
+    % era 5
+    \node[cell, e, minimum height=21mm] at (0,-8.1) {2019 to 2026\\Ethernet returns};
+    \node[cell, a, minimum height=21mm] at (3.05,-8.1) {2026 five exascale systems};
+    \node[cell, s, minimum height=21mm] at (7.1,-8.1) {2023 GPFS is named IBM Storage Scale};
+    \node[cell, p, lim, minimum height=21mm] at (11.5,-8.1) {2019 HPE acquires Cray\\2020 NVIDIA buys Mellanox\\2023 Ultra Ethernet Consortium\\2025 its specification 1.0};
+  \end{tikzpicture}
+  \caption[Five eras of one moving limit]{Five eras of one moving limit. In each era the shaded cell with the heavy frame is where the limit sat. The source of each date is given with the event in the text.}
+  \label{fig:timeline}
+\end{figure}
+
+ENIAC, built at the University of Pennsylvania under an Army contract and
+announced on February 14, 1946 \citep{penn_eniac}, used vacuum tubes throughout and
+carried out arithmetic at electronic speed \citep{goldstine1946eniac}, which
+removed the mechanical limit of every earlier calculator. However, the machine was set up for each problem by
+plugging cables and setting switches by hand, which could take far longer
+than the calculation itself. The remedy, to keep the instructions in the
+same memory as the data, had already been set down in a report of June 1945,
+which describes an arithmetic unit, a control unit, a memory that holds both instructions and
+data, and input and output \citep{vonneumann1945}. Every server in our
+testbed still has this organization, and its consequence is the first
+movement of the bottleneck: once arithmetic was fast, the limit became
+keeping the right data close to it. The key-value cache of a language model
+is held in GPU memory for exactly this reason.
+
+IBM enters the story through data, not arithmetic, and its line of work
+shows the same limit moving through storage. Hollerith's tabulating machine,
+which counted the United States census of 1890, read each census record as
+holes in a card and counted by closing circuits through the holes
+\citep{hollerith1894}. That count was finished in six months, where the
+census of 1880 had taken more than eight years, although clerks still fed
+every card by hand and dropped it into the bin that its holes selected
+\citep{ibm_tabulator}. Hollerith founded the Tabulating Machine Company in
+1896, it was merged into the Computing-Tabulating-Recording Company in 1911,
+and that company was renamed International Business Machines in 1924
+\citep{ibm_tabulator,goldstine1972}. In June 1956 IBM shipped the first
+commercial hard disk drive, the Model 350 of the RAMAC system
+\citep{chm_ramac}, which gave a program random access to stored records, and
+on April 7, 1964 it launched the System/360, a line on which software
+written for one machine ran on every other \citep{ibm_system360}. The chief
+architect of that line was Gene Amdahl \citep{ibm_system360}, whose
+observation of 1967, that the part of a program which cannot be divided sets
+a ceiling on the speed-up \citep{amdahl1967}, is why the cost of
+communication between processors decides how far a parallel machine can go.
+The storage side of the same problem is GPFS, presented in 2002 for the
+RS/6000 SP parallel supercomputer and for Linux clusters. It evolved from
+the Tiger Shark multimedia file system, lets the nodes of a cluster read and
+write the same disks at once under distributed byte-range locks, and ran at
+that time on six of the ten most powerful supercomputers
+\citep{schmuck2002gpfs}. Its descendant, named IBM Storage Scale since 2023
+\citep{ibm2023storagebrand}, uses remote direct memory access in production
+today, and its field record, which we examine in \cref{ch:rdma}, shows what
+goes wrong when an application takes over the work that the operating system
+used to do.
+
+Sun treated the network as part of the machine. The Sun Network Filesystem, presented in 1985,
+gave a workstation transparent access to files on another machine, on top of
+a remote procedure call layer and a machine-independent data representation,
+with a server that keeps no state so that a crash on either side needs no
+recovery protocol \citep{sandberg1985nfs}. This design made a room of
+workstations behave as one system, but it also meant that every operation
+paid for a trip through the network stack of two operating systems. As
+programs began to exchange data more often than they computed alone, that
+trip became the limit, and removing it became the goal of the next
+generation of interconnects.
+
+The machines that exposed this limit most clearly were clusters. The Beowulf
+project, whose first cluster was built at NASA's Goddard Space Flight Center
+in 1994 \citep{fischer2014beowulf}, joined ordinary personal computers with
+ordinary Ethernet into a parallel machine and measured what the
+communication cost real scientific programs \citep{sterling1995beowulf}. The
+Message Passing Interface, whose first version is dated June 1994
+\citep{mpi1995}, became the standard way to write programs for such machines
+\citep{mpiforum}.
+InfiniBand was designed to remove the cost that these clusters paid: an
+application hands data to the adapter directly, and the adapter delivers it
+into the memory of an application on another server \citep{mellanox_ibwp}.
+The trade association
+behind it was founded in 1999 \citep{eweek2002infiniband}, and its steering
+committee included both IBM and Sun, together with Compaq, Dell, Hewlett Packard, Intel and Microsoft, with the ambition of a common input and
+output infrastructure for servers and storage alike \citep{mellanox_ibwp}.
+That ambition was not met, as Intel dropped its plan to
+produce InfiniBand hardware in 2002, while IBM, Hewlett Packard and Sun
+continued \citep{eweek2002infiniband}, and the technology found its place as
+the interconnect of supercomputers. On the TOP500 list of November 2026 it
+is still the most common interconnect family, with 60.6 percent of the
+systems but only 37.8 percent of the aggregate performance
+\citep{sdx2026top500}.
+
+A second line of interconnects came from the makers of supercomputers
+themselves, and Cray is the clearest case. The CRAY-1 of 1976, whose first customer was Los Alamos National Laboratory
+\citep{hpe_crayhistory}, drew its speed from vector instructions and from a
+design that kept every wire short \citep{russell1978cray}. On the CRAY T3D
+of 1993, the first massively parallel system of the company
+\citep{hpe_crayhistory}, the SHMEM routines let one processor read or write the memory of another without the
+remote processor taking part, at a lower latency than message passing
+\citep{feind1995shmem}, which is the operation that RDMA later offered to
+ordinary clusters. The network of the current Cray systems,
+Slingshot, runs an optimized Ethernet protocol that remains interoperable
+with standard Ethernet devices, and it adds adaptive routing, congestion
+control and tunable traffic classes \citep{desensi2020slingshot}. Hewlett
+Packard Enterprise completed its acquisition of Cray in September 2019 for
+approximately 1.4 billion dollars, by which time the Department of Energy
+had selected Cray systems with the Slingshot interconnect for the first
+three exascale systems of the United States \citep{hpe2019cray}.
+
+The last decade also changed who owns InfiniBand and where it is used. In
+April 2020 NVIDIA completed its acquisition of Mellanox, the maker of the
+ConnectX adapters that provide the RDMA hardware in our testbed, for a
+transaction value of 7 billion dollars \citep{nvidia2020mellanox}. In
+October of the same year it announced the BlueField-2 family of data
+processing units, network adapters with processors of their own that take
+over networking, storage and security work from the host
+\citep{nvidia2020bluefield}, and a later generation of these units now
+appears in storage designs for the inference cache itself
+\citep{hsu2026fourtier}. In the clusters built for machine learning, however, the fabric moved away
+from InfiniBand, which held over 80 percent of switch sales in these networks
+in late 2023 \citep{delloro2025ethernet}, and in 2025
+Ethernet accounted for more than two-thirds of them, even though sales of
+InfiniBand continued to grow \citep{delloro2026ethernet}. The Ultra Ethernet
+Consortium, formed in 2023 by network vendors and operators
+\citep{uec2023launch}, is the effort to give Ethernet a transport designed
+for these workloads. It published version 1.0 of its specification in June
+2025 \citep{uecspec}, and we return to it in \cref{sec:uec}.
+
+The industry that these events produced is small and concentrated. By June
+2026 five systems had passed one
+exaflop on the TOP500, the fastest of them a Chinese machine with an
+interconnect of its own design, and Hewlett Packard Enterprise had supplied
+six of the ten fastest systems \citep{top500june2026}, an order that the
+list of November 2026 left unchanged \citep{sdx2026top500}. On that list
+Slingshot connects 12 percent of the systems, and its current generation
+carries 39.7 percent of the aggregate performance, which is the largest share
+of any interconnect \citep{sdx2026top500}, so the network that carries the most performance in
+high-performance computing is already a form of Ethernet. Two companies
+therefore hold most of the interconnects at the top, NVIDIA through
+InfiniBand and Hewlett Packard Enterprise through Slingshot, while standard
+Ethernet has taken most of the networks built for machine learning
+\citep{delloro2026ethernet}.
+
+What survived every change of fabric is the programming model. The one-sided
+operation that Cray built into the T3D, and that InfiniBand standardized as
+remote direct memory access, was carried over Ethernet almost unchanged, and
+it is now reached through a portable interface, libfabric, first released
+in 2015 (\cref{tab:ofi-timeline}), which is the native interface of
+Slingshot and which the designers of the next transport have adopted. A design that is
+built on those semantics is therefore not tied to one fabric. Language-model
+inference has arrived at the third stage of the bottleneck quickly: a single
+GPU does the arithmetic, the working state of the model lives in the memory
+of that GPU, and when the work is split across two servers the state has to
+cross from one memory to the other. In a national laboratory the link between them is InfiniBand or Slingshot,
+whereas in a university laboratory it is commodity Ethernet between two
+machines that were bought for other reasons, which is the setting we study.
+
+\section{Motivation and Contributions}
+\label{sec:contributions}
+
+When the cache moves between two machines, the link carries two kinds of
+traffic. The first is the cache itself, hundreds of megabytes of which no
+single block is urgent. The second is a small number of very short messages
+on which some part of the system is waiting: the signal that the cache is
+complete, the credits that allow the sender to continue, and the small
+updates of a running request. If both kinds share one queue, the short
+messages wait behind the long ones, and a message of a few bytes can be
+delayed by milliseconds on a link that could have delivered it in
+microseconds. We ask whether treating the two kinds differently helps on
+commodity hardware: giving each kind its own connection, choosing a route for
+each transfer, compressing the bulk data when the link is busy, and moving it to disk when memory is short. Three research questions
+follow from it.
+
+The system we built to answer them is a middleware, libscuffedrdma
+\citep{scuffedrdma}, and it carries six contributions. The first is a
+dual-endpoint pool that gives urgent and bulk traffic separate connections
+and separate completion handling, implemented twice behind one interface, on
+libfabric and on raw RDMA verbs, so that the cost of the portable interface
+can be measured (\cref{sec:pool}). The second is a blob channel that moves
+named byte strings of any size over the pool with credit-based flow control,
+together with proofs that no buffer is overwritten while in use, that
+notification never precedes data, and that the credits bound the throughput
+(\cref{sec:channel}). The third is a connector that attaches the channel to
+the interface of the vLLM serving engine for split serving
+(\cref{sec:connector}). The fourth is a classifier and a rule-tree policy
+that decide the route of each transfer, with a proof that size thresholds
+cannot recognize decode traffic and an analysis showing that the switching
+rule of a queue controller contradicts its own derivation
+(\cref{sec:classifier,sec:policy,sec:controller}). The fifth is a quantizer
+with a packed wire format, analyzed step by step, and an NVMe storage tier
+with a model of its batching (\cref{ch:shrink,sec:tier}). The sixth is a
+benchmark and a measurement method in which every number carries the commands
+that produced it and a record of the hardware on which it ran
+(\cref{ch:method}).
+
+The evaluation has two parts. The first concerns the bytes themselves: the
+quantizer on the cache of a real model, where the number of bytes is halved
+relative to the 16-bit format while the most-attended positions agree 91
+percent of the time, the decompression of that format on a GPU, and the
+storage tier. The second concerns the transport, with eight experiments that
+measure latency and throughput on both pairs of servers, from the cost of a
+single small message to the time to first token of a split request. \waiting{results from E3 and E8: add the two headline
+numbers here} One limit is stated here and again in \cref{sec:overview}: on the serving
+path the class of a transfer follows from its size, and the learned
+classifier, the rule tree and the storage tier are evaluated separately.
+
+The scope is deliberately narrow, as this work concerns inference, not
+training, and two machines on one link, not a cluster with a switch. The cache is staged through host memory, because the GPUs in the
+laboratory cannot be reached directly by a network card. We do not claim a
+faster way of moving bulk data. The subject is the order in which data is
+sent, the number of bytes sent, and the place where they wait. We begin
+with the hardware and the model that produce the cache.

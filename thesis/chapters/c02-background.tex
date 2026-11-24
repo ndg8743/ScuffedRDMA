@@ -1,0 +1,406 @@
+\chapter{Background}
+\label{ch:background}
+
+The middleware presented here moves one data structure, the key-value cache,
+between two GPU servers, so its design depends on what a GPU is, on how the
+cache arises inside a language model, and on the software that reads it. The
+background follows the order in which the later chapters use it: the GPU and
+its generations, the arithmetic and number
+formats of a model, the transformer and its attention mechanism, the kernels
+that compute attention on each generation of hardware, and finally inference
+as a systems problem, where the cache and the idea of splitting the work
+across machines appear.
+
+\section{Graphics Processors and Their Generations}
+\label{ch:gpu}
+\label{ch:gpugen}
+
+The processor that runs a language model was designed to draw triangles, and
+the properties it kept from that purpose explain both why it is fast and why
+the cache it produces is so large. Drawing a three-dimensional scene repeats
+one small computation a very large number of times, since every corner of
+every triangle is moved by the same matrix arithmetic and every pixel is
+colored by the same rule, and no pixel needs the result of another. Hardware
+built for this work has many simple arithmetic units side by side and a great
+deal of memory bandwidth to feed them. The step that mattered for everything
+afterwards was making that hardware programmable: a vertex engine that ran a
+small user-written program on every corner \citep{lindholm2001} turned the
+graphics card into a machine that applies an arbitrary short program to a
+large array of independent inputs.
+
+Researchers soon used such a machine for more than pictures, at first by
+disguising linear algebra, simulation and database operations as drawing
+\citep{owens2007}, which worked but forced every problem into the vocabulary
+of graphics. CUDA removed the disguise by letting a programmer write the
+per-element program as an ordinary function, launch it over an array of
+threads, and manage GPU memory directly \citep{nickolls2008}. The workload
+that made this matter was the neural network, because training a deep network
+is dominated by the same multiply-and-add over large arrays, and a network
+trained on GPUs won a major image-recognition benchmark by a wide margin
+\citep{krizhevsky2017}. Since then the size of models has been set by how
+much arithmetic and memory GPUs can supply. Two properties follow for this
+thesis. The memory of a GPU is separate from that of the host, fast and
+limited, so the cache lives there and moving it to another machine means
+leaving that memory (\cref{ch:compat}). In addition, the hardware changes
+with every generation, so software is compiled for a generation.
+
+NVIDIA identifies each architecture by a compute capability number, and a
+kernel compiled for one number may use instructions that an older number does
+not have \citep{cuda_gpus}. \Cref{tab:cc} lists the GPUs in the testbed with
+two data-center parts for comparison.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Compute capability of the GPUs in the testbed]{Compute capability of the GPUs in the testbed, with two data-center parts for reference. The Volta value is not on NVIDIA's current list, which points to a separate list for earlier architectures.}
+  \label{tab:cc}
+  \small
+  \begin{tabular}{L{4.4cm}L{3.2cm}L{2.6cm}L{3.2cm}}
+    \toprule
+    GPU & Architecture & Compute capability & Where \\
+    \midrule
+    Tesla V100 & Volta & 7.0 & server 4 \\
+    GeForce RTX 3090 & Ampere & 8.6 & server 2 \\
+    H100 & Hopper & 9.0 & reference only \\
+    B200 & Blackwell, data center & 10.0 & reference only \\
+    GeForce RTX 5090, RTX 5070 Ti & Blackwell, consumer & 12.0 & servers 1 and 3 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Three points from the table are used later. The testbed spans the range,
+from the V100, which is the oldest architecture and needs a legacy driver
+branch (\cref{ch:bringup}), to the RTX 5090 and 5070 Ti, which are the
+newest. Data-center and consumer parts of the newest generation carry
+different compute capabilities, so software released for the data-center
+part does not necessarily recognize the consumer part, which is the
+background to the start-up failure on server 1 (\cref{ch:kernels}). Finally,
+consumer and data-center cards differ in more than speed, since features
+such as direct access to GPU memory from a network card are reserved for
+data-center and workstation products (\cref{ch:compat}). Each generation
+since Volta has also added or reworked dedicated matrix-multiply hardware,
+called tensor cores, and the instructions that drive it
+\citep{patel2025tensorcore}, while the precision of the arithmetic has moved
+from 32-bit floating point to 16-bit, and for some uses to 8 bits or fewer
+\citep{micikevicius2018,rouhani2023mx}.
+
+\section{Arithmetic and Number Formats}
+\label{ch:matrix}
+
+Everything a language model computes is built from a small set of operations
+on vectors and matrices, and the size of the cache in later chapters is
+simply a count of the numbers that these operations produce. The dot product
+of two vectors $a$ and $b$ of the same length $d$ multiplies them position by
+position and adds the results:
+\mathalt{a dot b equals the sum over i from 1 to d of a i times b i}{%
+\begin{equation}
+  a \cdot b = \sum_{i=1}^{d} a_i b_i ,
+  \label{eq:dot}
+\end{equation}}
+where $a_i$ and $b_i$ are the entries of the two vectors at position $i$ and
+the sum runs over all $d$ positions. The dot product measures how much two
+vectors point the same way, being large and positive when they agree, near
+zero when they are unrelated, and negative when they oppose, and attention is
+built on that reading of it. Multiplying a matrix by a vector takes the dot
+product of each row with the vector, so a matrix with $n$ rows and $d$
+columns costs $n d$ multiplications and as many additions, none of which
+depends on another, which is the shape of work a GPU is built for. A layer
+of a neural network multiplies its input by a matrix of learned weights and
+applies a simple nonlinear function to each result, and the size of a model
+is mostly the number of entries in its weight matrices.
+
+Several times in a model a list of arbitrary scores has to become a list of
+positive weights that add up to one, and the softmax function does this. For
+a list of $n$ scores $z = (z_1, \dots, z_n)$ it returns the $n$ weights
+\mathalt{softmax of z, component i, equals e to the z i, divided by the sum over j from 1 to n
+  of e to the z j}{%
+\begin{equation}
+  \operatorname{softmax}(z)_i = \frac{e^{z_i}}{\sum_{j=1}^{n} e^{z_j}} ,
+  \qquad i = 1, \dots, n,
+  \label{eq:softmax}
+\end{equation}}
+where $z_i$ is the score at position $i$, $e$ is the base of the natural
+logarithm, and the sum in the denominator runs over all $n$ scores. The
+largest score receives the largest weight and the gaps are exaggerated,
+so that scores of $(2, 1, 0)$ give weights of about $(0.67, 0.24, 0.09)$.
+
+A number in a model is stored in a fixed number of bits, and the choice sets
+both the accuracy of the arithmetic and the size of everything the model
+keeps. \Cref{tab:formats} lists the formats that appear in later chapters.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Number formats and their size for one cache vector of 64 numbers]{Number formats and their size for one cache vector of 64 numbers.}
+  \label{tab:formats}
+  \small
+  \begin{tabular}{L{5.4cm}L{2.6cm}L{4.4cm}}
+    \toprule
+    Format & Bits per number & Bytes for 64 numbers \\
+    \midrule
+    32-bit floating point & 32 & 256 \\
+    16-bit floating point, two variants & 16 & 128 \\
+    8-bit & 8 & 64 \\
+    Packed format of \cref{ch:shrink}, with its sketch & 3, plus overhead & 64 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Models were once trained and run in 32-bit floating point. Training in a mix
+of 16-bit and 32-bit arithmetic roughly halves memory and speeds up the
+hardware with little loss of accuracy \citep{micikevicius2018}, so 16 bits is
+now the usual format for inference, and formats of 8 bits and fewer, with a
+shared scale per small group of numbers, go further \citep{rouhani2023mx}.
+The model used in the experiments runs in a 16-bit format, so each number in
+its cache occupies two bytes.
+
+\section{The Transformer}
+\label{ch:transformers}
+
+A language model reads a sequence of tokens and predicts the next one, and
+the architecture used for this purpose in every current large model is the
+transformer \citep{vaswani2017}. The remaining chapters depend on one part
+of it, attention, which is described here in sufficient detail to show what
+must be remembered between one token and the next.
+
+\subsection{Tokens and Vectors}
+
+Text is cut into tokens, pieces of words drawn from a fixed vocabulary, and
+each token is replaced by a vector of a few thousand numbers. The model is a
+stack of identical layers. Each layer takes one vector per position and
+returns one vector per position, and the output of the last layer at the last
+position is turned into a score for every word in the vocabulary.
+
+\subsection{Attention}
+
+Inside a layer, positions exchange information through attention. Each position computes three vectors from its current vector by three learned
+matrices: a query, which expresses what the position is looking for, a key,
+which expresses what the position offers, and a value, which is what it hands
+over.
+
+For a position with query $q$, the score of an earlier position with key $k$
+is their dot product. The scores over all earlier positions are passed
+through a softmax to become weights, and the position's result is the
+weighted sum of the values. Written for all positions at once,
+\mathalt{attention of Q, K and V equals softmax of Q times K transpose, divided by the
+  square root of d, all times V}{%
+\begin{equation}
+  \operatorname{Attention}(Q, K, V) = \operatorname{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d}}\right) V ,
+  \label{eq:attention}
+\end{equation}}
+where $Q$, $K$ and $V$ are the matrices whose rows are the queries, keys and
+values of the positions, $K^{\top}$ is the transpose of $K$, so that the
+entry of $Q K^{\top}$ in row $i$ and column $j$ is the dot product of query
+$i$ with key $j$, $d$ is the number of entries of a key, and the softmax of
+\cref{eq:softmax} is applied to each row. The division by $\sqrt{d}$ keeps
+the scores in a range where the softmax behaves well \citep{vaswani2017}.
+
+\subsection{Attention Heads}
+
+One set of queries, keys and values can capture only one kind of relationship, so a
+layer runs several in parallel, called heads, each with its own matrices and
+shorter vectors, and joins their results. The model used in the experiments has vectors of 64 numbers per head.
+
+Keeping a key and a value for every head, position and layer is expensive, and
+two refinements reduce it. In multi-query attention all heads of a layer share
+one key and one value per position \citep{shazeer2019mqa}. Grouped-query
+attention is the middle ground: the query heads are divided into groups, and
+each group shares one key head and one value head \citep{ainslie2023gqa}. The
+model used here has 8 key-value heads per layer. What matters for the transfer problem is the count of key-value heads, because keys and values are what must be
+kept.
+
+\subsection{The Causal Mask}
+
+A language model is trained to predict each token from the ones before it, so
+a position may attend only to itself and earlier positions. The scores for
+later positions are replaced by minus infinity before the softmax, which
+makes their weights zero. This is the causal mask.
+
+The mask has a consequence that the whole thesis rests on. The vector at a
+position, in every layer, depends only on the tokens up to that position.
+Adding a token at the end changes nothing that was computed for earlier
+positions. Their keys and values can be computed once and kept.
+
+\subsection{The Remainder of a Layer}
+
+After attention, the vector of each position passes through a small two-layer network of the kind described in \cref{ch:matrix}, on its own, with no
+exchange between positions. Both steps add their result to their input, and
+the vectors are rescaled along the way. None of this involves other
+positions, so it adds nothing that must be remembered.
+
+\section{Attention Kernels}
+\label{ch:kernels}
+
+Attention is computed by a kernel, a routine compiled for one generation of
+GPU, and the kernel matters to a thesis on transport for one reason: it is
+the consumer of the cache. It determines the layout and the number format of
+the bytes that cross the link, it is compiled separately for each GPU
+generation in the testbed, and it was the source of the one software failure
+that kept a server out of the cluster. Only what the later chapters rely on
+is covered here.
+
+\subsection{The FlashAttention Line of Work}
+
+Attention, as \cref{ch:transformers} defined it, forms a score for every pair
+of positions. Computed naively, that is a matrix with one entry per pair,
+written to GPU memory and read back. FlashAttention \citep{dao2022fa1}
+computes the same result in tiles small enough to stay in fast on-chip
+memory, so the full matrix is never stored. The result is exact, and the
+saving is in reads and writes of GPU memory, which is the scarce resource
+(\cref{sec:history}). FlashAttention-2 \citep{dao2023fa2} reorganized the work
+for better parallelism. FlashAttention-3 \citep{shah2024fa3} targets a newer
+GPU generation, overlapping data movement with computation and adding a
+low-precision mode. FlashAttention-4 \citep{zadouri2026fa4} continues the
+line for the most recent hardware.
+
+Two consequences matter here. First, these kernels are exact, so a cache
+produced under one of them is valid input to another. That is what allows
+prefill on one GPU generation and decode on a different one
+(\cref{ch:compat}). Second, each version depends on hardware instructions
+that exist only from some generation onward, so which kernel runs is decided
+per machine.
+
+\subsection{One Kernel per GPU Generation}
+
+NVIDIA labels each GPU architecture with a compute capability number, and
+compiled kernels are specific to it \citep{cuda_gpus}. The testbed spans
+three of them (\cref{tab:cc}).
+
+The consumer and data-center parts of the newest generation carry different
+numbers. The vendor's list gives 12.0 for the cards of server 1. The distinction matters because software that
+checks for ``the newest generation'' by one number will miss the other. The
+tensor-core hardware these kernels drive has also changed with each
+generation \citep{patel2025tensorcore}.
+
+The difference between generations is also a practical one. On server 1 the
+serving engine stopped with an initialization error when the third
+FlashAttention version was selected, because one of its modules imported the
+attention library, and with it the GPU runtime, before the engine had set up
+its GPU context, which the older generation tolerated and the newest did not.
+Moving that import into the function that uses it is a one-file patch, kept
+in the repository with a container recipe that applies it
+\citep{scuffedrdma}, and without it server 1 could not serve at all.
+
+\subsection{Constraints the Kernel Places on the Cache}
+
+The serving engine stores the cache in fixed-size blocks of 16 tokens and
+maps each request to a list of blocks \citep{kwon2023vllm}. The attention
+kernel reads keys and values straight from those blocks. The connector of \cref{sec:connector} therefore gathers blocks, not tensors, and has to understand
+the block layout of the engine version it runs against. It supports three
+layouts, and each has a gather and scatter test on both the processor and the
+GPU (\cref{sec:tests}).
+
+The number format is the kernel's as well: 16-bit floating point in this
+work. Lower-precision formats exist for both weights and cache
+\citep{rouhani2023mx,micikevicius2018}, and the engine can store the cache in
+8 bits. The quantizer of \cref{ch:shrink} is different in kind. It does not
+change what the kernel reads. It packs the bytes for the wire and for disk,
+and they are expanded back to 16-bit before the kernel sees them. That
+expansion is the one GPU routine written for this work, and its timing is
+in \cref{sec:res-decomp}.
+
+\section{LLM Inference as a Systems Problem}
+\label{ch:inference}
+
+Running a trained model is called inference. For a language model, inference
+is a loop that produces one token at a time, and almost everything that makes
+it a systems problem follows from a single data structure that the loop
+builds and reuses. That structure comes first, followed by the two phases
+of the loop, the metrics visible to users, and the idea of running the two
+phases on different machines, which is the point at which the bottleneck
+of \cref{sec:history} moves from memory to the link.
+
+\subsection{Autoregressive Generation}
+
+To answer a prompt the model predicts the first token of the answer, appends
+it to the sequence, predicts the next, and so on. Done naively, each step
+would run the whole sequence through every layer again, and the work to
+produce an answer would grow with the square of its length in every layer.
+
+\subsection{The Key-Value Cache}
+
+The causal mask (\cref{ch:transformers}) makes most of that work unnecessary.
+The keys and values of earlier positions do not change when a token is added,
+so they can be stored the first time they are computed. This store is the
+key-value cache, or KV cache. With it, a step computes a query, key and value
+for the new position only, and attention reads the stored keys and values of
+the earlier ones.
+
+\begin{proposition}[The cache is exact]
+\label{prop:cache}
+Let a transformer with a causal mask process a sequence of $t$ tokens, and
+then the same sequence extended by one token. For every layer, the keys and
+values at positions $1$ to $t$ are identical in the two runs.
+\end{proposition}
+
+\begin{proof}
+The proof is by induction on the layers. The statement carried from one
+layer to the next is that the input vectors of the layer at positions $1$ to
+$t$ are identical in the two runs.
+
+\emph{First layer.} The input vectors at positions $1$ to $t$ are the
+embeddings of the same tokens at the same positions in both runs, so they are
+identical.
+
+\emph{From one layer to the next.} Suppose that the input vectors of a layer
+at positions $1$ to $t$ are identical in both runs. Keys and values are
+computed from each position's own input vector, so they are identical at
+those positions, which is the claim for this layer. Attention at a position
+$i \le t$ reads only keys and values at positions up to $i$, because of the
+mask, so its result is identical as well, and the remaining steps of the
+layer act on each position separately. Hence the output vectors at positions
+$1$ to $t$, which are the input vectors of the next layer, are identical, and
+the induction continues.
+\end{proof}
+
+Two consequences follow. Reusing the cache gives the same output as
+recomputing it, up to the rounding of the arithmetic, so it is an
+optimization with no loss. Moreover, the cache is a function of the prompt and the
+weights alone. Any machine with the same weights computes the same cache,
+and a cache computed on one machine can be used on another. The second consequence is what makes the split studied here possible.
+
+The cache is large. Its size is counted in the next chapter: for the model used here, 80 KiB per token.
+
+\subsection{Two Phases with Different Bottlenecks}
+
+Inference has two phases. In \emph{prefill} the model processes the whole
+prompt at once and fills the cache. All positions are computed in parallel,
+and the GPU's arithmetic units are the limit. In \emph{decode} the model
+produces the answer one token at a time. Each step computes very little and
+reads the whole cache, so the limit is how fast the GPU can read its own
+memory \citep{pope2023}.
+
+The two phases place different demands on the hardware and interfere with each other when they share it: a long prefill delays the decode steps of
+every other request on the same GPU. Running them on separate machines, each
+tuned for its phase, improves the service that a given amount of hardware can
+deliver \citep{patel2024splitwise,zhong2024distserve}.
+
+\subsection{Cache Blocks}
+
+A serving engine handles many requests of unpredictable length, and giving
+each a contiguous piece of GPU memory for its cache would waste most of it.
+The engine used here divides cache memory into fixed blocks of 16
+tokens and gives each request a list of blocks, as an operating system gives
+a process pages \citep{kwon2023vllm}. Whatever moves the cache between
+machines therefore moves blocks, not one tensor.
+
+\subsection{User-Visible Latency}
+
+Two latencies describe the experience of a user of a language model. \emph{Time
+to first token} is the delay from sending the prompt to seeing the first
+piece of the answer. It contains the whole prefill. \emph{Inter-token latency}
+is the gap between later tokens, and it is set by decode. A system can be
+good at one and poor at the other, so both are reported.
+
+\subsection{Disaggregating the Two Phases}
+
+In disaggregated serving, a prefill server computes the cache for a prompt
+and a decode server generates the answer from it. Between the two, the cache
+has to cross a network. Several systems are built on this pattern
+\citep{zhong2024distserve,patel2024splitwise,qin2024mooncake,dynamo}, and
+the serving engine used here supports it through a connector interface with
+a transfer library underneath \citep{vllm_disagg,nixl}.
+
+The split adds one term to the time to first token: the transfer
+(\cref{eq:ttft}). For a 2,048-token prompt on the model used here that is 160 MiB.
+The next chapter computes what those bytes cost on commodity Ethernet,
+examines what else crosses the link with them, and shows why the order in
+which they are sent matters.

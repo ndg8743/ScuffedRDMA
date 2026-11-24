@@ -1,0 +1,700 @@
+\chapter{Results and Discussion}
+\label{ch:results}
+
+The results are reported in the order of the argument, under the rules of
+the previous chapter. The first
+sections concern the bytes themselves, and each names the file from which
+its numbers come: the quantizer on the cache of a real model and across
+model families, its decompression on a GPU, and the storage tier. The
+sections that follow concern the transport, from a Python implementation of
+the pool on a loopback device and the baselines of the two links to the
+eight experiments of \cref{sec:experiments}. \Cref{ch:discussion} then
+discusses what the results allow us to state.
+
+\section{The Quantizer on a Real Model's Cache}
+\label{sec:res-quant}
+
+The quantizer of \cref{ch:shrink} was run on the key and value cache that
+Granite 3.3 2B \citep{granite33} produces for a 58-token prompt: 40 layers,
+8 key-value heads, 64 dimensions per head. Each vector was packed at 3 bits
+per coordinate with a 256-bit sign sketch, which is 64 bytes per vector. The
+same vector takes 128 bytes in 16-bit floating point and 256 bytes in 32-bit,
+so the packed cache is half the size of the 16-bit cache.
+
+The test asks whether attention still falls on the same positions. For each
+layer the last token's key was used as a query, attention scores were computed
+against the original keys and against the reconstructed ones, and the eight
+highest-scoring positions were compared.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Quantizer on the Granite 3.3 2B cache at 3 bits per coordinate]{Quantizer on the Granite 3.3 2B cache, 3 bits per coordinate, 256-bit sketch, 40 layers. Source: \nolinkurl{scuffed_quant_llm.json}.}
+  \label{tab:quant}
+  \small
+  \begin{tabular}{L{8.6cm}L{4.6cm}}
+    \toprule
+    Quantity & Value \\
+    \midrule
+    Top-8 overlap, mean over layers & 91.1\% (standard deviation 3.3) \\
+    Top-8 overlap, lowest layer & 82.8\% (layer 1) \\
+    Top-8 overlap, highest layer & 96.9\% \\
+    Inner-product error with the sketch, mean & 25.1 \\
+    Inner-product error without the sketch, mean & 58.2 \\
+    Compression time per layer on the processor, mean & 5.8 ms \\
+    Packed size per vector & 64 bytes \\
+    Size against 16-bit and 32-bit floating point & 2.0 times and 4.0 times smaller \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Line chart of top-8 attention overlap by layer for 40 layers of Granite 3.3 2B after
+        3-bit quantization. The vertical axis runs from 80 to 100 percent. The values lie between
+        82.8 percent at layer 1 and 96.9 percent at layers 4, 20, 33 and 38, with a mean of 91.1
+        percent drawn as a dashed horizontal line. Most layers fall between 87 and 94 percent, and
+        the last seven layers are all above 93 percent.}]
+    \begin{axis}[thesis chart, xmin=-1, xmax=40, ymin=80, ymax=100,
+        xlabel={Layer}, ylabel={Top-8 overlap (\%)}, xtick={0,5,...,35,39}]
+      \plotcoords[draw=dBlue, line width=0.9pt, mark=*, mark size=1.4pt, mark options={fill=dBlue}]{\quantOverlapCoords}
+      \addplot[draw=dOrange, dashed, line width=0.9pt] coordinates {(-1,91.09) (40,91.09)};
+      \node[small text, anchor=south west] at (axis cs:0.5,97.2) {dashed line: mean, 91.1\%};
+    \end{axis}
+  \end{tikzpicture}
+  \caption[Top-8 overlap by layer after quantization]{Top-8 overlap by layer after quantization. Each point is one layer; the data are in \nolinkurl{scuffed_quant_llm.json}.}
+  \label{fig:quant-layers}
+\end{figure}
+
+The sketch earns its 32 bytes on this cache: the error in the inner products
+that attention is built from falls by more than half when it is used. Layer 1
+is the weakest layer and the last layers are the strongest
+(\cref{fig:quant-layers}).
+
+Five limits apply. The overlap was computed with the sketch in use, whereas
+the receiver of the connector reconstructs vectors without it
+(\cref{ch:shrink}), which is the path with the higher error in
+\cref{tab:quant}. The prompt is one prompt of 58 tokens, so ``top 8 of 58''
+is an easier test than top 8 of thousands. The query is a key, not a real
+query vector from a following token. The cache was held in 32-bit floating
+point, while the serving engine uses a 16-bit format. Moreover, overlap of
+attention positions is a proxy for the text that the model then produces.
+\Cref{fig:pending-quant-long} repeats the measurement without the last four
+limits, on prompts of 512 to 4,096 tokens.
+
+\fixnote{Fix in the repository: \nolinkurl{benchmark_scuffed_quant_llm.py} divides the 16-bit size by the ratio against 32-bit, so the field \nolinkurl{kv_compressed_bytes} of \nolinkurl{scuffed_quant_llm.json} is half the true value. The sizes in \cref{tab:quant} are computed from the packed format.}
+
+\pendingfigure{fig:pending-quant-long}{Quantizer on long prompts with real queries}{results from the quantizer on long prompts (run R4)}{Run notebook 05_scuffedquant in cluster mode on server 2, or notebook 08_local_gpu on one GPU machine, with prompts of 512, 2048 and 4096 tokens ;; Use the query vectors of the next tokens, not the last key, and keep the cache in bfloat16 ;; Add one output measure: the fraction of greedy tokens that match the uncompressed run over 256 generated tokens ;; Repeat over at least 20 prompts and report the spread ;; Results go to benchmarks/results/scuffedquant/ and the figure replaces this box}
+
+\FloatBarrier
+\section{The Quantizer Across Model Families}
+\label{sec:res-arch}
+
+The same packing was applied to the state of four models from different
+families, on servers 1 and 2. \Cref{tab:arch} gives the 3-bit results.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Quantizer at 3 bits on four models]{Quantizer at 3 bits on four models. Overlap is top-8 agreement on server 1 and on server 2. Source: \nolinkurl{benchmarks/results/test_arch/}.}
+  \label{tab:arch}
+  \small
+  \begin{tabular}{L{4.6cm}L{2.1cm}L{2.0cm}L{2.2cm}L{2.2cm}}
+    \toprule
+    Model & Sequence length & Size ratio against 32-bit & Overlap, server 1 & Overlap, server 2 \\
+    \midrule
+    Granite 3.3 2B, four layers & 36 & 4.00 & 83.59\% & 82.42\% \\
+    Granite 4.0 H Micro & 19 & 5.64 & 96.25\% & 95.94\% \\
+    Granite 4.0 H Tiny & 18 & 7.60 & 100\% & 100\% \\
+    Mamba 130M & 30 & 1.39 & 97.40\% & 97.40\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The table supports one modest statement: the packing runs on attention caches,
+on hybrid models \citep{granite40micro,granite40tiny} and on a state-space
+model \citep{mamba130m,gu2023mamba}, on two GPU generations, with nearly the
+same result on both. It does not support a comparison between the rows. The
+sequences are 18 to 36 tokens long, so top-8 overlap is close to trivial for
+some of them. The size ratio is taken against 32-bit floating point and
+follows from the width of the vectors that each model stores: the 40 bytes
+of sketch and norms weigh most on the 16-dimensional state of Mamba, the
+1,536-dimensional activations of the Tiny model are padded to 2,048 before
+the rotation, and the value for the Micro model is a mean over its attention
+and state-space blocks. The first row gives 83 percent where
+\cref{tab:quant} gives 91 percent for the same model, as it uses a different
+prompt and four of the forty layers.
+
+\fixnote{Fix in the repository: the files behind the last row are named \code{mamba3} and carry that architecture label, although the model that ran was \code{state-spaces/mamba-130m-hf}.}
+
+\FloatBarrier
+\section{Decompression on the GPU}
+\label{sec:res-decomp}
+
+A compressed cache has to be expanded before the model can use it, and the
+receiving machine has a GPU. \Cref{fig:decomp} compares expanding vectors on
+the GPU with expanding them on the processor.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Line chart with both axes logarithmic. Horizontal axis: number of vectors, 4096, 32768
+        and 131072. Vertical axis: decompression time in milliseconds. Four lines. GPU on server
+        1, solid with circles: 0.46, 2.41 and 20.8 milliseconds. GPU on server 2, solid with
+        squares: 1.47, 3.98 and 33.6 milliseconds. Processor on server 1, dashed with circles:
+        6.6, 56.5 and 572 milliseconds. Processor on server 2, dashed with squares: 8.9, 135 and
+        1026 milliseconds. At every size the GPU lines are well below the processor lines.}]
+    \begin{loglogaxis}[thesis chart, xlabel={Vectors (128 dimensions, 3 bits)}, ylabel={Time (ms)},
+        xtick={4096,32768,131072}, xticklabels={4{,}096, 32{,}768, 131{,}072},
+        legend pos=north west, ymin=0.2, ymax=3000]
+      \plotcoords[draw=dBlue, line width=0.9pt, mark=*, mark size=1.8pt]{\decompGpuSone}
+      \plotcoords[draw=dGreen, line width=0.9pt, mark=square*, mark size=1.8pt]{\decompGpuStwo}
+      \plotcoords[draw=dBlue, dashed, line width=0.9pt, mark=o, mark size=1.8pt]{\decompCpuSone}
+      \plotcoords[draw=dGreen, dashed, line width=0.9pt, mark=square, mark size=1.8pt]{\decompCpuStwo}
+      \legend{{GPU, server 1}, {GPU, server 2}, {Processor, server 1}, {Processor, server 2}}
+    \end{loglogaxis}
+  \end{tikzpicture}
+  \caption[Time to decompress 3-bit vectors on the GPU and on the processor]{Time to decompress 3-bit vectors on the GPU and on the processor. Source: \nolinkurl{cerberus_gpu_decompress.json} and \nolinkurl{chimera_gpu_decompress.json} (the files carry host names; they are servers 1 and 2).}
+  \label{fig:decomp}
+\end{figure}
+
+For 131,072 vectors the GPU needs 20.8 ms on server 1 and 33.6 ms on server 2,
+against 572 ms and 1,026 ms on the processors: about 28 and 31 times faster.
+The same runs tried the framework's compiler on the decompression routine. It
+gave no gain: the uncompiled routine was fastest in 8 of 11 cases, and the
+compiled variants ran between 10 percent slower and 4 percent faster than
+it. That is a negative result: this routine is not worth compiling.
+
+\FloatBarrier
+\section{The Storage Tier}
+\label{sec:res-nvme}
+
+When memory fills, cache blocks spill to an NVMe drive (\cref{ch:shrink}).
+Each write is followed by a flush to stable storage, and the flush has a cost
+that does not depend on how much was written, so batching several blocks into
+one write should help. \Cref{fig:nvme} shows a sweep over the batch size on
+server 2.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[diagram,
+      alt={Line chart of storage throughput against the number of cache blocks written in one
+        batch: 1, 10, 20 and 50. Write throughput, solid line with circles, rises from 662 to
+        731, 803 and 827 megabytes per second. Read throughput, dashed line with squares, is
+        1731, 2149 and 2188 megabytes per second for batches of 1, 10 and 20, then falls to 1104
+        at a batch of 50.}]
+    \begin{axis}[thesis chart, xlabel={Blocks per write (1,568 KiB each)}, ylabel={Throughput (MB/s)},
+        xtick={1,10,20,50}, xmin=-2, xmax=54, ymin=0, ymax=2500, legend pos=south east]
+      \plotcoords[draw=dBlue, line width=0.9pt, mark=*, mark size=1.8pt]{\nvmeWriteCoords}
+      \plotcoords[draw=dOrange, dashed, line width=0.9pt, mark=square*, mark size=1.8pt]{\nvmeReadCoords}
+      \legend{Write with flush, Read}
+    \end{axis}
+  \end{tikzpicture}
+  \caption[Storage tier throughput against batch size on server 2]{Storage tier throughput against batch size on server 2. Source: \nolinkurl{chimera_storage_spill.json}. One run per point.}
+  \label{fig:nvme}
+\end{figure}
+
+Write throughput rises from 662 MB/s for single blocks to 827 MB/s for
+batches of 50, a gain of 25 percent, and most of the gain is reached by a
+batch of 20. The two-parameter model of \cref{eq:coalesce}, a fixed time per
+batch plus a time per block, fitted to the four points gives
+$t_{\text{fix}} = 1.60$ ms and $t_{\text{blk}} = 1.91$ ms, which implies a
+ceiling $s_{\text{blk}} / t_{\text{blk}}$ near 839 MB/s. The model overestimates the time of
+a single-block write by about 45 percent, so it describes the batched regime
+and not the unbatched one. Reads improve with batching up to 20 blocks
+and then drop by half at 50, which this sweep does not explain.
+
+Each point is one run without a repeat, so the numbers should be read as a
+shape and not as the performance of the drive, and \cref{fig:pending-nvme}
+repeats the sweep with five runs per point.
+
+\fixnote{The sweep above wrote to a temporary directory and did not record the drive or the file system, so it is not certain that the writes reached the NVMe drive. Run R3 replaces it; remove this note with the old figure.}
+
+\pendingfigure{fig:pending-nvme}{Storage tier sweep on the NVMe drive with repeats}{results from the storage sweep on the NVMe drive with repeats (run R3)}{Run notebook 07_storage_tier in cluster mode on server 2 with SPILL_DIR set to a directory on the NVMe drive, for example /mnt/nvme/scuffed-spill ;; Record the drive model, file system and mount options in the result (lsblk, findmnt) ;; Sweep batch sizes 1, 2, 5, 10, 20, 50 for each block size, five runs per point, once with direct I/O and once without ;; Plot the median with the range, and refit the two-parameter model ;; Results go to benchmarks/results/storage_tier/}
+
+\FloatBarrier
+\section{A Python Pool on a Loopback Device}
+\label{sec:res-loopback}
+
+A Python implementation of the dual pool on pyverbs was measured on a single Soft-RoCE device looped back on itself, with 1,000
+operations of which half were 256-byte writes and half were 1 MiB writes.
+\Cref{tab:loopback} gives the latencies.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Python pool, Soft-RoCE loopback, 1,000 operations]{Python pool, Soft-RoCE loopback, 1,000 operations. Latency of the 256-byte writes in microseconds, and the median of the 1 MiB writes. Source: \nolinkurl{aggregate_results.json}.}
+  \label{tab:loopback}
+  \small
+  \begin{tabular}{L{4.6cm}L{1.9cm}L{1.9cm}L{1.9cm}L{2.6cm}}
+    \toprule
+    Configuration & Median & 95th & 99th & 1 MiB median \\
+    \midrule
+    One queue pair & 13.64 & 15.92 & 17.70 & 2,772 \\
+    Two queue pairs & 14.15 & 17.68 & 21.42 & 2,763 \\
+    Two queue pairs with the controller & 14.51 & 18.47 & 23.18 & 2,769 \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip{\raggedright\fixnote{Rerun at the current commit and replace this table: these values were taken before the benchmark checked the status of every completion (\cref{sec:rules}).}\par}
+\end{table}
+
+These numbers describe the cost of one operation on a software RDMA device
+and say nothing about head-of-line blocking, because the benchmark sent one
+operation at a time and waited for it, so no small write ever stood behind a
+large one. Three observations follow from the run. First, a 1 MiB write over a looped-back
+Soft-RoCE device took about 2.8 ms, which is roughly 3 Gb/s. Second, the
+static phase detector labeled 781 transfers as prefill, 219 as unknown and
+none as decode, which is what \cref{prop:nodecode} proves it must do. Third,
+the controller made 1,000 decisions and chose the cold path every time, which
+is the symptom of the issue in its switching rule (\cref{sec:controller}). A
+companion sweep of one write size from 64 bytes to 1 MiB on the same device
+gives medians from 12.6\us{} at 64 bytes to 2.8 ms at 1 MiB, with no sudden
+step between neighboring sizes.
+
+\FloatBarrier
+\section{Link Baselines}
+\label{sec:first-links}
+
+The remaining sections concern the links themselves, and the first step is to
+characterize each link without any of our own code. Each link is measured
+with perftest \citep{perftest}, the standard tool for bandwidth and latency
+at the level of raw verbs, so that every later result can be read against
+what the link itself delivers. Two baselines are needed, one for each pair
+of servers, and the processor load recorded with them tests the expectation
+that on Soft-RoCE the processor, not the cable, is the limit.
+\Cref{tab:baseline} holds the numbers, and \cref{tab:bounds} gives the lower
+bounds that follow from the link rate alone, which are the reference for
+every table that follows.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Link baselines measured with perftest]{Link baselines measured with perftest.}
+  \label{tab:baseline}
+  \small
+  \begin{tabular}{L{5.2cm}L{2.0cm}L{2.0cm}L{1.8cm}L{2.6cm}}
+    \toprule
+    Link and transport & Bandwidth, Gb/s & Median latency, \textmu s & 99th, \textmu s & Processor load of the sender, percent \\
+    \midrule
+    Lab pair, TCP reference & & & & \\
+    Lab pair, Soft-RoCE, MTU 1500 & & & & \\
+    Lab pair, Soft-RoCE, MTU 9000 & & & & \\
+    Home pair, RoCEv2, server 3 to server 4 & & & & \\
+    Home pair, RoCEv2, server 4 to server 3 & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from the link baselines (run R1)}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption[Lower bounds from arithmetic for the transport experiments]{Lower bounds from arithmetic for the transport experiments, with 4,096-byte RDMA packets and 82 bytes of overhead per packet. These values are computed, not measured. The home pair cannot reach its nominal rate, as its card sits in an eight-lane slot (\cref{ch:compat}).}
+  \label{tab:bounds}
+  \small
+  \begin{tabular}{L{7.4cm}L{3.0cm}L{3.0cm}}
+    \toprule
+    Quantity & At 10 Gb/s & At 100 Gb/s \\
+    \midrule
+    Highest payload rate (E2) & 1,225 MB/s & 12,255 MB/s \\
+    Wire time of one 1 MiB write (E3, E6) & 0.86 ms & 0.086 ms \\
+    Wire time of a 32 MiB blob (E6) & 27.4 ms & 2.7 ms \\
+    Cache of a 128-token prompt, 10 MiB (E8) & 8.6 ms & 0.9 ms \\
+    Cache of a 512-token prompt, 40 MiB (E8) & 34.2 ms & 3.4 ms \\
+    Cache of a 1,024-token prompt, 80 MiB (E8) & 68.5 ms & 6.8 ms \\
+    Cache of a 2,048-token prompt, 160 MiB (E8) & 136.9 ms & 13.7 ms \\
+    Cache of a 4,096-token prompt, 320 MiB (E8) & 273.8 ms & 27.4 ms \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\pendingfigure{fig:pending-10g-baseline}{Link baseline of the lab pair on the direct 10GbE cable}{results from the link baseline of the lab pair (run R1)}{On both servers confirm with rdma link that rxe0 sits on the 10GbE interface, and save ethtool output for that interface (speed, MTU) ;; Run a TCP reference between the two 10.0.0.x addresses and save the output ;; Run ib_write_bw -d rxe0 --report_gbits and ib_write_lat -d rxe0 against the peer's 10.0.0.x address, at MTU 1500 and at MTU 9000, saving the raw output of every run ;; Record processor load on both ends during each run, which is what tests the claim that the processor is the limit ;; Repeat each run five times and plot bandwidth and latency with their spread}
+
+\pendingfigure{fig:pending-100g-baseline}{Link baseline of the home pair between two machines}{results from the link baseline of the home pair (run R1)}{Boot server 3 into Linux and confirm that both ConnectX-4 ports are in Ethernet mode with ibv_devinfo ;; Run ib_write_bw and ib_write_lat from server 3 to server 4 and in the other direction, saving the raw output ;; Record the negotiated PCI Express link width of each card from lspci -vv ;; Repeat five times and plot next to the lab pair}
+
+\section{E1: Hot-Path Latency by Stack}
+\label{sec:res-e1}
+
+E1 measures the cost of the path that a hot message takes when nothing else
+is on the link, which is the floor under every later latency. The benchmark
+runs its signaling mode with the default completion signal for sizes from 8
+bytes to 64 KB, on raw verbs and on two endpoint types of libfabric, so that
+the difference between the rows of \cref{tab:e1} is the cost of the portable
+interface about which RQ2 asks. The result is read against the perftest
+latency of the same link (\cref{tab:baseline}): a stack that stays within a
+small factor of that baseline shows that the interface adds little, whereas a
+large gap locates the cost in our code or in the provider.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E1: One-way latency of small writes by stack]{E1: One-way latency of small writes in microseconds.}
+  \label{tab:e1}
+  \small
+  \begin{tabular}{L{5.6cm}L{1.6cm}L{1.6cm}L{1.6cm}L{1.6cm}}
+    \toprule
+    Stack & 64 B median & 64 B 99th & 4 KB median & 4 KB 99th \\
+    \midrule
+    Raw verbs, lab pair & & & & \\
+    libfabric, connected endpoints, lab pair & & & & \\
+    libfabric, reliable-datagram endpoints (rxm), lab pair & & & & \\
+    Raw verbs, home pair & & & & \\
+    libfabric, connected endpoints, home pair & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E1 (run R2)}
+\end{table}
+
+\pendingfigure{fig:pending-e1}{E1: Latency against message size for each stack}{results from E1 on both pairs (run R2)}{Complete the link baselines first ;; On server 1 open notebook 03_libfabric_vs_libibverbs, set MODE to cluster, PEER to server 2, PEER_IP to server 2's 10.0.0.x address, DOMAIN to rxe0, and pin HOT_CPU away from the network interrupts ;; Run the E1 section: sig mode with mechanism cq, sizes 8 B to 64 KB, 20,000 iterations, five repeats ;; Repeat on servers 3 and 4 with DOMAIN set to the ConnectX-4 device ;; Results go to benchmarks/results/fabric/ and the notebook writes the table fragment and the figure}
+
+\section{E2: Cold Bandwidth}
+\label{sec:res-e2}
+
+E2 measures the opposite end of the design, the throughput of the cold class,
+for writes from 4 KB to 16 MB with 16 writes in flight. \Cref{tab:e2} answers
+two questions: how close each stack comes to the ceiling of
+\cref{tab:bounds}, which is 1,225 MB/s on the lab pair, and whether the
+blocking wait that protects the hot poller (\cref{alg:pool}) costs the cold
+class any throughput. On Soft-RoCE the expected limit is the processor and
+not the cable, so the processor load recorded with each run is part of the
+result.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E2: Throughput of bulk writes by stack]{E2: Throughput of bulk writes in MB/s by write size, with 16 writes in flight.}
+  \label{tab:e2}
+  \small
+  \begin{tabular}{L{6.2cm}L{1.6cm}L{1.6cm}L{1.6cm}L{2.2cm}}
+    \toprule
+    Stack and completion handling & 64 KB & 1 MB & 16 MB & Processor load, percent \\
+    \midrule
+    Raw verbs, lab pair & & & & \\
+    libfabric connected, polling, lab pair & & & & \\
+    libfabric connected, blocking wait, lab pair & & & & \\
+    Raw verbs, home pair & & & & \\
+    libfabric connected, blocking wait, home pair & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E2 (run R2)}
+\end{table}
+
+\pendingfigure{fig:pending-e2}{E2: Bandwidth of bulk writes against write size}{results from E2 on both pairs (run R2)}{In notebook 03_libfabric_vs_libibverbs run the E2 section: bw mode, 16 writes in flight, sizes 4 KB to 16 MB, 200 iterations per size, once with --cold-wait and once without ;; Compare against the perftest bandwidth of the same link from the baseline run ;; Repeat on the home pair ;; Plot MB/s against write size, one line per stack, with the link rate as a reference line}
+
+\section{E3: Head-of-Line Blocking with One and Two Endpoints}
+\label{sec:res-e3}
+
+E3 is the experiment on which the central claim rests
+(\cref{sec:experiments}). The hot class exchanges 64-byte and 4 KB writes in
+a ping-pong while the cold class streams writes of 256 KB, 1 MB and 4 MB,
+first with both classes on one endpoint and then with one endpoint per class.
+\Cref{eq:fifo} predicts the wait that a shared queue imposes, which is
+0.84 ms behind a single 1 MiB write on the lab pair, and the penalty of
+\cref{eq:penalty} states the result as one number per row of \cref{tab:e3}. A
+penalty near one with two endpoints, together with a penalty that grows with
+the size of the cold writes on one endpoint, would support the design,
+whereas growth in both cases on Soft-RoCE alone would place the contention in
+the kernel, below the queue pairs.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E3: Tail latency of hot writes with and without a cold stream]{E3: 99th percentile round trip of 64-byte hot writes in microseconds, without and with a stream of 1 MiB cold writes, and the cold throughput.}
+  \label{tab:e3}
+  \small
+  \begin{tabular}{L{5.4cm}L{2.2cm}L{2.4cm}L{1.6cm}L{2.0cm}}
+    \toprule
+    Stack and endpoints & Hot 99th, no cold & Hot 99th, 1 MiB cold & Penalty & Cold MB/s \\
+    \midrule
+    Raw verbs, one queue pair & & & & \\
+    Raw verbs, two queue pairs & & & & \\
+    libfabric connected, one endpoint & & & & \\
+    libfabric connected, two endpoints & & & & \\
+    libfabric reliable-datagram (rxm), two endpoints & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E3 (run R2)}
+\end{table}
+
+\pendingfigure{fig:pending-e3}{E3: Penalty on the hot tail latency with one and two endpoints}{results from E3 on both pairs (run R2)}{On server 1 open notebook 01_hol_blocking in cluster mode with the same parameters as E1, and set COLD_CPU to a different core from HOT_CPU ;; Run hol mode for hot sizes 64 B and 4 KB against cold sizes 256 KB, 1 MB and 4 MB, each with one endpoint (-s) and with two, cold stream off and on, five repeats ;; Compute the penalty: hot 99th percentile with the cold stream divided by hot 99th percentile without it ;; Repeat on servers 3 and 4 ;; Fill the table and plot penalty against cold write size, one line per stack and endpoint count ;; Either outcome is a result: flat with two endpoints supports the design; growth with both on Soft-RoCE only points at the kernel packet thread}
+
+\section{E4: libfabric Configuration Matrix}
+\label{sec:res-e4}
+
+E4 repeats the load of E3 over the six ways in which the pool can be
+configured on libfabric, as the endpoint type and the completion handling of
+each class are options of the pool and not constants of the design. The row
+of \cref{tab:e4} with the lowest loaded tail at no loss of cold throughput
+becomes the default of the pool, and the single-endpoint row is the baseline
+against which every other row is read.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E4: Hot tail latency under load for six configurations]{E4: 99th percentile round trip of 64-byte hot writes in microseconds, unloaded and under a stream of 1 MiB cold writes, for six configurations of the pool on libfabric.}
+  \label{tab:e4}
+  \small
+  \begin{tabular}{L{6.0cm}L{2.0cm}L{2.0cm}L{1.6cm}L{2.0cm}}
+    \toprule
+    Configuration & Hot 99th, no cold & Hot 99th, loaded & Penalty & Cold MB/s \\
+    \midrule
+    Connected endpoints for both classes & & & & \\
+    Reliable-datagram endpoints for both classes & & & & \\
+    Reliable-datagram hot, connected cold & & & & \\
+    Hot completions through a counter & & & & \\
+    Cold completions through a blocking wait & & & & \\
+    One endpoint for both classes (baseline) & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E4 (run R2)}
+\end{table}
+
+\pendingfigure{fig:pending-e4}{E4: Hot tail latency under load for six libfabric configurations}{results from E4 on both pairs (run R2)}{In notebook 03_libfabric_vs_libibverbs run the E4 matrix: connected for both classes, reliable-datagram for both, reliable-datagram hot with connected cold, hot completions through a counter, cold completions through a blocking wait, and the one-endpoint baseline ;; Use hot 64 B and cold 1 MiB, 20,000 iterations, five repeats, with the hot and cold threads pinned to different cores ;; Report hot 99th percentile loaded and unloaded, and cold MB/s, per configuration ;; Make the best configuration the default of the pool}
+
+\section{E5: Completion Signaling}
+\label{sec:res-e5}
+
+E5 compares the five completion signals of \cref{tab:signals} on the hot
+path, for sizes from 8 bytes to 16 KB. Besides latency, the benchmark counts
+the user-space instructions retired per posted operation, which separates the
+cost of the software path from the cost of the wire. The decision rule was
+fixed in advance: a mechanism replaces the default, the completion with
+immediate data, only if it lowers the 99th percentile in \cref{tab:e5}.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E5: Latency and instructions per operation for five completion signals]{E5: One-way latency of 64-byte writes in microseconds and user-space instructions per posted operation, for five completion signals.}
+  \label{tab:e5}
+  \small
+  \begin{tabular}{L{5.2cm}L{1.7cm}L{1.7cm}L{1.7cm}L{3.0cm}}
+    \toprule
+    Mechanism & Median & 99th & 99.9th & Instructions per operation \\
+    \midrule
+    Completion with immediate data & & & & \\
+    Flag in the payload & & & & \\
+    Sentinel write & & & & \\
+    Remote-write counter & & & & \\
+    Write, then read & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E5 (run R2)}
+\end{table}
+
+\pendingfigure{fig:pending-e5}{E5: Latency and instructions per operation for five completion signals}{results from E5 on both pairs (run R2)}{Allow performance counters for the user: set kernel.perf_event_paranoid so that perf_event_open succeeds ;; On server 1 run notebook 02_completion_signaling in cluster mode: mechanisms cq, flag, sentinel, cntr and read, sizes 8 B to 16 KB, with --perf ;; Report median, 99th and 99.9th percentile one-way latency and instructions per post for each mechanism ;; Repeat on the home pair ;; Adopt a mechanism other than the default only if it moves the 99th percentile}
+
+\section{E6: The Blob Channel Against TCP}
+\label{sec:res-e6}
+
+E6 measures the blob channel as a whole against a plain TCP stream between
+the same two servers, for blobs from 4 KiB to 32 MiB. For large blobs TCP is
+already close to the wire rate, so the question is whether the credit scheme
+costs anything there, and \cref{prop:credit} bounds what it can cost: with
+the default window of 32 MiB the credits do not limit a 10 gigabit link
+unless a credit takes longer than about 27 ms to return. The lower bounds of
+\cref{tab:bounds} are 0.86 ms for 1 MiB and 27.4 ms for 32 MiB on the lab
+pair, and \cref{tab:e6} is read against them.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E6: Time to move one blob over the blob channel and over TCP]{E6: Median time to move one blob between server 1 and server 2 in milliseconds, by blob size.}
+  \label{tab:e6}
+  \small
+  \begin{tabular}{L{5.6cm}L{1.5cm}L{1.5cm}L{1.5cm}L{1.5cm}L{1.5cm}}
+    \toprule
+    Transport & 4 KiB & 64 KiB & 1 MiB & 8 MiB & 32 MiB \\
+    \midrule
+    Blob channel, libfabric verbs provider & & & & & \\
+    Blob channel, libfabric TCP provider & & & & & \\
+    Plain TCP channel & & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E6 (run R5)}
+\end{table}
+
+\pendingfigure{fig:pending-e6}{E6: Time to move one blob over the blob channel and over TCP}{results from E6 (run R5), after the stall of blobs larger than one slot is fixed}{Reproduce the stall with benchmarks/fabric/blob_multichunk_check.py (8 MiB blobs, four slots of 4 MiB) on the tcp provider and on rxe0, and fix it ;; Add a regression test that sends 100 multi-chunk blobs without a timeout ;; Run benchmarks/fabric/blob_bench.py between server 1 and server 2 for sizes 4 KB to 32 MB on the fabric transport and on TCP, five repeats ;; Plot transfer time against blob size for both, with the wire time at 10 Gb/s as a reference line}
+
+\section{E7: The Split Engine on One GPU}
+\label{sec:res-e7}
+
+E7 runs the complete serving path on one GPU, with a prefill and a decode
+instance that share the card and exchange the cache through the connector. It
+removes the network from the measurement, which isolates two quantities that
+E8 cannot separate: whether split serving through the connector produces the
+same tokens as a single instance, and what the connector costs in gather,
+copy, encode and decode time, which \cref{eq:staging} only estimates.
+\Cref{tab:e7} holds both.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E7: Split serving on one GPU against a single instance]{E7: Split serving on one GPU against a single instance: agreement of the generated tokens, median time to first token and median inter-token latency in milliseconds, and the time spent in copies and codec per layer.}
+  \label{tab:e7}
+  \small
+  \begin{tabular}{L{5.2cm}L{2.2cm}L{1.9cm}L{1.9cm}L{2.4cm}}
+    \toprule
+    Setup & Tokens agree & First token & Inter-token & Copy and codec per layer \\
+    \midrule
+    Single instance & & & & \\
+    Split, connector, raw codec & & & & \\
+    Split, connector, quantizer codec & & & & \\
+    Split, NIXL connector & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E7 (run R6)}
+\end{table}
+
+\pendingfigure{fig:pending-e7}{E7: Split serving on a single GPU against a single instance}{results from E7 (run R6)}{On one GPU machine run scripts/local_gpu/setup_gpu_env.sh, then notebook 08_local_gpu with MODE set to gpu ;; Confirm that the full test suite passes with the gpu marker and that the byte-exact data path check passes with the cache on the GPU ;; Start the decode instance, then the prefill instance, then the proxy, each with 0.40 of the card's memory, and compare greedy output token for token with a single instance ;; Record first-token and inter-token latency for the split and the single instance, and for the engine's NIXL connector if it starts ;; Results go to benchmarks/results/local_gpu/. This run shares memory on one host and says nothing about the network}
+
+\section{E8: The Split Engine Across Machines}
+\label{sec:res-e8}
+
+E8 is the experiment at which the question of the thesis is asked. Prefill
+runs on server 1 and decode on server 2, and the time to first token is
+measured for prompts of 128 to 4,096 tokens in five setups (\cref{tab:e8}).
+By \cref{eq:ttft} only the transfer term belongs to the transport, and
+\cref{tab:bounds} gives its floor, which rises from 8.6 ms at 128 tokens to
+273.8 ms at 4,096 tokens on the lab pair. \Cref{tab:e8split} therefore
+divides the measured time of the connector into its three terms, so that the
+distance between the measured transfer and its floor, which is the part that
+software can still remove, is visible for each prompt length. The comparison
+between the rows of \cref{tab:e8} then separates the effect of the transport,
+through the connector on verbs against the connector on TCP, from the effect
+of the connector, through our connector against NIXL.
+
+\begin{table}[htbp]
+  \centering
+  \caption[E8: Median time to first token by prompt length]{E8: Median time to first token in milliseconds by prompt length, prefill on server 1 and decode on server 2.}
+  \label{tab:e8}
+  \small
+  \begin{tabular}{L{5.6cm}L{1.3cm}L{1.3cm}L{1.3cm}L{1.3cm}L{1.3cm}}
+    \toprule
+    Setup & 128 & 512 & 1,024 & 2,048 & 4,096 \\
+    \midrule
+    One machine, no transfer & & & & & \\
+    Connector over libfabric verbs & & & & & \\
+    Connector over TCP & & & & & \\
+    NIXL connector, UCX back end & & & & & \\
+    NIXL connector, libfabric back end & & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E8 (run R7)}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption[E8: The three terms of the time to first token]{E8: The three terms of \cref{eq:ttft} in milliseconds for the connector over libfabric verbs, by prompt length.}
+  \label{tab:e8split}
+  \small
+  \begin{tabular}{L{5.6cm}L{1.3cm}L{1.3cm}L{1.3cm}L{1.3cm}L{1.3cm}}
+    \toprule
+    Term & 128 & 512 & 1,024 & 2,048 & 4,096 \\
+    \midrule
+    Prefill & & & & & \\
+    Cache transfer & & & & & \\
+    First decode step & & & & & \\
+    Time to first token & & & & & \\
+    \bottomrule
+  \end{tabular}
+  \par\smallskip\waiting{results from E8 (run R7)}
+\end{table}
+
+\pendingfigure{fig:pending-e8}{E8: Time to first token against prompt length for five setups}{results from E8 (run R7)}{Finish E6 first, because the multi-chunk stall blocks the connector's fabric path ;; Install NIXL on both lab servers for the two baseline rows ;; On server 1 run notebook 06_vllm_disagg_ttft in cluster mode; it prints the launch commands for each setup; start the decode instance on server 2 first ;; Sweep prompt lengths 128 to 4096 tokens with exact-length random prompts and a fixed output length, for each of the five setups, with enough requests for a stable 99th percentile ;; From the connector's telemetry split first-token time into prefill, transfer and first decode step ;; Fill the table and plot median and 99th percentile against prompt length, one line per setup ;; Results go to benchmarks/results/vllm_disagg/}
+
+\section{Discussion}
+\label{ch:discussion}
+
+The results are now read together: what they establish, what the transport
+measurements add to them, where the conclusions could be wrong, and what
+follows for a small laboratory.
+
+\subsection{Findings}
+
+The size of the problem is fixed by arithmetic. For Granite
+3.3 2B in 16-bit floating point, the cache holds 2 KiB per token per layer,
+which is 80 KiB per token over 40 layers and 160 MiB for a 2,048-token
+prompt. At 10 gigabits per second that is 134 ms of payload on the wire
+before any software cost (\cref{eq:wiretime}), and a transport that wastes
+nothing still pays it. The levers that remain are therefore the number of
+bytes and the order in which they are sent.
+
+The byte count can be halved at a known cost. The quantizer packs
+each vector into 64 bytes, half of the 16-bit size, and on the one real cache
+tested the eight most-attended positions agree with those of the uncompressed
+cache 91 percent of the time on average (\cref{sec:res-quant}). Expanding the
+packed cache on the receiving GPU takes tens of milliseconds for a hundred
+thousand vectors (\cref{sec:res-decomp}). However, agreement of attended
+positions is a proxy for what the model writes, so this result is a bound on
+size, and a recommendation rests on the generated text
+(\cref{fig:pending-quant-long}).
+
+Order matters in a way that arithmetic can also bound. A 64-byte
+control message that arrives behind four queued 1 MiB blocks on a 10 gigabit
+link waits 3.4 ms in a first-in first-out queue (\cref{eq:fifo}), although
+its own transmission takes microseconds. The dual-endpoint pool exists to
+remove that wait. On the lab pair, the 99th percentile of the 64-byte round
+trip under a stream of 1 MiB writes is \blank\us{} on one endpoint and
+\blank\us{} on two, against \blank\us{} with no stream (\cref{tab:e3}).
+\waiting{results from E3}
+
+Host staging is affordable on this link. With no GPU-direct path,
+each transfer is copied through host memory, and under the assumed copy rate
+of \cref{eq:staging} that copy adds about 6 percent to the wire time at 10
+gigabits per second. The same design on a 100 gigabit link would pay about
+ten times that share, so the conclusion is specific to commodity Ethernet.
+
+The static classifier cannot perform its function, which is proved and not
+only measured. The size-threshold classifier never labels a transfer
+as decode (\cref{prop:nodecode}), and the one recorded run agrees, with 781
+prefill labels, 219 unknown and none for decode (\cref{sec:res-loopback}).
+The learned replacement reaches high accuracy on synthetic traces
+(\cref{tab:wfa}).
+
+Batching helps the storage tier by about a quarter. Writing 50
+blocks per flush raised the write throughput by 25 percent over single-block
+writes in the measured sweep (\cref{sec:res-nvme}), with most of the gain
+reached by 20 blocks.
+
+\subsection{Impact of the Transport Results}
+\label{sec:impact-transport}
+
+\waiting{results from E3 and E8: this subsection is written from them}
+
+\pendingfigure{fig:pending-impact}{Share of the transfer in the time to first token, by setup}{results from E3 and E8}{Run E1 to E5 on both server pairs and E8 on the lab pair, by the steps given with each experiment ;; From E3 state, for each stack, whether the hot 99th percentile stays within a small factor of its unloaded value with two endpoints, and what it does with one ;; From E8 state the share of first-token time spent in transfer at each prompt length, and the difference between the connector and the NIXL baselines ;; If E3 shows growth on Soft-RoCE and not on hardware RoCE, report that separation by endpoint needs a network card that schedules queue pairs independently, and say so in the conclusion ;; Write this section from those four statements}
+
+\subsection{Limitations and Threats to Validity}
+
+The first group of limitations concerns the serving path. The learned
+classifier, the rule tree, the controller and the storage tier are measured
+as components and are not called by the connector (\cref{sec:overview}). E8
+as specified therefore measures a path on which the class of a transfer
+follows from its size, and it cannot show what per-transfer decisions would
+add. Moreover, the sender of the connector serializes both classes in one
+queue (\cref{sec:connector}), so the separation that E3 measures on the pool
+does not reach concurrent requests on the serving path until the sender has
+a queue per class.
+
+The second group concerns the testbed. Every transport experiment runs
+between one pair of machines over one cable, and nothing here indicates how
+the design behaves with many senders, with a switch, or with loss. On the
+lab pair the network card is a kernel driver, and its packet processing
+shares processor cores with the benchmark. Results on Soft-RoCE therefore
+describe Soft-RoCE, and the home pair is included to bound how much of a
+result is due to the software device, although it has its own limit in the
+eight-lane slot.
+
+The third group concerns the workload. The cache arithmetic and the
+quantizer result are for one two-billion-parameter model. Larger models have
+more layers and wider heads, which scales the byte count, and their caches
+may tolerate quantization differently. The learned classifier and the
+controller comparison use generated traffic, so the ordering of the methods
+is plausible on real traffic and is not demonstrated.
+
+The last group concerns the measurements themselves. Latency is half a round
+trip between two machines with different processors (\cref{eq:oneway}). The
+storage sweep and the quantizer result are single runs without a spread.
+Finally, one baseline is at a disadvantage. The libfabric back end of NIXL
+is written for the Slingshot network and for a cloud provider's adapter
+(\cref{ch:libfabric}). On this testbed it can only run over TCP, so E8
+compares against that path as it behaves on commodity Ethernet, which is the
+fair comparison for this setting and an unfair one in general.
+
+\subsection{Implications for a Small Laboratory}
+
+For a laboratory with two GPU machines and commodity Ethernet, the
+practical outcome is a method and a set of working parts. Such a laboratory
+can create RDMA devices in software, run the same benchmark used here, and determine in an afternoon whether a second endpoint isolates small messages on
+its own hardware. The library, the benchmark, the notebooks and the hardware
+record are built so that the answer comes with the commands that produced it.
+The next chapter places these results beside the systems that address
+neighboring problems.
