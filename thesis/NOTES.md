@@ -2,7 +2,7 @@
 
 Every note below is printed in the PDF with a star (*) in front of it. Nothing else in the PDF uses that character, so a search for * finds all of them. Page numbers are those printed on the pages of the last build (roman numbers are the front matter).
 
-49 notes: 37 wait for a result or a record, 12 are things to fix, confirm or write.
+50 notes: 37 wait for a result or a record, 13 are things to fix, confirm or write.
 
 ## Waiting for results
 
@@ -49,6 +49,7 @@ Every note below is printed in the PDF with a star (*) in front of it. Nothing e
 - approval page: fill in [Name]
 - approval page: fill in [Department]
 - p. iii: To be written.
+- p. iv: To be written.
 - p. 43: Confirm against the connector at the commit used for the runs: the two statements above, the single send queue of the sender, and the marker that the decode side does not wait for ([sec:connector]). If the decision components are connected to the serving path first, rewrite this paragraph and the dashed box of [fig:architecture].
 - p. 50: Fix before E6: blobs larger than one slot stall intermittently when the channel runs on the TCP provider of libfabric in loopback (reproducer: `benchmarks/fabric/blob_multichunk_check.py`; cause not identified). With 4 MiB slots a layer of Granite 3.3 2B fits in one chunk for prompts up to about 2,000 tokens, so the 2,048-token and 4,096-token points of E8 need the fix or a larger slot. If the stall is still open at submission, state it here as a limitation.
 - p. 70: Decide before submission: apply one of the two repairs in the code and measure it (run R8), or keep this section as the analysis of the rule as implemented.

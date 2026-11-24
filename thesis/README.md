@@ -1,7 +1,7 @@
 # Thesis source
 
 Adaptive RDMA Middleware for Disaggregated LLM Inference over Commodity Ethernet.
-Nathan Gopee, M.S. Computer Science, SUNY New Paltz. Draft of November 24, 2026 (version 9).
+Nathan Gopee, M.S. Computer Science, SUNY New Paltz. Draft of November 24, 2026 (version 10).
 
 ## Build
 
@@ -20,9 +20,9 @@ slow. A build from nothing takes several minutes. While editing, change
 `tagging = on` to `tagging = off` near the top of `thesis.tex`, and switch it
 back on for any PDF you check or hand in.
 
-This draft has 165 pages, of which 17 are the bibliography, so 148 pages
-count against the limit of 150. The list of symbols takes two of them, and
-the Dedication page is switched off (see Switches). It builds with no LaTeX or BibTeX warnings and
+This draft has 166 pages, of which 17 are the bibliography, so 149 pages
+count against the limit of 150. The list of symbols takes two of them and
+the Dedication page one, and both can be dropped (see Switches). It builds with no LaTeX or BibTeX warnings and
 no overfull lines, every figure and formula has alt text, and no heading level
 is skipped.
 
@@ -49,8 +49,8 @@ and sections only (`\setcounter{tocdepth}{1}` in `thesis.tex`).
 
 Other files: `thesis.tex` (preamble, title data, order of the chapters),
 `thesis-macros.tex` (star notes, placeholders, tables, charts, headings),
-`chapters/00-*.tex` (title page, approval page, abstract, acknowledgments,
-terms, symbols), `figures/data.tex` (chart data taken from the results
+`chapters/00-*.tex` (title page, approval page, abstract, dedication,
+acknowledgments, terms, symbols), `figures/data.tex` (chart data taken from the results
 files in the repository), `figures/newpaltz-logo.png`, `refs.bib`,
 `audit/` (how each bibliography entry was checked), `tools/make_bib.py`,
 `tools/notes.py` and `NOTES.md` (the list of star notes, see below).
@@ -83,7 +83,7 @@ section, no section on withdrawn results or corrections, and no paragraph
 that tells the reader what is missing. Where something is missing, the place
 holds a blank, an empty table cell or a placeholder figure, and a note marked
 with a star says what it waits for. **Nothing else in the PDF uses the
-character `*`, so a search for `*` finds every note.** This build has 49.
+character `*`, so a search for `*` finds every note.** This build has 50.
 
 | Command | Prints | Used for |
 |---|---|---|
@@ -125,8 +125,8 @@ Where the notes are:
 6. **Decisions**: the controller (repair it or keep the analysis), and the
    statements about the connector in section 5.1.
 7. **Front matter**: the name and department of the third committee member
-   on the approval page (two items in square brackets), and the
-   ACKNOWLEDGMENTS page.
+   on the approval page (two items in square brackets), and the DEDICATION
+   and ACKNOWLEDGMENTS pages.
 
 Appendix A of the thesis gives the runs (R0 to R8) that produce the results.
 Two items are not in the PDF: the logo on the title page (see Switches), and
@@ -153,10 +153,9 @@ items of the future work.
 
 - `\showlogofalse` in `thesis-macros.tex` removes the university logo from the
   title page. The Library's sample title page has no logo.
-- The DEDICATION page is switched off, because it held only a note. To add
-  a dedication, remove the two percent signs in front of
-  `\frontchapter{DEDICATION}` in `chapters/00-front.tex` and write the text
-  under it.
+- The DEDICATION page is optional. To drop it, put a percent sign in front
+  of `\frontchapter{DEDICATION}` and of the note under it in
+  `chapters/00-front.tex`.
 - The list of symbols (`chapters/00-symbols.tex`, two pages) is included by
   the two lines after the list of terms in `chapters/00-front.tex`. Remove
   them if the pages are needed.
