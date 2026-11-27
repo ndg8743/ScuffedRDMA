@@ -1,0 +1,242 @@
+{
+ "attention": {
+  "w": 184.076,
+  "h": 27.652,
+  "alt": "Attention of Q, K and V equals the softmax of Q times K transposed divided by the square root of d, times V"
+ },
+ "cache_size": {
+  "w": 166.517,
+  "h": 12.758,
+  "alt": "s layer equals 2 times h times d times w times T, and s cache equals L times s layer"
+ },
+ "attention2": {
+  "w": 116.383,
+  "h": 47.377,
+  "alt": "A equals the softmax of Q times K transposed divided by the square root of d, and the output equals A times V"
+ },
+ "cache_layer": {
+  "w": 75.234,
+  "h": 12.758,
+  "alt": "s layer equals 2 times h times d times w times T"
+ },
+ "cache_total": {
+  "w": 70.472,
+  "h": 12.647,
+  "alt": "s cache equals L times s layer"
+ },
+ "pk_defs": {
+  "w": 104.255,
+  "h": 22.983,
+  "alt": "S equals 8 s over C, and rho equals lambda times the expected value of S"
+ },
+ "chunk_max": {
+  "w": 147.201,
+  "h": 12.951,
+  "alt": "the chunk payload is at most B minus 64 minus the length of the key"
+ },
+ "hessian": {
+  "w": 137.737,
+  "h": 14.436,
+  "alt": "the Hessian of the log-sum-exp function equals the diagonal matrix of pi minus pi times pi transposed, which is positive semidefinite"
+ },
+ "yi": {
+  "w": 95.209,
+  "h": 35.388,
+  "alt": "y i equals 1 over the square root of d, times the sum over j of H i j times delta j times u j"
+ },
+ "wire": {
+  "w": 67.951,
+  "h": 22.983,
+  "alt": "t wire equals 8 times s cache divided by C"
+ },
+ "hol": {
+  "w": 62.987,
+  "h": 34.032,
+  "alt": "W equals 8 over C, times the sum of s i for i from 1 to k"
+ },
+ "pk": {
+  "w": 66.155,
+  "h": 27.163,
+  "alt": "the mean wait W bar equals lambda times the expected value of S squared, divided by 2 times 1 minus rho"
+ },
+ "bound": {
+  "w": 57.296,
+  "h": 24.865,
+  "alt": "X is at most N times B divided by t credit"
+ },
+ "staging": {
+  "w": 92.044,
+  "h": 26.525,
+  "alt": "t copy divided by t wire equals s over P divided by 8 s over C, which equals C divided by 8 P"
+ },
+ "softmax": {
+  "w": 152.213,
+  "h": 29.689,
+  "alt": "the probability of next state s prime, given state s and transfer x, equals the exponential of W s s prime dot phi of x, divided by the sum over the three states r of the exponential of W s r dot phi of x"
+ },
+ "objective": {
+  "w": 237.793,
+  "h": 32.192,
+  "alt": "J of W equals minus one over n times the sum over the n examples of the logarithm of the probability of the labeled next state, plus eta over 2 times the squared length of W, with eta greater than zero"
+ },
+ "queues": {
+  "w": 227.331,
+  "h": 23.481,
+  "alt": "the rate of change of q H equals lambda H minus u times C times mu H, and the rate of change of q C equals lambda C minus 1 minus u, times C times mu C"
+ },
+ "switching": {
+  "w": 107.985,
+  "h": 11.734,
+  "alt": "S equals p H times C times mu H, minus p C times C times mu C"
+ },
+ "implemented": {
+  "w": 168.198,
+  "h": 14.841,
+  "alt": "alpha times q H times mu H is greater than beta times q C times mu C, which with the default values means q H greater than one tenth of q C"
+ },
+ "consistent": {
+  "w": 145.793,
+  "h": 25.418,
+  "alt": "alpha times q H divided by mu H is greater than beta times q C divided by mu C, which with the default values means q H greater than two and a half times q C"
+ },
+ "rotation": {
+  "w": 65.693,
+  "h": 25.414,
+  "alt": "y equals 1 over the square root of d, times H times D times u"
+ },
+ "hadamard": {
+  "w": 156.853,
+  "h": 26.899,
+  "alt": "H 1 is the one by one matrix 1, and H of 2 n is the two by two block matrix with rows H n, H n and H n, minus H n"
+ },
+ "rrt": {
+  "w": 131.031,
+  "h": 25.414,
+  "alt": "R equals 1 over the square root of d, times H d times D, and R times R transposed equals the identity"
+ },
+ "variance": {
+  "w": 116.244,
+  "h": 22.983,
+  "alt": "the expected value of y i is zero and the variance of y i is 1 over d"
+ },
+ "score": {
+  "w": 176.167,
+  "h": 33.548,
+  "alt": "Score of q equals the inner product of q and x hat, plus rho times the square root of pi over 2 divided by m, times the sum over the m projections of z j times the inner product of s j and q"
+ },
+ "packed": {
+  "w": 138.335,
+  "h": 26.899,
+  "alt": "s packed equals 4 plus 4 plus the ceiling of d times b over 8, plus the ceiling of m over 8"
+ },
+ "packed64": {
+  "w": 118.721,
+  "h": 11.844,
+  "alt": "4 plus 4 plus 24 plus 32 equals 64 bytes"
+ },
+ "reconstruct": {
+  "w": 65.684,
+  "h": 25.912,
+  "alt": "x hat equals l over the square root of d, times D times H times y hat"
+ },
+ "batching": {
+  "w": 134.495,
+  "h": 22.346,
+  "alt": "X of n equals n times s block, divided by t fix plus n times t block, which tends to s block divided by t block as n grows"
+ },
+ "penalty": {
+  "w": 150.451,
+  "h": 26.525,
+  "alt": "penalty equals the 99th percentile of the hot latency with the cold stream on, divided by the 99th percentile with the cold stream off"
+ },
+ "ttft": {
+  "w": 166.995,
+  "h": 11.967,
+  "alt": "time to first token equals t prefill plus t transfer plus t first decode"
+ },
+ "oneway": {
+  "w": 92.1,
+  "h": 22.69,
+  "alt": "one-way latency equals round-trip time divided by two"
+ },
+ "proof54a": {
+  "w": 231.631,
+  "h": 24.865,
+  "alt": "K minus N, times t credit, is at most N times t observed, so K is at most N plus N times t observed divided by t credit"
+ },
+ "proof54b": {
+  "w": 130.771,
+  "h": 24.865,
+  "alt": "X is at most B times K divided by t observed, which is at most N times B divided by t observed, plus N times B divided by t credit"
+ },
+ "delta": {
+  "w": 181.018,
+  "h": 12.951,
+  "alt": "Delta of x equals minus gamma P times t p minus tau P times p, minus gamma D times t e minus tau D times e"
+ },
+ "hht": {
+  "w": 58.682,
+  "h": 14.408,
+  "alt": "H d times H d transposed equals d times the identity"
+ },
+ "sketch_est": {
+  "w": 233.516,
+  "h": 33.548,
+  "alt": "the inner product of q and r is estimated by the length of r times the square root of pi over 2 divided by m, times the sum of z j times the inner product of s j and q, where z j is the sign of the inner product of s j and r"
+ },
+ "sketch_est2": {
+  "w": 142.359,
+  "h": 33.548,
+  "alt": "the inner product of q and r is estimated by the length of r times the square root of pi over 2 divided by m, times the sum of z j times the inner product of s j and q"
+ },
+ "sketch_sd": {
+  "w": 163.54,
+  "h": 27.298,
+  "alt": "the standard deviation is at most the square root of pi over 2 m, times the length of r times the length of q"
+ },
+ "lemma610": {
+  "w": 104.609,
+  "h": 27.298,
+  "alt": "the expected value of the sign of X times Y equals the square root of 2 over pi, times kappa divided by sigma"
+ },
+ "window": {
+  "w": 125.021,
+  "h": 10.627,
+  "alt": "N times B equals 8 times 4 mebibytes, which is 32 mebibytes"
+ },
+ "ratio": {
+  "w": 82.369,
+  "h": 25.307,
+  "alt": "4 mebibytes divided by 8 bytes equals 524,288"
+ },
+ "softmax_def": {
+  "w": 98.211,
+  "h": 27.525,
+  "alt": "the softmax of z at entry i equals e to the z i, divided by the sum over j of e to the z j"
+ },
+ "wire_num": {
+  "w": 190.142,
+  "h": 24.672,
+  "alt": "t wire equals 8 times s cache divided by C, which is 8 times 160 times 2 to the 20, divided by 10 to the 10, seconds, which is 134.2 milliseconds"
+ },
+ "hol_num": {
+  "w": 170.235,
+  "h": 34.032,
+  "alt": "W equals 8 over C times the sum of s i for i from 1 to k, which is 8 times 4 times 2 to the 20, divided by 10 to the 10, seconds, which is 3.36 milliseconds"
+ },
+ "cache_num": {
+  "w": 169.883,
+  "h": 12.758,
+  "alt": "s layer equals 2 times 8 times 64 times 2 times T, which is 2,048 times T bytes"
+ },
+ "batch_time": {
+  "w": 100.856,
+  "h": 12.951,
+  "alt": "the time of a batch of n blocks equals t fix plus n times t block"
+ },
+ "amdahl": {
+  "w": 107.794,
+  "h": 25.474,
+  "alt": "S of N equals 1 divided by the sum of 1 minus P and P over N"
+ }
+}

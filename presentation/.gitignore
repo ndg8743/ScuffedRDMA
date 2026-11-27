@@ -1,0 +1,5 @@
+# output of a rebuild, and local installs
+out/
+node_modules/
+manim/media/
+assets/math/tmp/

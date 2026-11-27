@@ -1,0 +1,12 @@
+{
+  "name": "thesis-defense-deck",
+  "private": true,
+  "description": "Generator of the thesis defense deck (pptxgenjs)",
+  "scripts": {
+    "build": "node build.js ../../out/deck_raw.pptx",
+    "words": "node words.js"
+  },
+  "dependencies": {
+    "pptxgenjs": "4.0.1"
+  }
+}

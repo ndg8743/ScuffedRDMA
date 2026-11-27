@@ -1,0 +1,15 @@
+{
+ "h1_amdahl_dig": 39.2,
+ "m10_controller": 24.9,
+ "m1_attention": 45.0,
+ "m2a_cache_rows": 27.9,
+ "m2b_cache_size": 28.6,
+ "m3_head_of_line": 36.0,
+ "m4_hadamard": 36.4,
+ "m5_rotation": 22.6,
+ "m6_quantize": 31.3,
+ "m7_classifier": 27.3,
+ "m8_phase_detector": 29.9,
+ "m9_credits": 33.1,
+ "t0_title": 12.0
+}
