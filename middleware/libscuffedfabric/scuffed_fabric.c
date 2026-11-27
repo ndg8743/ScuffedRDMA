@@ -31,6 +31,7 @@
 
 #define SF_FI_VERSION FI_VERSION(1, 9)
 #define SF_MAGIC 0x53434652u /* 'SCFR' */
+#define SF_WIRE_VERSION 2u   /* 2: unconnected endpoints exchange one message during setup */
 #define TX_TAG(cls) ((void *)(uintptr_t)(0x10 + (cls)))
 #define RX_TAG(cls, slot) ((void *)(uintptr_t)(0x40000000u | ((uint32_t)(cls) << 24) | (uint32_t)(slot)))
 #define IS_RX_TAG(p) ((((uintptr_t)(p)) & 0xC0000000u) == 0x40000000u)
@@ -110,6 +111,10 @@ static void seterr(const char *fmt, ...) {
     va_end(ap);
 }
 
+/* Called on entry to the public calls that can fail, so that sf_strerror()
+ * describes the failure of the last call and not one from an earlier call. */
+static inline void clrerr(void) { g_err[0] = 0; }
+
 const char *sf_strerror(int err) {
     if (g_err[0]) return g_err;
     return fi_strerror(err < 0 ? -err : err);
@@ -172,12 +177,14 @@ static int recvall(int fd, void *p, size_t n) {
 
 int sf_oob_barrier(sf_ctx_t *c) {
     char b = 'b', r;
+    clrerr();
     int ret = sendall(c->oob, &b, 1);
     if (ret) return ret;
     return recvall(c->oob, &r, 1);
 }
 
 int sf_oob_xchg(sf_ctx_t *c, uint64_t mine, uint64_t *theirs) {
+    clrerr();
     int ret = sendall(c->oob, &mine, sizeof mine);
     if (ret) return ret;
     return recvall(c->oob, theirs, sizeof *theirs);
@@ -504,7 +511,7 @@ static int setup_side(sf_ctx_t *c, const char *node, int port) {
 }
 
 static int exchange(sf_ctx_t *c) {
-    struct sf_wire me = {.magic = SF_MAGIC, .version = 1, .base = (uint64_t)(uintptr_t)c->arena, .single = (uint32_t)c->o.single_ep};
+    struct sf_wire me = {.magic = SF_MAGIC, .version = SF_WIRE_VERSION, .base = (uint64_t)(uintptr_t)c->arena, .single = (uint32_t)c->o.single_ep};
     for (int k = 0; k < SF_NCLASS; k++) {
         me.key[k] = c->res[k]->key;
         me.virt[k] = (uint32_t)c->res[k]->virt_addr;
@@ -521,6 +528,11 @@ static int exchange(sf_ctx_t *c) {
     if (!ret) ret = recvall(c->oob, &them, sizeof them);
     if (ret) { seterr("oob exchange: %s", strerror(-ret)); return ret; }
     if (them.magic != SF_MAGIC) { seterr("peer is not libscuffedfabric"); return -FI_EINVAL; }
+    if (them.version != me.version) {
+        seterr("peer uses setup protocol version %u, this side version %u (rebuild both sides from one tree)",
+               them.version, me.version);
+        return -FI_EINVAL;
+    }
     if (them.single != me.single || them.ep_type[0] != me.ep_type[0] || them.ep_type[1] != me.ep_type[1]) {
         seterr("peer config mismatch (single_ep or endpoint types differ)");
         return -FI_EINVAL;
@@ -574,7 +586,12 @@ static int msg_accept_server(sf_ctx_t *c, int timeout_ms) {
     int nep = c->o.single_ep ? 1 : 2, need = 0;
     for (int k = 0; k < nep; k++) need += c->ep[k]->ep_type == SF_EP_MSG;
     int connected = 0;
+    uint64_t deadline = sf_now_ns() + (uint64_t)(timeout_ms > 0 ? timeout_ms : 30000) * 1000000ull;
     while (connected < need) {
+        if (sf_now_ns() > deadline) {
+            seterr("accept timed out: %d of %d endpoints connected", connected, need);
+            return -FI_ETIMEDOUT;
+        }
         /* events may arrive on either resource's EQ */
         for (int k = 0; k < nep && connected < need; k++) {
             sf_res_t *r = c->ep[k]->r;
@@ -605,12 +622,52 @@ static int msg_accept_server(sf_ctx_t *c, int timeout_ms) {
                 connected++;
             }
         }
-        (void)timeout_ms;
     }
     return 0;
 }
 
+/* Unconnected (RDM) endpoints set up their path to a peer on first use: ofi_rxm
+ * opens its connection, shm exchanges names. Until the peer has made progress on
+ * that, posts return "try again". Both sides are inside sf_listen / sf_connect
+ * here and can drive progress, so each sends one byte on every RDM endpoint and
+ * waits for the peer's byte. After this, first use cannot land on the data path,
+ * where the peer may be idle. Connected (MSG) endpoints need nothing. */
+static int warm_rdm(sf_ctx_t *c, int timeout_ms) {
+    int nep = c->o.single_ep ? 1 : 2;
+    uint64_t target[SF_NCLASS] = {0};
+    unsigned need = 0, got = 0;
+    for (int k = 0; k < nep; k++) {
+        if (c->ep[k]->ep_type != SF_EP_RDM || !c->ep[k]->rx_slots) continue;
+        int r = sf_send(c, k, 0, 1, 0, 0);
+        if (r) return r;
+        target[k] = sf_tx_posted(c, k);
+        need |= 1u << k;
+    }
+    if (!need) return 0;
+    uint64_t deadline = sf_now_ns() + (uint64_t)(timeout_ms > 0 ? timeout_ms : 30000) * 1000000ull;
+    for (;;) {
+        int sent = 1;
+        for (int k = 0; k < nep; k++) {
+            if (!(need & (1u << k))) continue;
+            int r = sf_progress(c, k);
+            if (r < 0) return r;
+            if (sf_tx_done(c, k) < target[k]) sent = 0;
+            sf_rx_ev_t ev[8];
+            int n = sf_poll_rx(c, k, ev, 8);
+            if (n < 0) return n;
+            for (int i = 0; i < n; i++)
+                if (ev[i].kind == SF_RX_MSG) got |= 1u << k;
+        }
+        if (sent && got == need) return 0;
+        if (sf_now_ns() > deadline) {
+            seterr("endpoint warm-up timed out (own message sent: %d, peer messages 0x%x of 0x%x)", sent, got, need);
+            return -FI_ETIMEDOUT;
+        }
+    }
+}
+
 int sf_listen(sf_ctx_t *c, const char *addr, int port, int timeout_ms) {
+    clrerr();
     c->server = 1;
     int lfd = oob_listen_fd(addr, port);
     if (lfd < 0) return lfd;
@@ -621,10 +678,12 @@ int sf_listen(sf_ctx_t *c, const char *addr, int port, int timeout_ms) {
     if (c->oob < 0) return c->oob;
     if ((ret = exchange(c))) return ret;
     if ((ret = msg_accept_server(c, timeout_ms))) return ret;
+    if ((ret = warm_rdm(c, timeout_ms))) return ret;
     return sf_oob_barrier(c);
 }
 
 int sf_connect(sf_ctx_t *c, const char *host, int port, int timeout_ms) {
+    clrerr();
     c->server = 0;
     c->oob = oob_connect(host, port, timeout_ms);
     if (c->oob < 0) return c->oob;
@@ -632,6 +691,7 @@ int sf_connect(sf_ctx_t *c, const char *host, int port, int timeout_ms) {
     if (ret) return ret;
     if ((ret = exchange(c))) return ret;
     if ((ret = msg_connect_client(c, timeout_ms))) return ret;
+    if ((ret = warm_rdm(c, timeout_ms))) return ret;
     return sf_oob_barrier(c);
 }
 
@@ -718,6 +778,7 @@ static int drain_tx(sf_ctx_t *c, sf_ep_t *e) {
 
 int sf_progress(sf_ctx_t *c, int cls) {
     sf_ep_t *e = c->ep[cls];
+    clrerr();
     if (e->use_cntr) {
         lock_res(e->r);
         if (e->manual_progress) fi_cq_read(e->rxcq, NULL, 0);
@@ -737,6 +798,7 @@ int sf_progress(sf_ctx_t *c, int cls) {
 
 int sf_wait_tx(sf_ctx_t *c, int cls, uint64_t target, int timeout_ms) {
     sf_ep_t *e = c->ep[cls];
+    clrerr();
     uint64_t deadline = timeout_ms > 0 ? sf_now_ns() + (uint64_t)timeout_ms * 1000000ull : 0;
     while (atomic_load(&c->done[cls]) < target) {
         if (e->wait && !e->use_cntr) {
@@ -798,6 +860,7 @@ static ssize_t do_sendmsg(sf_ep_t *e, void *m, uint64_t fl) { return fi_sendmsg(
 
 int sf_write(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff, uint64_t imm, int flags) {
     sf_ep_t *e = c->ep[cls];
+    clrerr();
     if (loff + len > c->data_len || roff + len > c->data_len) { seterr("sf_write out of range"); return -FI_EINVAL; }
     struct iovec iov = {.iov_base = c->arena + loff, .iov_len = len};
     void *desc = e->r->desc;
@@ -813,6 +876,7 @@ int sf_write(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff, uint64_
 
 int sf_read(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff) {
     sf_ep_t *e = c->ep[cls];
+    clrerr();
     if (loff + len > c->data_len || roff + len > c->data_len) { seterr("sf_read out of range"); return -FI_EINVAL; }
     struct iovec iov = {.iov_base = c->arena + loff, .iov_len = len};
     void *desc = e->r->desc;
@@ -824,6 +888,7 @@ int sf_read(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff) {
 
 int sf_send(sf_ctx_t *c, int cls, size_t loff, size_t len, uint64_t imm, int with_imm) {
     sf_ep_t *e = c->ep[cls];
+    clrerr();
     if (len > c->o.rx_slot_bytes || loff + len > c->data_len) { seterr("sf_send larger than rx slot"); return -FI_EINVAL; }
     struct iovec iov = {.iov_base = c->arena + loff, .iov_len = len};
     void *desc = e->r->desc;
@@ -837,6 +902,7 @@ int sf_send(sf_ctx_t *c, int cls, size_t loff, size_t len, uint64_t imm, int wit
 
 int sf_poll_rx(sf_ctx_t *c, int cls, sf_rx_ev_t *ev, int max) {
     sf_ep_t *e = c->ep[cls];
+    clrerr();
     struct fi_cq_data_entry ents[64];
     if (max > 64) max = 64;
     lock_res(e->r);

@@ -101,6 +101,8 @@ static void seterr(const char *fmt, ...) {
     va_end(ap);
 }
 const char *sf_strerror(int err) { return g_err[0] ? g_err : strerror(err < 0 ? -err : err); }
+/* On entry to the public calls that can fail, so that sf_strerror() describes the last call. */
+static inline void clrerr(void) { g_err[0] = 0; }
 
 uint64_t sf_now_ns(void) {
     struct timespec ts;
@@ -148,10 +150,12 @@ static int recvall(int fd, void *p, size_t n) {
 int sf_oob_fd(sf_ctx_t *c) { return c->oob; }
 int sf_oob_barrier(sf_ctx_t *c) {
     char b = 'b', r;
+    clrerr();
     int ret = sendall(c->oob, &b, 1);
     return ret ? ret : recvall(c->oob, &r, 1);
 }
 int sf_oob_xchg(sf_ctx_t *c, uint64_t mine, uint64_t *theirs) {
+    clrerr();
     int ret = sendall(c->oob, &mine, sizeof mine);
     return ret ? ret : recvall(c->oob, theirs, sizeof *theirs);
 }
@@ -333,6 +337,7 @@ static int exchange_and_connect(sf_ctx_t *c) {
 
 int sf_listen(sf_ctx_t *c, const char *addr, int port, int timeout_ms) {
     (void)addr;
+    clrerr();
     c->server = 1;
     int lfd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
@@ -350,6 +355,7 @@ int sf_listen(sf_ctx_t *c, const char *addr, int port, int timeout_ms) {
 }
 
 int sf_connect(sf_ctx_t *c, const char *host, int port, int timeout_ms) {
+    clrerr();
     c->server = 0;
     char svc[16];
     snprintf(svc, sizeof svc, "%d", port);
@@ -427,10 +433,11 @@ static int drain_send(sf_ctx_t *c, sv_qp_t *q) {
     return n;
 }
 
-int sf_progress(sf_ctx_t *c, int cls) { return drain_send(c, c->q[cls]); }
+int sf_progress(sf_ctx_t *c, int cls) { clrerr(); return drain_send(c, c->q[cls]); }
 
 int sf_wait_tx(sf_ctx_t *c, int cls, uint64_t target, int timeout_ms) {
     sv_qp_t *q = c->q[cls];
+    clrerr();
     uint64_t deadline = timeout_ms > 0 ? sf_now_ns() + (uint64_t)timeout_ms * 1000000ull : 0;
     while (atomic_load(&c->done[cls]) < target) {
         if (q->wait) {
@@ -473,6 +480,7 @@ static int post_send(sf_ctx_t *c, int cls, struct ibv_send_wr *wr) {
 
 int sf_write(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff, uint64_t imm, int flags) {
     sv_qp_t *q = c->q[cls];
+    clrerr();
     if (loff + len > c->data_len || roff + len > c->data_len) { seterr("sf_write out of range"); return -EINVAL; }
     struct ibv_sge sge = {.addr = (uint64_t)(uintptr_t)(c->arena + loff), .length = (uint32_t)len, .lkey = c->mr->lkey};
     struct ibv_send_wr wr = {.wr_id = TX_TAG(cls), .sg_list = &sge, .num_sge = 1,
@@ -487,6 +495,7 @@ int sf_write(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff, uint64_
 
 int sf_read(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff) {
     sv_qp_t *q = c->q[cls];
+    clrerr();
     if (loff + len > c->data_len || roff + len > c->data_len) { seterr("sf_read out of range"); return -EINVAL; }
     struct ibv_sge sge = {.addr = (uint64_t)(uintptr_t)(c->arena + loff), .length = (uint32_t)len, .lkey = c->mr->lkey};
     struct ibv_send_wr wr = {.wr_id = TX_TAG(cls), .sg_list = &sge, .num_sge = 1, .opcode = IBV_WR_RDMA_READ,
@@ -498,6 +507,7 @@ int sf_read(sf_ctx_t *c, int cls, size_t loff, size_t len, size_t roff) {
 
 int sf_send(sf_ctx_t *c, int cls, size_t loff, size_t len, uint64_t imm, int with_imm) {
     sv_qp_t *q = c->q[cls];
+    clrerr();
     if (len > q->rx_slot_bytes || loff + len > c->data_len) { seterr("sf_send larger than rx slot"); return -EINVAL; }
     struct ibv_sge sge = {.addr = (uint64_t)(uintptr_t)(c->arena + loff), .length = (uint32_t)len, .lkey = c->mr->lkey};
     struct ibv_send_wr wr = {.wr_id = TX_TAG(cls), .sg_list = &sge, .num_sge = 1,
@@ -509,6 +519,7 @@ int sf_send(sf_ctx_t *c, int cls, size_t loff, size_t len, uint64_t imm, int wit
 
 int sf_poll_rx(sf_ctx_t *c, int cls, sf_rx_ev_t *ev, int max) {
     sv_qp_t *q = c->q[cls];
+    clrerr();
     struct ibv_wc wc[64];
     if (max > 64) max = 64;
     int n = ibv_poll_cq(q->rcq, max, wc);

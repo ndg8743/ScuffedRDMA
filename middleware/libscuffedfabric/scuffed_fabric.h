@@ -20,7 +20,19 @@
  * holds receive slots for two-sided messages and FI_RX_CQ_DATA.
  *
  * Address and key exchange go over an out-of-band TCP socket on `port`;
- * MSG endpoints listen on port+1.
+ * MSG endpoints listen on port+1. Unconnected (RDM) endpoints exchange one
+ * message during sf_listen / sf_connect, so the provider's first-use setup
+ * (ofi_rxm connection, shm name exchange) is finished before either call
+ * returns.
+ *
+ * Progress. The library has no thread of its own. With manual-progress
+ * providers (ofi_rxm, shm), and with the tcp provider of libfabric 1.17,
+ * which reports automatic progress but has no thread either, a posted
+ * operation only advances while the application calls sf_progress,
+ * sf_wait_tx or sf_poll_rx, on the initiator and on the target. A caller
+ * that posts and then goes idle leaves the rest of the transfer queued.
+ * Wait with sf_wait_tx, or keep polling. On verbs the device progresses
+ * by itself and these calls only collect completions.
  */
 #ifndef SCUFFED_FABRIC_H
 #define SCUFFED_FABRIC_H
@@ -106,7 +118,10 @@ uint64_t sf_tx_posted(sf_ctx_t *c, int cls);
 uint64_t sf_tx_done(sf_ctx_t *c, int cls);
 int sf_progress(sf_ctx_t *c, int cls);                     /* drain TX CQ / read counter; returns events seen or <0 */
 int sf_wait_tx(sf_ctx_t *c, int cls, uint64_t target, int timeout_ms); /* until done >= target */
-int sf_poll_rx(sf_ctx_t *c, int cls, sf_rx_ev_t *ev, int max);         /* reposts consumed slots */
+/* sf_poll_rx gives a consumed receive slot back to the provider before it returns. The bytes of an
+ * SF_RX_MSG at slot_off stay intact until rx_depth further messages have arrived on that class (slots
+ * are reused in the order they were posted), so read or copy them before polling that many more. */
+int sf_poll_rx(sf_ctx_t *c, int cls, sf_rx_ev_t *ev, int max);
 uint64_t sf_rma_events(sf_ctx_t *c, int cls);              /* remote writes landed (needs rma_event) */
 
 /* OOB helpers for benchmarks: tiny barrier and u64 exchange over the side socket. */
