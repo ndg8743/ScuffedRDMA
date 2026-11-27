@@ -574,6 +574,17 @@ int main(int argc, char **argv) {
     sb(&out, "\"hot\":\"%s\",", sf_describe(c, SF_HOT));
     sb(&out, "\"cold\":\"%s\",", sf_describe(c, SF_COLD));
     sb(&out, "\"iters\":%d,\"warmup\":%d,", a.iters, a.warmup);
+    /* An option the provider could not grant falls back silently in the library (the verbs provider
+     * has no counters, for example). Record what was asked for next to what is active, so that a
+     * result is never filed under a configuration that did not run. */
+    int cntr_on = sf_capable(c, SF_HOT, "cntr"), wait_on = sf_capable(c, SF_COLD, "wait");
+    sb(&out, "\"hot_cntr_requested\":%d,\"hot_cntr_active\":%d,\"cold_wait_requested\":%d,\"cold_wait_active\":%d,",
+       a.hot_cntr, cntr_on, a.cold_wait, wait_on);
+    if (a.hot_cntr && !cntr_on)
+        fprintf(stderr, SF_BENCH_TOOL ": --hot-cntr was requested, but this provider gave no completion counter; "
+                                      "hot completions use the queue\n");
+    if (a.cold_wait && !wait_on)
+        fprintf(stderr, SF_BENCH_TOOL ": --cold-wait was requested, but no wait object is active on the cold queue\n");
 
     if (!strcmp(a.mode, "sig")) run_sig(c, &a, &out);
     else if (!strcmp(a.mode, "bw")) run_bw(c, &a, &out);
