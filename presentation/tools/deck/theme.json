@@ -1,0 +1,19 @@
+{
+  "name": "New Paltz thesis, formal",
+  "headFontFace": "Cambria",
+  "bodyFontFace": "Calibri",
+  "colors": {
+    "dk1": "1A202C",
+    "lt1": "FFFFFF",
+    "dk2": "173A79",
+    "lt2": "EEF1F5",
+    "accent1": "005AB5",
+    "accent2": "B04800",
+    "accent3": "8A929C",
+    "accent4": "C9CED6",
+    "accent5": "5C6066",
+    "accent6": "F4741C",
+    "hlink": "005AB5",
+    "folHlink": "5C6066"
+  }
+}

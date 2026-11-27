@@ -1,0 +1,70 @@
+{
+ "towers": {
+  "file": "towers.jpg",
+  "w": 2400,
+  "h": 1108,
+  "source": "towers-initial-setup.jpg",
+  "crop": null,
+  "rotation": 0
+ },
+ "v100_installed": {
+  "file": "v100_installed.jpg",
+  "w": 2211,
+  "h": 1022,
+  "source": "v100-gpus-installed.jpg",
+  "crop": null,
+  "rotation": 0
+ },
+ "staging": {
+  "file": "staging.jpg",
+  "w": 920,
+  "h": 757,
+  "source": "hardware-staging-v100s.jpg",
+  "crop": [
+   30,
+   1060,
+   950,
+   1817
+  ],
+  "rotation": 0
+ },
+ "vendor_firmware_list": {
+  "file": "vendor_firmware_list.png",
+  "w": 1223,
+  "h": 664,
+  "source": "bios-official-versions.png",
+  "crop": [
+   318,
+   140,
+   1541,
+   804
+  ],
+  "rotation": 0
+ },
+ "firmware_f24": {
+  "file": "firmware_f24.jpg",
+  "w": 1518,
+  "h": 308,
+  "source": "bios-custom-f24-rebar.jpg",
+  "crop": [
+   10,
+   104,
+   1528,
+   412
+  ],
+  "rotation": -1.1
+ },
+ "server4_status": {
+  "file": "server4_status.jpg",
+  "w": 900,
+  "h": 399,
+  "source": "specs-proxmox-server.png",
+  "crop": [
+   0,
+   418,
+   900,
+   817
+  ],
+  "rotation": 0
+ }
+}
