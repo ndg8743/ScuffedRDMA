@@ -10,7 +10,7 @@ Commodity Ethernet" (Nathan Gopee, SUNY New Paltz, December 2026), with everythi
 
 This is version 8 of the deck, built on November 26, 2026. It follows version 12 of the thesis draft, which is
 newer than the draft in `thesis/`. Slide 64 and the remarks on the verbs provider on slides 65 and 150 describe
-the code of the branch `fix/blob-channel-progress`.
+the blob channel after the fix of the same day (commits 9ae6c93, 0c4c93e and 5b0e9a7).
 
 ## The talk
 
