@@ -24,6 +24,18 @@ Blob wire protocol (per side, data region split in half):
   credit write: 8-byte fi_writedata on the hot endpoint, imm = CREDIT | s
 Writes and their notification are one operation on one endpoint, so a
 notification never overtakes its payload.
+
+Progress. With the providers that libfabric calls manual progress (ofi_rxm,
+shm) a transfer only advances while the application is inside a libfabric
+call that reads a completion queue. The tcp provider of libfabric 1.17
+behaves the same way although it reports FI_PROGRESS_AUTO: it has no thread
+of its own, so the part of a write that the socket did not take at once
+stays queued until the next such call. The channel therefore drives progress
+itself. send() returns after its writes have completed locally, recv() polls
+while it waits, and a side that is idle between sends calls poll() from time
+to time (KVSender does) so that credits and connection handshakes from the
+peer are served. On the verbs provider the device makes progress on its own
+and these calls only collect completions.
 """
 
 from __future__ import annotations
@@ -400,15 +412,37 @@ class FabricBlobChannel:
                 if self._free:
                     slot = self._free.popleft()
                     staged = self._staged_at.pop(slot, None)
-                    if staged is not None and self.pool.done(staged[0]) < staged[1]:
-                        self.pool.wait_tx(staged[0], staged[1])
+                    if staged is not None:
+                        try:   # the staging buffer of this slot is free once its earlier write is done
+                            self._wait_done(staged[0], staged[1], deadline)
+                        except BaseException:
+                            self._free.appendleft(slot)
+                            self._staged_at[slot] = staged
+                            raise
                     return slot
                 self._pump()
             if deadline is not None and time.monotonic() > deadline:
                 raise TimeoutError("no free remote slot (peer not receiving?)")
 
     # ---- BlobChannel ---------------------------------------------------------
-    def send(self, key: str, payload: Buf, hot: bool = False, timeout: Optional[float] = 120.0) -> None:
+    def _wait_done(self, cls: int, target: int, deadline: Optional[float]) -> None:
+        """Drive progress on both classes until `target` writes of class cls have completed locally."""
+        while True:
+            with self._lock:
+                if self.pool.done(cls) >= target:
+                    return
+                self._pump()
+                if self.pool.done(cls) >= target:
+                    return
+            if deadline is not None and time.monotonic() > deadline:
+                raise TimeoutError(f"write not completed locally: class {cls} done {self.pool.done(cls)} "
+                                   f"of {target} (peer not making progress?)")
+
+    def send(self, key: str, payload: Buf, hot: bool = False, timeout: Optional[float] = 120.0,
+             wait: bool = True) -> None:
+        """Send one blob. With wait=True (default) the call returns after every chunk has completed
+        locally, which is also what the recorded latency then measures. wait=False returns after the
+        chunks are posted; the caller must then call flush() or poll() until they are done."""
         kb = key.encode()
         mv = memoryview(payload).cast("B")
         total = mv.nbytes
@@ -435,10 +469,13 @@ class FabricBlobChannel:
             with self._lock:
                 self.pool.write(cls, src, n, slot * self.slot_bytes, imm=_DATA | slot,
                                 inject=n <= self.pool.inject_size(cls), more=False)
-                self._staged_at[slot] = (cls, self.pool.posted(cls))
+                mark = self.pool.posted(cls)
+                self._staged_at[slot] = (cls, mark)
             off += clen
             if off >= total:
                 break
+        if wait:
+            self._wait_done(cls, mark, deadline)
         dt_us = (time.perf_counter() - t0) * 1e6
         self.tel.record("hot" if hot else "cold", dt_us, total)
 
@@ -454,11 +491,24 @@ class FabricBlobChannel:
             if deadline is not None and time.monotonic() > deadline:
                 raise TimeoutError("no blob before timeout")
 
+    def poll(self) -> int:
+        """Drive progress once on both classes: completions, incoming chunks, credits. Returns the
+        number of receive events handled. For a side that is idle between sends."""
+        with self._lock:
+            return self._pump()
+
+    def flush(self, timeout: Optional[float] = 120.0) -> None:
+        """Drive progress until every write posted so far has completed locally."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._lock:
+            targets = [(cls, self.pool.posted(cls)) for cls in (HOT, COLD)]
+        for cls, target in targets:
+            self._wait_done(cls, target, deadline)
+
     def close(self) -> None:
         with self._lock:
             try:
-                for cls in (HOT, COLD):
-                    self.pool.wait_tx(cls, timeout_ms=2000)
-            except FabricError:
+                self.flush(timeout=2.0)
+            except (FabricError, TimeoutError):
                 pass
             self.pool.close()

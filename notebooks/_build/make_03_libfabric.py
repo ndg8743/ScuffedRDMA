@@ -137,7 +137,7 @@ app += blob_bench(lambda: pair(lambda: FabricBlobChannel.listen(port + 1, "127.0
 app = pd.DataFrame(app)
 if not app.ok.all():
     print("NOTE: some blob sizes did not complete:", app[~app.ok][["label", "blob_bytes", "error"]].to_dict("records"))
-    print("      multi-chunk blobs (larger than one slot) stall intermittently on the libfabric tcp provider loopback; see benchmarks/fabric/blob_multichunk_check.py")
+    print("      this is not expected: the stall of blobs larger than one slot was fixed on 2026-11-26 (docs/explained/05-blob-channel.md, section 9); check with benchmarks/fabric/blob_multichunk_check.py")
 app'''),
 ("code", '''figb, ax = plt.subplots(1, 2, figsize=(10, 3.4))
 for lab, g in app[app.ok].groupby("label"):

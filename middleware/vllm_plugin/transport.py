@@ -5,6 +5,9 @@ KV push transport for the connector.
               consumer at peer:port+rank in the background, queues blobs,
               tags each hot/cold with the WFA classifier, sends from a
               thread, and reports every transfer to middleware.telemetry.
+              While its queue is empty the thread polls the channel every
+              few milliseconds, because a libfabric channel only makes
+              progress inside calls (see middleware/fabric/pool.py).
   KVReceiver  consumer side (decode). Listens on port+rank, receives blobs
               into a bounded staging pool keyed by blob key, and hands them
               to start_load_kv via wait(key, timeout).
@@ -32,6 +35,8 @@ from middleware.fabric.channel import BlobChannel, TcpBlobChannel
 from middleware.telemetry import SignalVector
 
 log = logging.getLogger("scuffed.vllm")
+
+_IDLE_POLL_S = 0.002   # how often an idle sender serves its channel (credits, handshakes from the peer)
 
 _FABRIC_IMPORT_ERR: Optional[BaseException] = None
 
@@ -136,8 +141,13 @@ class KVSender:
         try:
             if self._ch is None:
                 self._connect()
+            poll = getattr(self._ch, "poll", None)   # FabricBlobChannel has it, TcpBlobChannel does not
             while True:
-                item = self._q.get()
+                try:
+                    item = self._q.get(timeout=_IDLE_POLL_S) if poll is not None else self._q.get()
+                except queue.Empty:
+                    poll()
+                    continue
                 if item is None:
                     self._q.task_done()
                     return

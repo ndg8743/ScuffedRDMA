@@ -23,7 +23,7 @@ Status of every next step from the proposal through Update 8, checked against th
 | Completion-signaling microbenchmark, instructions per post | U7 step 3 | cluster | `sf_bench -m sig`, notebook 02 |
 | libfabric vs libibverbs comparison | U7 step 4, U8 | cluster | notebook 03 |
 | Per-class telemetry, QP error / reconnect / TCP fallback, Prometheus | U2, U7 step 5 | built | `middleware/telemetry.py` |
-| FabricBlobChannel multi-chunk blobs stall intermittently (libfabric `tcp` loopback) | found 2026-10-26, notebook 03 | **open bug**, blocks E6–E8 | `benchmarks/fabric/blob_multichunk_check.py` |
+| FabricBlobChannel multi-chunk blobs stalled intermittently (libfabric `tcp` loopback) | found 2026-10-26, notebook 03 | fixed 2026-11-26: `send` returned with writes still queued and an idle sender never drove them out; it now waits for local completion, and unconnected endpoints finish their first-use setup during connect. Passes on tcp / tcp;ofi_rxm / shm here; confirm on verbs (run R5) | `docs/explained/05-blob-channel.md` section 9, `tests/test_fabric_pool.py`, `benchmarks/fabric/blob_multichunk_check.py` |
 | NCCL net plugin | U5-2 | builds; NCCL + vLLM run open | `middleware/nccl_plugin/` |
 | UCCL vs ScuffedRDMA mixed-traffic p99 | U5-2 | open | `benchmarks/test_arch/stack-draft/bench_uccl_p2p.py` |
 | NVSHMEM + OpenMPI GPU-initiated puts | U5-2 | open | |

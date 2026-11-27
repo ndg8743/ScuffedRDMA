@@ -237,6 +237,33 @@ def _cfg(prod, cons, **kw):
     return ConnectorConfig(is_producer=prod, is_consumer=cons, block_size=16, **kw)
 
 
+def test_idle_sender_polls_its_channel():
+    """A channel that needs calls to make progress is served while the sender has nothing to send."""
+    class Polled:
+        def __init__(self):
+            self.polls, self.sent = 0, []
+
+        def poll(self):
+            self.polls += 1
+            return 0
+
+        def send(self, key, payload, hot=False):
+            self.sent.append((key, bytes(payload), hot))
+
+        def close(self):
+            pass
+
+    ch = Polled()
+    tx = KVSender("unused", 0, channel=ch, tel=Telemetry(node="t"))
+    try:
+        time.sleep(0.2)
+        assert ch.polls >= 10                       # about every 2 ms while the queue is empty
+        tx.send("x/L0", b"abc", hot=True)
+        assert tx.flush(timeout=5) and ch.sent == [("x/L0", b"abc", True)]
+    finally:
+        tx.close()
+
+
 def test_scheduler_producer_full_and_chunked_prefill():
     s = SchedulerSide(_cfg(True, False))
     r1 = FakeRequest("p-1-aaaa", list(range(40)), {"do_remote_decode": True, "scuffed_xfer_id": "X1"})

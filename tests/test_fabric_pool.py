@@ -140,6 +140,81 @@ def test_blob_channel_sizes_and_classes(cfg):
         c.close()
 
 
+# SCUFFED_TEST_ADDR: address both sides use. For the verbs rows set it to the IP of the interface that
+# carries the RDMA device if the loopback address does not resolve to it on that host.
+ADDR = os.environ.get("SCUFFED_TEST_ADDR", "127.0.0.1")
+IDLE_SENDER = [dict(provider="tcp", ep_type="msg"), dict(provider="tcp;ofi_rxm", ep_type="rdm"),
+               dict(provider="shm", ep_type="rdm"),
+               pytest.param(dict(provider="verbs", ep_type="msg"), marks=pytest.mark.rdma),
+               pytest.param(dict(provider="verbs;ofi_rxm", ep_type="rdm"), marks=pytest.mark.rdma)]
+
+
+@pytest.mark.parametrize("cfg", IDLE_SENDER, ids=_ids)
+def test_blob_channel_multichunk_with_idle_sender(cfg):
+    """A sender that makes no call after send() must not leave part of a blob behind.
+
+    Regression test for the stall of blobs larger than one slot. The channel used to post its chunks
+    and return. libfabric's tcp provider (1.17) has no progress thread, so whatever the socket had not
+    taken at once stayed queued until the sender's next call, and on ofi_rxm and shm the receiver's
+    first credit waited for an idle sender to answer the provider's first-use setup."""
+    from middleware.fabric.pool import COLD, FabricBlobChannel, FabricPool
+
+    nslots, slot = 8, 4 << 20
+    p = port()
+    mk = lambda: FabricPool(arena_mb=2 * nslots * 4 + 1, **cfg)  # noqa: E731
+    s, c = _pair(lambda: FabricBlobChannel(mk().listen(p, ADDR, 20000), nslots=nslots, slot_bytes=slot),
+                 lambda: FabricBlobChannel(mk().connect(ADDR, p, 20000), nslots=nslots, slot_bytes=slot))
+    try:
+        for i, size in enumerate([8 << 20, 16 << 20, (5 << 20) + 7, 16 << 20]):
+            payload, out = os.urandom(size), {}
+            t = threading.Thread(target=lambda: out.update(r=s.recv(timeout=30)))
+            t.start()
+            c.send(f"k{i}", payload)
+            assert c.pool.done(COLD) == c.pool.posted(COLD), "send returned with writes still queued"
+            t.join(40)                                   # the sender is idle from here on
+            assert not t.is_alive(), f"blob {i} ({size} bytes) not delivered"
+            assert out.get("r") == (f"k{i}", payload)
+    finally:
+        s.close()
+        c.close()
+
+
+def test_blob_channel_posted_sends_complete_on_flush():
+    """wait=False returns after posting; flush() then drives every write to completion."""
+    from middleware.fabric.pool import COLD, HOT, FabricBlobChannel, FabricPool
+
+    p = port()
+    mk = lambda: FabricPool("tcp", "msg", arena_mb=2 * 8 * 1 + 1)  # noqa: E731
+    s, c = _pair(lambda: FabricBlobChannel(mk().listen(p, "127.0.0.1", 20000), nslots=8, slot_bytes=1 << 20),
+                 lambda: FabricBlobChannel(mk().connect("127.0.0.1", p, 20000), nslots=8, slot_bytes=1 << 20))
+    blobs = [(f"b{i}", os.urandom(300000 + i), i % 5 == 0) for i in range(24)]
+    got = {}
+
+    def rx():
+        for _ in blobs:
+            k, v = s.recv(timeout=30)
+            got[k] = v
+
+    t = threading.Thread(target=rx)
+    t.start()
+    try:
+        for k, v, hot in blobs:
+            c.send(k, v, hot=hot, wait=False)
+        c.flush(timeout=30)
+        assert c.pool.done(COLD) == c.pool.posted(COLD) and c.pool.done(HOT) == c.pool.posted(HOT)
+        t.join(40)
+        assert not t.is_alive() and got == {k: v for k, v, _ in blobs}
+        for _ in range(5000):                            # every slot comes back as a credit
+            c.poll()
+            if len(c._free) == c.nslots:
+                break
+            threading.Event().wait(0.001)
+        assert sorted(c._free) == list(range(c.nslots))
+    finally:
+        s.close()
+        c.close()
+
+
 def test_blob_channel_reports_telemetry():
     from middleware.fabric.pool import FabricBlobChannel, FabricPool
     from middleware.telemetry import Telemetry
@@ -182,6 +257,17 @@ def test_sf_bench_sig_tcp(mech):
         return
     assert [r["size"] for r in d["results"]] == [64, 4096]
     assert all(r["n"] == 200 and r["p50_us"] > 0 for r in d["results"])
+
+
+def test_sf_bench_records_requested_and_active_options():
+    """The output says which options were asked for and which are active, so a run on a provider
+    that cannot grant one (verbs has no counters) is not filed under the configuration asked for."""
+    d = _bench(FAB / "sf_bench", "sig", ["-M", "cq", "-p", "tcp", "-t", "msg", "-n", "50", "-w", "5", "-S", "64",
+                                         "--hot-cntr", "--cold-wait"])
+    assert d["hot_cntr_requested"] == 1 and d["cold_wait_requested"] == 1
+    assert f"hot_cntr={d['hot_cntr_active']}" in d["hot"] and f"cold_wait={d['cold_wait_active']}" in d["cold"]
+    plain = _bench(FAB / "sf_bench", "sig", ["-M", "cq", "-p", "tcp", "-t", "msg", "-n", "50", "-w", "5", "-S", "64"])
+    assert plain["hot_cntr_requested"] == 0 and plain["hot_cntr_active"] == 0
 
 
 def test_sf_bench_sig_shm_counter():

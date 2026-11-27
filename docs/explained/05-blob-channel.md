@@ -37,6 +37,8 @@ Each slot holds a 64-byte header (magic, blob id, key length, flags, total lengt
 3. Write header, key and chunk into staging slot $`s`$.
 4. Post one `fi_writedata` from staging slot $`s`$ to the peer's receive slot $`s`$, with immediate data `DATA | s`, on the hot or cold endpoint (cold unless the blob is tagged hot).
 
+After the last chunk the sender keeps driving progress on both endpoints until every chunk of the blob has completed locally, and only then returns. With `send(..., wait=False)` it returns after step 4, and the caller calls `flush()` later.
+
 **Receiver**, on a completion carrying `DATA | s`:
 
 5. Check the magic, read the header, and copy the chunk into the blob's reassembly buffer at `chunk_off`.
@@ -68,7 +70,7 @@ A one-sided write reads its source buffer after it is posted. If the sender over
 
 **Claim.** Staging slot $`s`$ is not rewritten until the previous write from it has completed locally.
 
-**Proof.** When the sender posts from staging slot $`s`$ it records `(endpoint, posted count)` in `_staged_at[s]`. Before reusing $`s`$, `_take_slot` checks whether the endpoint's completed-operation count has reached that number and, if not, waits (`wait_tx`). Completions on one endpoint are counted in order, so reaching the count means that write has completed, and a completed write no longer reads its source. Small writes are posted with `FI_INJECT`, which copies the payload at post time, so their source is free immediately. $`\square`$
+**Proof.** When the sender posts from staging slot $`s`$ it records `(endpoint, posted count)` in `_staged_at[s]`. Before reusing $`s`$, `_take_slot` checks whether the endpoint's completed-operation count has reached that number and, if not, waits while driving progress on both endpoints (`_wait_done`). Completions on one endpoint are counted in order, so reaching the count means that write has completed, and a completed write no longer reads its source. Small writes are posted with `FI_INJECT`, which copies the payload at post time, so their source is free immediately. $`\square`$
 
 ## 5. Safety: the notification never arrives before the data
 
@@ -98,7 +100,13 @@ To run at link rate $`C`$ the window must cover the bandwidth-delay product: $`N
 
 A credit is 8 bytes and gates the sender's next chunk. If credits shared the cold endpoint, each credit would wait behind queued bulk writes from receiver to sender (README section 2), and the sender would sit idle with work to do. On the hot endpoint they have no bulk ahead of them.
 
-## 9. Status
+## 9. Who drives progress
+
+libfabric only moves data while the application is inside one of its calls when the provider uses manual progress (`ofi_rxm`, `shm`). The `tcp` provider of libfabric 1.17 behaves the same way although it reports automatic progress: it has no thread of its own, so the part of a write that the socket did not take at once stays queued until the next call that reads a completion queue. On the verbs provider the device makes progress by itself.
+
+The channel therefore never leaves work behind a call. `send` returns after its writes have completed locally, `recv` polls while it waits, and a side that is idle calls `poll()` from time to time; `KVSender` does this every 2 ms while its queue is empty. Unconnected endpoints also need both sides for their first use (`ofi_rxm` opens its connection, `shm` exchanges names), so `sf_listen` and `sf_connect` exchange one message on each of them before they return.
+
+## 10. Status
 
 | Claim | Status |
 |---|---|
@@ -107,7 +115,7 @@ A credit is 8 bytes and gates the sender's next chunk. If credits shared the col
 | Notification after data | follows from write-with-immediate semantics |
 | Correct reassembly | proven |
 | Throughput ≤ $`NB/R`$ | Little's law; the actual $`R`$ is measured by `benchmarks/fabric/blob_bench.py` (E6) |
-| Multi-chunk blobs (larger than one slot) delivered | **open bug**: intermittent stall on the libfabric `tcp` provider in loopback (first seen executing notebook 03, 2026-10-26; `benchmarks/fabric/blob_multichunk_check.py` reproduces it). Single-chunk blobs always pass. The reassembly proof above assumes every chunk arrives; the stall means a chunk or its credit is lost or never polled, which is a transport or `_pump` bug, not a proof gap. Must be fixed before E6–E8. |
+| Multi-chunk blobs (larger than one slot) delivered | fixed 2026-11-26. Cause: `send` posted its chunks and returned, and in the failing runs the sender then made no further call, so whatever the socket had not taken at once stayed in the provider's queue (section 9). `benchmarks/fabric/blob_multichunk_check.py` now passes, and `tests/test_fabric_pool.py::test_blob_channel_multichunk_with_idle_sender` covers `tcp`, `tcp;ofi_rxm` and `shm` in loopback on libfabric 1.17. Still to confirm on the verbs provider (run R5). |
 
 ## References
 
