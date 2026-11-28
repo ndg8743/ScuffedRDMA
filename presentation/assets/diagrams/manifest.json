@@ -1,0 +1,63 @@
+{
+ "tq_rotation": {
+  "w": 3.6,
+  "h": 2.6,
+  "alt": "Picture in three parts. Left, labeled before: the 64 coordinates of the example vector as bars; three bars are tall, the tallest is 0.76, and the rest are short. Middle, labeled rotation matrix: a square of 64 by 64 cells in many shades, which looks like noise, with the text 4,096 random numbers under it. Right, labeled after: 64 bars of similar, small size; the tallest is 0.26. Under each set of bars its largest value is printed."
+ },
+ "tq_polar": {
+  "w": 5.3,
+  "h": 2.6,
+  "alt": "Picture in two parts. Left: a circle divided into 16 equal sectors, with the axes y 1 and y 2. A point is joined to the center by a line labeled r, an arc from the y 1 axis to that line is labeled theta, the sector that holds the point is shaded, a dashed line marks the middle of that sector, and the text under the circle reads 16 sectors for the angle. Right: a tree over 64 coordinates. Neighbors are joined in pairs, the 32 joints are joined in pairs again, and so on up to one joint at the top, which is labeled one radius. A column labeled angles counts the joints of each row: 32, 16, 8, 4, 2 and 1."
+ },
+ "tq_signs": {
+  "w": 2.4,
+  "h": 2.6,
+  "alt": "A grid of 64 cells in 4 rows of 16, some filled and some empty, with the text 64 signs under it."
+ },
+ "sq_rotation": {
+  "w": 3.6,
+  "h": 2.6,
+  "alt": "Picture in three parts. Left, labeled before: the same 64 coordinates as bars; three bars are tall, the tallest is 0.76. Middle, labeled Hadamard matrix: a square of 64 by 64 cells in two shades that form a regular pattern, which repeats at every scale, and under it one row of 64 cells in the same two shades with the text and 64 random signs. Right, labeled after: 64 bars of similar, small size; the tallest is 0.25. Under each set of bars its largest value is printed."
+ },
+ "sq_levels": {
+  "w": 5.3,
+  "h": 2.6,
+  "alt": "Picture in two parts. Left: a square with the axes y 1 and y 2 and eight vertical and eight horizontal lines, closer together near the center. A point is reached by one step along y 1 and one step along y 2, the rectangle of the grid that holds it is shaded, and a short line joins the point to the nearest crossing of two lines, which is marked with a small square; the text under the square reads 8 levels for each coordinate. Right: the 64 rotated coordinates as dots over eight horizontal lines labeled 8 levels, each dot joined to the nearest line by a short stroke."
+ },
+ "sq_signs": {
+  "w": 2.4,
+  "h": 2.6,
+  "alt": "A grid of 256 cells in 16 rows of 16, some filled and some empty, with the text 256 signs under it. The cells have the size of those on the slide before."
+ },
+ "_numbers": {
+  "dimension": 64,
+  "seed_of_the_vector": 1343,
+  "seed_of_the_rotation_matrix": 244,
+  "largest_entry_before": 0.76,
+  "largest_entry_after_random_rotation": 0.26,
+  "largest_entry_after_hadamard_rotation": 0.25,
+  "polar_pair": [
+   1,
+   2
+  ],
+  "polar_pair_angle_degrees": 40.9,
+  "polar_pair_sector_of_16": 2,
+  "levels_pair": [
+   1,
+   2
+  ],
+  "levels_in_units_of_one_over_sqrt_d": [
+   -2.118,
+   -1.338,
+   -0.764,
+   -0.257,
+   0.233,
+   0.738,
+   1.316,
+   2.097
+  ],
+  "plus_signs_of_64": 32,
+  "plus_signs_of_256": 131,
+  "packed_bytes_of_the_vector": 64
+ }
+}

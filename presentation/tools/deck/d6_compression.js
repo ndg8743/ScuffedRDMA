@@ -1,17 +1,81 @@
 // Part VII: compression (the quantizer) and the storage tier.
 const { pres, H, INK, NAVY, WHITE, PANEL, BLUE, ORANGE, RULE, HAIR, GRAY, BRIGHT, W, MX, CW, Y0, Y1, FX, FW, num, def,
-  newSlide, opener, B, B2, T, L, note, take, star, claim, stat, more, node, arrow, hline, vline, rect, eq, gif, tbl, CH } = require("./lib");
+  newSlide, opener, B, B2, T, L, note, take, star, claim, stat, more, node, arrow, hline, vline, rect, eq, gif, dia, tbl, CH, linesOf } = require("./lib");
 
 opener("c", "This part covers the two components that act, which are a quantizer that halves the bytes of the cache on the wire and a storage tier that gives blocks a place to wait.");
 
 def("c01", () => {
   const s = newSlide("c01", "Two columns", "What comes from published work, and what we add",
-    "The method comes from published work: the rotation and the scalar quantizer of TurboQuant, the sign sketch of QJL, and the levels of Lloyd and Max.\n\nOur part is the packed wire format, sizes measured from the bytes written, and the placement, which is on data in transit and at rest while the cache on the GPU stays as it is.");
+    "The method comes from published work: the scheme of TurboQuant, which rotates a vector and then rounds each coordinate, the sign sketch of QJL, and the levels of Lloyd and Max. The next two slides show TurboQuant, and then where ours differs.\n\nOur part is the packed wire format, sizes measured from the bytes written, and the placement, which is on data in transit and at rest while the cache on the GPU stays as it is.");
   B(s, [{ t: "Taken from published work", plain: true, bold: true, color: NAVY, size: 24 },
-    "The rotation and the scalar quantizer of TurboQuant", "The sign sketch of QJL", "The levels of Lloyd and Max"]);
+    "The scheme of TurboQuant: rotate a vector, then round each coordinate", "The sign sketch of QJL", "The levels of Lloyd and Max"]);
   B2(s, [{ t: "Contributed here", plain: true, bold: true, color: NAVY, size: 24 },
     "A packed wire format", "Sizes measured from the bytes written", "The placement: data in transit and at rest, with the cache on the GPU left as it is"]);
   vline(s, 6.66, Y0 + 0.05, 3.5);
+});
+
+// added in version 10: TurboQuant as the Google Research post of March 24, 2026 presents it, and ours beside it.
+// Both slides have the same three panels at the same places, so that going from one to the other shows what
+// differs. The pictures are drawn by tools/quant_figures.py at the size they have here.
+const QG = (CW - 3.6 - 5.3 - 2.4) / 2;
+const QP = [{ x: MX, w: 3.6 }, { x: MX + 3.6 + QG, w: 5.3 }, { x: MX + 8.9 + 2 * QG, w: 2.4 }];
+const QY = 4.8;                                   // top of the captions
+// caps: one sentence per panel, or [ours, TurboQuant] for the slide that compares
+function quantPanels(s, heads, pics, caps) {
+  let bottom = 0;
+  heads.forEach((head, k) => {
+    const p = QP[k];
+    node(s, p.x, 1.62, p.w, 0.45, [{ text: (k + 1) + "   ", options: { bold: true, color: NAVY } }, { text: head, options: { bold: true } }], { size: 18, kind: "panel", name: "step " + (k + 1) });
+    if (k < 2) arrow(s, p.x + p.w + 0.03, 1.845, QP[k + 1].x - 0.03, 1.845, { color: NAVY, width: 2 });
+    dia(s, pics[k], p.x, 2.12);
+    const c = caps[k];
+    let runs_, lines, gap = 0;
+    if (typeof c === "string") { runs_ = c; lines = linesOf(c, 16, p.w); }
+    else {
+      // the first run of a paragraph carries its spacing and the last one its line break
+      runs_ = [{ text: "Ours: ", options: { bold: true, color: NAVY, paraSpaceAfter: 6 } }, { text: c[0], options: { color: INK, breakLine: true } },
+        { text: "TurboQuant: ", options: { bold: true, color: GRAY } }, { text: c[1], options: { color: GRAY } }];
+      lines = linesOf("Ours: " + c[0], 16, p.w - 0.05) + linesOf("TurboQuant: " + c[1], 16, p.w - 0.05); gap = 6;
+    }
+    const h = (lines * 16 * 1.2 + gap) / 72;
+    T(s, runs_, p.x, QY, p.w, h + 0.05, { fontSize: 16, objectName: "caption " + (k + 1) });
+    bottom = Math.max(bottom, QY + h);
+  });
+  return bottom;
+}
+
+def("c22", () => {
+  const s = newSlide("c22", "Title only", "TurboQuant: a rotation, then polar coordinates",
+    "This is the method ours comes from, drawn the way Google presents it, in three steps.\n\n" +
+    "First the vector is rotated at random. A cache vector often has a few large channels. After the rotation its length is the same and it is spread evenly over the coordinates.\n\n" +
+    "Second, the rounding, here in polar coordinates. Two coordinates become a radius and an angle, the radii are paired again, and this repeats until one radius is left. The angles are rounded on a fixed grid.\n\n" +
+    "Third, one sign per coordinate describes what the rounding lost, which removes the bias of inner products.\n\n" +
+    "For questions: the polar form is the PolarQuant step, and in the TurboQuant paper the second step rounds each rotated coordinate to a level. Because the distribution after the rotation is known, the grid is fixed and no scale is stored for a block. PolarQuant uses four bits for an angle of the first level and two bits above.");
+  const bottom = quantPanels(s, ["Rotate", "Round, in polar coordinates", "Signs of the error"], ["tq_rotation", "tq_polar", "tq_signs"],
+    ["A random rotation matrix spreads the vector evenly over its coordinates. The length stays the same.",
+     "Pairs of coordinates become a radius and an angle, and the radii are paired again until one is left. The angles are rounded on a fixed grid.",
+     "One sign per coordinate, for what the rounding lost."]);
+  if (bottom > 5.68) console.warn("  ! c22: captions reach " + bottom.toFixed(2));
+  T(s, "After the Google Research post on TurboQuant of March 24, 2026, and the papers on TurboQuant, PolarQuant and QJL. The polar form is the PolarQuant step. In the TurboQuant paper, the second step rounds each rotated coordinate to a level. " +
+    "Illustration with one synthetic vector of 64 coordinates, computed from our reading of the published steps.",
+    MX, 5.78, CW, 0.74, { fontSize: 14, color: GRAY, objectName: "note" });
+});
+
+def("c23", () => {
+  const s = newSlide("c23", "Title only", "Our quantizer, and where it differs",
+    "Ours has the same three steps. The first and the third are built differently, and the second follows the TurboQuant paper in place of the polar form.\n\n" +
+    "The rotation is a diagonal of random signs followed by a Hadamard matrix. Only 64 signs are random, where a rotation matrix has 4,096 random numbers, and the transform takes additions and subtractions.\n\n" +
+    "The rounding stays in ordinary coordinates. Each coordinate goes to one of eight fixed levels, which takes three bits, and the length of the vector is stored once.\n\n" +
+    "For the error we keep 256 signs for every vector, four per coordinate here, where TurboQuant keeps one.\n\n" +
+    "Packed, that is 64 bytes for a vector of 64 coordinates. The next slides take the steps one at a time.\n\n" +
+    "For questions: the levels can be fixed in advance because the rotation makes the distribution of a coordinate known. Our signs come from projections with entries plus and minus one, and those of TurboQuant from Gaussian projections. In bits per coordinate, ours is three for the level, four for the signs and one for the two lengths.");
+  const bottom = quantPanels(s, ["Rotate", "Round, coordinate by coordinate", "Signs of the error"], ["sq_rotation", "sq_levels", "sq_signs"],
+    [["64 random signs and a Hadamard matrix.", "a random rotation matrix, 4,096 numbers here."],
+     ["each coordinate goes to one of eight fixed levels (3\u00A0bits), and the length is stored once.", "a radius and angles in Google's post. In the paper, levels per coordinate, as here."],
+     ["256 signs per vector.", "one sign per coordinate."]]);
+  if (bottom > 6.12) console.warn("  ! c23: captions reach " + bottom.toFixed(2));
+  T(s, "Illustration with the same synthetic vector, computed with the code of the repository. Packed, the vector takes 64 bytes.",
+    MX, 6.24, CW, 0.36, { fontSize: 14, color: GRAY, align: "center", valign: "middle", objectName: "note" });
 });
 
 def("c02", () => {
@@ -42,6 +106,16 @@ def("c03", () => {
     "Any two different rows agree in half of the places and differ in the other half, so their dot product is zero. Scaled, and multiplied by a diagonal of random signs, it is a rotation.");
   gif(s, "m4_hadamard", "Animation. The Hadamard matrix is built by doubling: from the one by one matrix 1, three copies and one copy with every sign flipped give the 2 by 2 matrix, then the 4 by 4, then the 8 by 8. Two rows of the 8 by 8 matrix are compared: they agree in four places and differ in four, so their dot product is zero. The final lines are H times H transposed equals d times the identity, and R equals one over the square root of d times H D, with R times R transposed equal to the identity.");
   note(s, "Three copies and one copy with every sign flipped, repeated until the matrix has d rows.", { align: "center", y: 6.28 });
+});
+
+// added in version 9: the two lemmas of the rotation as a picture in three dimensions
+def("c21", () => {
+  const s = newSlide("c21", "Title only", "The rotation as a stick in a room",
+    "Before the rotation of a real vector, a picture in three dimensions. A stick of length one lies along one wall of a room. Its shadows on the three edges are its three coordinates: one is long, and two have no length.\n\n" +
+    "One ruler with eight marks has to measure all three. The long shadow runs past the last mark, and the other two use no mark. On the diagonal of the room the length is the same, the three shadows are equal, and the one ruler fits them.\n\n" +
+    "Turning back gives the same stick. These are the two lemmas that follow: the rotation keeps lengths and can be undone, and on average it spreads a vector evenly.");
+  gif(s, "x4_stick", "Animation. On the left a room drawn as a box, with a stick of length 1.00 that starts in one corner and lies along the edge named length. On the right three bars give the shadows of the stick on the edges length, width and height, under one ruler with eight marks. At first the bars read 1.00, 0.00 and 0.00, and the first bar runs past the last mark of the ruler. The stick turns onto the diagonal of the room: its length stays 1.00 and the three bars become 0.58 each, inside the ruler. The stick turns back and onto the diagonal once more. A legend maps the stick to a cache vector, a shadow to a coordinate, the ruler to the eight levels, and the turn to the rotation. The last caption reads: Lemmas 6.7 and 6.8, same length, even spread on average, and it can be undone.");
+  note(s, "Illustration in three dimensions, with a ruler chosen for the picture. A cache vector of the model used here has 64 dimensions.", { align: "center", y: 6.28 });
 });
 
 def("c04", () => {

@@ -73,7 +73,7 @@ def("a04", () => {
 
 def("a05", () => {
   const s = newSlide("a05", "Title only", "Outline",
-    "The talk has ten parts. The first four are background, the next three are what we built, and the last three cover how we measured, what we found and what it means.\n\nEach row links to its part, and the same names are in the footer of the slides.\n\nTiming: read in full, the notes take about 50 minutes. Without parts I and IV, the five completion signals, the rule tree, the storage tier and the related work, about 38 minutes.");
+    "The talk has ten parts. The first four are background, the next three are what we built, and the last three cover how we measured, what we found and what it means.\n\nEach row links to its part, and the same names are in the footer of the slides.\n\nTiming: read in full, the notes take about 59 minutes. Without parts I and IV, the five completion signals, the NUMA details, the rule tree, the storage tier and the related work, about 45 minutes.");
   const parts = PARTS.filter((p) => p.n), y0 = 1.5, rh = 0.49;
   hline(s, MX, y0, CW, { color: INK, width: 1.25 });
   parts.forEach((p, k) => {
@@ -292,6 +292,15 @@ def("k05", () => {
     "This is what lets the two phases be split, because the rows can be built on one machine and used on another once they are carried across.");
   gif(s, "m2a_cache_rows", "Animation. A key matrix K and a value matrix V have one row per token. Prefill fills four rows at once. Each decoding step appends one new row; the earlier rows are marked computed once, reused. At the end the two matrices move over one link from a prefill server to a decode server.");
   note(s, "The same holds in every layer of the model: 40 layers for the model used here.", { align: "center", y: 6.28 });
+});
+
+// added in version 9: a picture from everyday life before the proposition (as on the slide with the shovels)
+def("k21", () => {
+  const s = newSlide("k21", "Title only", "The cache as a bank statement",
+    "Before the proposition, a picture from everyday life. On a bank statement each line shows an amount and the balance after it. A balance is computed from the lines above it, so a new line changes no balance that is already printed.\n\n" +
+    "The cache behaves in the same way. A line is a token, and its balance is the row of keys and values of that token. The old lines are not added up again, and another branch can carry on from a copy of the statement. That branch is the decode server.");
+  gif(s, "x1_statement", "Animation of a bank statement with the columns line, amount and balance. Four lines stand on the statement at branch A. The balance of line 3 is marked as the sum of the amounts of lines 1 to 3: 120 minus 45 plus 30 equals 105. A fifth line is added with its balance, and check marks show that the balances of lines 1 to 4 are unchanged. A copy of the statement goes to branch B, where a sixth line is added. A legend maps a line to a token, a balance to its keys and values, the statement to the cache, and branch B to the decode server. The last caption reads: Proposition 2.1, a new token changes no earlier row of the cache.");
+  note(s, "Illustration with made-up amounts. The next slide states the proposition.", { align: "center", y: 6.28 });
 });
 
 def("k06", () => {

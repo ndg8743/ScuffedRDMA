@@ -17,6 +17,11 @@ run m8_phase.py M8PhaseDetector m8_phase_detector
 run m9_credits.py M9Credits m9_credits
 run m10_controller.py M10Controller m10_controller
 run h1_amdahl_dig.py H1AmdahlDig h1_amdahl_dig
+run x1_statement.py X1Statement x1_statement
+run x2_post_office.py X2PostOffice x2_post_office
+run x3_lockers.py X3Lockers x3_lockers
+run x4_stick.py X4Stick x4_stick
+run x5_numa_halls.py X5NumaHalls x5_numa_halls
 run t0_title.py T0Title t0_title 1600,200
 python3 "$here/durations.py" >> "$L" 2>&1
 echo ALLDONE >> "$L"

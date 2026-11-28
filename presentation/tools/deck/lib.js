@@ -13,6 +13,8 @@ const MATH = JSON.parse(fs.readFileSync(A + "/math/manifest.json", "utf8"));
 const DUR = fs.existsSync(A + "/clips/durations.json") ? JSON.parse(fs.readFileSync(A + "/clips/durations.json", "utf8")) : {};
 // photographs and screenshots prepared by tools/photos.py (sizes in pixels)
 const PHOTOS = fs.existsSync(A + "/photos/manifest.json") ? JSON.parse(fs.readFileSync(A + "/photos/manifest.json", "utf8")) : {};
+// diagrams drawn by a script at the size they have on the slide (tools/quant_figures.py; sizes in inches, alt text)
+const DIAGRAMS = fs.existsSync(A + "/diagrams/manifest.json") ? JSON.parse(fs.readFileSync(A + "/diagrams/manifest.json", "utf8")) : {};
 const THEME = JSON.parse(fs.readFileSync(path.join(__dirname, "theme.json"), "utf8"));
 const H = THEME.colors;                        // hex values, for the options that do not take theme colors
 // advance widths of the body font, in em (measured on Carlito, which has the metrics of Calibri)
@@ -61,7 +63,7 @@ const PARTS = [
   { key: "k", n: "II", title: "A language model and its cache", nav: "Model", line: "What attention computes, and what is kept between tokens" },
   { key: "p", n: "III", title: "The problem", nav: "Problem", line: "Megabytes and bytes on one link, and the research questions" },
   { key: "n", n: "IV", title: "RDMA at a low level", nav: "RDMA", line: "What the network card does, and in which order" },
-  { key: "m", n: "V", title: "The middleware", nav: "Middleware", line: "One endpoint per class, a channel with credits, a connector" },
+  { key: "m", n: "V", title: "The middleware", nav: "Middleware", line: "One endpoint per class, credits, a connector, memory placement" },
   { key: "d", n: "VI", title: "Decisions per transfer", nav: "Decisions", line: "A classifier, a rule tree, a controller, and what is proved" },
   { key: "c", n: "VII", title: "Compression and storage", nav: "Compression", line: "Fewer bytes on the wire, and a place for them to wait" },
   { key: "e", n: "VIII", title: "Testbed and method", nav: "Method", line: "Four servers, the firmware work, and how a result is taken" },
@@ -149,7 +151,8 @@ function finish() {
     const s = open_.shift();
     if (s._layout !== "Title slide") tracker(s, s._part);
     let notes = s._notes;
-    const spoken = notes.split(/\n+/).filter((p) => !/^(\*|Timing:)/.test(p.trim())).join(" ").split(/\s+/).filter(Boolean).length;
+    // not counted as spoken: star notes, the timing line of the Outline, and lines kept for a question from the audience
+    const spoken = notes.split(/\n+/).filter((p) => !/^(\*|Timing:|For questions:)/.test(p.trim())).join(" ").split(/\s+/).filter(Boolean).length;
     wordsBy[s._id] = spoken;
     if (s._id[0] !== "b") words += spoken;
     if (s._anim && DUR[s._anim]) notes += "\n\nAnimation: one pass takes about " + Math.round(DUR[s._anim]) + " seconds, then it repeats.";
@@ -328,6 +331,13 @@ function gif(s, name, alt, o = {}) {
   s._anim = name;
 }
 
+// A diagram of assets/diagrams, placed at the size it was drawn for, so that its labels keep their point size.
+function dia(s, name, x, y) {
+  const m = DIAGRAMS[name]; if (!m) throw new Error("no diagram " + name);
+  s.addImage({ path: `${A}/diagrams/${name}.png`, x, y, w: m.w, h: m.h, altText: m.alt, objectName: "diagram " + name });
+  return { x, y, w: m.w, h: m.h };
+}
+
 // A photograph or screenshot. Give a width, a height, or both (the picture is then fitted into that box).
 // o.cx centers it on a vertical line, o.frame draws a thin border (for pictures with a white background).
 // Returns the placed rectangle, so that a caption can follow it.
@@ -402,4 +412,4 @@ const CH = {
 
 module.exports = { pres, THEME, H, ROOT, STATIC, A, C, MATH, INK, NAVY, WHITE, PANEL, BLUE, ORANGE, RULE, HAIR, GRAY, BRIGHT,
   W, MX, CW, Y0, Y1, FX, FW, NX, NW, SL, def, num, PARTS, partOf, defineLayouts, newSlide, finish, opener, B, B2, T, L, note, take, star, claim, stat, more, back,
-  node, arrow, hline, vline, rect, eq, gif, pic, caption, code, tbl, CH, runs, textW, linesOf, wordCount: () => words, wordsBy };
+  node, arrow, hline, vline, rect, eq, gif, pic, dia, caption, code, tbl, CH, runs, textW, linesOf, wordCount: () => words, wordsBy };

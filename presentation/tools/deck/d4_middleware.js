@@ -6,7 +6,7 @@ const two = (a, b, size) => [{ text: a, options: { bold: true, breakLine: true }
 const bold = (t) => ({ text: t, options: { bold: true } });
 const row = (name, what) => [{ text: name + "   ", options: { bold: true } }, { text: what, options: { fontSize: 15 } }];
 
-opener("m", "This is what we built: a pool with one endpoint per class, a channel that moves named byte strings over it, and a connector into the serving engine.");
+opener("m", "This is what we built: a pool with one endpoint per class, a channel that moves named byte strings over it, and a connector into the serving engine. The part ends with where the registered memory lies inside a server.");
 
 def("m01", () => {
   const s = newSlide("m01", "Title only", "The layers of the middleware",
@@ -123,6 +123,15 @@ def("m08", () => {
     { t: "**The credit travels on the hot endpoint,** also when the data used the cold one", num: true }], { gap: 22 });
 });
 
+// added in version 9: the four propositions of the next slide in one picture
+def("m21", () => {
+  const s = newSlide("m21", "Title only", "The blob channel as parcel lockers",
+    "Four properties of the channel are proved, and one picture carries all four. A locker is a receive slot, a box is a chunk, and the courier holds one token for each locker, which is the credit.\n\n" +
+    "First, a token is handed in with every box and comes back after the locker has been emptied, so a full locker gets no second box. Second, the door sends the arrival message as it closes, so the message does not come before the box. Third, every box names its order and its place in it, so the order of arrival does not matter. Fourth, at most eight boxes are under way, so the pace is set by how fast the tokens return.");
+  gif(s, "x3_lockers", "Animation of a wall of eight parcel lockers between a courier, who is the sender, and a customer, who is the receiver. The courier holds eight tokens, one for each locker. Scene for Proposition 5.1: a box goes into a locker together with the token of that locker; while the locker is full its token is away, so no second box goes in; the token returns after the customer has emptied the locker. Scene for Proposition 5.2: the door sends the arrival message as it closes on the box. Scene for Proposition 5.3: three boxes numbered 3, 1 and 2 arrive, each labeled with its order and its place in it, and the customer puts them in the order 1, 2, 3. Scene for Proposition 5.4: all eight lockers are full, the courier waits without a token, and the tokens return on the fast route. A legend maps a locker to a receive slot, a token to a credit, and a box to a chunk of a layer. The last caption reads: throughput is at most 8 lockers times the locker size divided by the time for a token to return.");
+  note(s, "Illustration. The next slide states the four propositions.", { align: "center", y: 6.28 });
+});
+
 def("m09", () => {
   const s = newSlide("m09", "Title only", "What is proved about the channel",
     "Four properties are proved in the thesis. A slot is not overwritten while it is being read. A notification does not arrive before its data. Reassembly does not depend on the order of arrival. And the throughput is bounded by the window divided by the time a credit needs to come back.");
@@ -224,4 +233,98 @@ def("m14", () => {
   stat(s, "6 %", "at 10 Gb/s", FX, 3.45, 2.7, { size: 54, lh: 0.4 });
   stat(s, "62 %", "at 100 Gb/s", FX + 2.95, 3.45, 2.7, { size: 54, lh: 0.4 });
   note(s, "Computed for an assumed copy rate of 20 GB/s.", { x: FX, y: 5.05, w: FW, h: 0.45, size: 17 });
+});
+
+// ------------------------------------------------------------------ NUMA (added in version 9; thesis section 5.6)
+def("m31", () => {
+  const s = newSlide("m31", "Title only", "NUMA: two sorting halls and one corridor",
+    "The last topic of this part is where the registered memory lies inside one server. A server with two processor sockets is like a sorting center with two halls and one corridor. A hall is a NUMA node, the corridor is the interconnect, and the loading bay is the network card, which is attached to one hall. The shelf is the registered memory of the pool, and the worker is the thread that copies.\n\n" +
+    "With shelf and worker in the hall of the bay, no trip goes through the corridor. With the worker in the other hall, every copy does. With the shelf in the other hall, every delivery does. Today the shelf goes up in the hall where the worker first fills it.");
+  gif(s, "x5_numa_halls", "Animation with three floor plans of two sorting halls, A and B, joined by one corridor, with a loading bay at hall A. First plan: the shelf and the worker are in hall A; parcels go from the bay to the shelf and from the shelf to the worker, and no trip goes through the corridor. Second plan: the shelf is in hall A and the worker in hall B; every copy goes through the corridor. Third plan: the shelf is in hall B; every delivery goes through the corridor, wherever the worker stands. A legend maps a hall to a NUMA node, the corridor to the interconnect, the loading bay to the network card, the shelf to the registered memory, and the worker to the thread that copies. The last caption reads: today the shelf goes up in the hall where the worker first fills it.");
+  note(s, "Illustration. The network card is attached to one node, and the pool does not choose the node of its memory today.", { align: "center", y: 6.28 });
+});
+
+def("m32", () => {
+  const s = newSlide("m32", "Text and figure", "NUMA: memory has a location",
+    "On a server with more than one processor socket, each socket has its own memory and its own I/O buses, and Linux calls a socket with its memory a node. What an access costs depends on the distance between the node of the memory and the node of the processor or I/O bus that makes it. A network card is attached to the bus of one node, so the placement of memory matters for a device as it does for a thread.");
+  B(s, ["With more than one processor socket, a server has non-uniform memory access (NUMA)",
+    "Each socket has its own memory and I/O buses, and Linux calls a socket with its memory a node",
+    "The cost of an access depends on the distance between the node of the memory and the node of the processor or I/O bus that makes it",
+    "A network card or a GPU is attached to the bus of one node, so the placement of memory matters for a device as it does for a thread"], { size: 20, gap: 12 });
+  const pw = 2.5, x1 = FX, x2 = FX + FW - pw, py = 1.98, ph = 2.62;
+  T(s, "interconnect", FX, 1.62, FW, 0.3, { fontSize: 15, color: GRAY, align: "center", objectName: "label interconnect" });
+  [[x1, "Node 0", "network card"], [x2, "Node 1", "GPU"]].forEach(([x, name, dev]) => {
+    rect(s, x, py, pw, ph, { fill: { color: PANEL }, line: { color: PANEL, width: 0 }, name: "panel " + name });
+    T(s, name, x + 0.18, py + 0.06, pw - 0.36, 0.36, { fontSize: 17, bold: true, color: NAVY, valign: "middle", objectName: "label " + name });
+    ["processor cores", "memory", "I/O bus"].forEach((t, k) => node(s, x + 0.18, py + 0.48 + k * 0.69, pw - 0.36, 0.56, t, { size: 16, name: name + " " + t }));
+    arrow(s, x + pw / 2, py + 0.48 + 2 * 0.69 + 0.56, x + pw / 2, 5.02, { head: false, color: INK, width: 1.5, name: "bus of " + name });
+    node(s, x + 0.18, 5.02, pw - 0.36, 0.56, dev, { size: 16, bold: true, name: dev });
+  });
+  arrow(s, x1 + pw, py + ph / 2, x2, py + ph / 2, { both: true, color: NAVY, width: 2.5, name: "interconnect" });
+  note(s, "After the Linux kernel documentation, \u201cWhat is NUMA?\u201d", { x: FX, y: 5.72, w: FW, h: 0.4, size: 15 });
+});
+
+def("m33", () => {
+  const s = newSlide("m33", "Text and figure", "NUMA: where the arena lands today",
+    "Where does the arena of the pool lie today? Linux allocates a page on the node of the processor on which the allocating thread runs, unless a policy says otherwise. The pool maps its arena and writes zeros to it in the thread that opens the pool, so the arena lies where that thread happened to run. Registration then pins the pages, and the scheduler remains free to move the thread.");
+  B(s, ["Unless a policy says otherwise, Linux allocates a page on the node of the processor on which the allocating thread runs",
+    "The pool maps its arena and writes zeros to all of it in the thread that opens the pool",
+    "So the arena lies on the node where that thread happened to run",
+    "Registration pins the pages, and the scheduler remains free to move the thread"], { size: 20, gap: 12 });
+  const steps = [["1   The pool is opened", "The arena is mapped and filled with zeros, so its pages are allocated on the node of this thread"],
+    ["2   The arena is registered", "The pages are pinned for as long as the pool exists"],
+    ["3   Later, the scheduler moves the thread", "The memory stays on the node where it was placed"]];
+  steps.forEach(([a, b], k) => {
+    const y = 1.75 + k * 1.38;
+    node(s, FX, y, FW, 1.05, two(a, b, 15), { size: 17, kind: "panel", align: "left", margin: 10, name: "step " + (k + 1) });
+    if (k < 2) arrow(s, FX + FW / 2, y + 1.07, FX + FW / 2, y + 1.36, { color: NAVY, width: 2 });
+  });
+  note(s, "Read from the code of the pool and from the Linux kernel documentation on memory policy and on pinned pages.", { x: FX, y: 5.72, w: FW, h: 0.6, size: 15 });
+});
+
+def("m34", () => {
+  const s = newSlide("m34", "Text below", "NUMA: three cases on a server with two nodes",
+    "On a server with two nodes this leaves three cases, the three rows of the picture with the halls. With arena and thread on the node of the card, nothing crosses the interconnect. With the thread on the other node, every copy crosses it. With the arena on the other node, every transfer of the card crosses it.\n\n" +
+    "The staging copy from the GPU follows the same rule, and if the GPU and the card are on different nodes, which of the two to favor has to be measured.");
+  tbl(s, ["Arena of the pool", "Thread that copies", "What crosses the interconnect"], [
+    ["on the node of the card", "on the node of the card", bold("nothing")],
+    ["on the node of the card", "on the other node", bold("every copy")],
+    ["on the other node", "on either node", bold("every transfer of the card")],
+  ], MX, 1.68, CW, [3.7, 3.7, 4.533], { size: 20, rowH: 0.62, name: "three cases" });
+  B(s, ["The staging copy between GPU memory and host memory follows the same rule, so the copy rate can depend on the placement",
+    "If the GPU and the card are attached to different nodes, the arena is local to only one of the two, and which to favor is a matter for measurement"], { size: 20, gap: 10 });
+});
+
+def("m35", () => {
+  const s = newSlide("m35", "Text and figure", "NUMA: what a NUMA-aware pool does",
+    "A NUMA-aware pool removes the dependence on chance in four steps. It reads the node of the network card. It binds the arena to that node before the first write, which in the code belongs between mapping the arena and writing zeros to it. It registers the arena only then. And it keeps the copying threads on processors of that node.\n\n" +
+    "This was planned at the start of the work and is not implemented.");
+  B(s, [{ t: "**Read the node of the network card.** The kernel reports it for every PCI device, and reports \u22121 if the firmware does not supply it", num: true },
+    { t: "**Bind the arena to that node before the first write.** A policy governs the pages that are allocated after it is installed", num: true },
+    { t: "**Register the arena only then**", num: true },
+    { t: "**Keep the threads that copy** into and out of the slots on processors of that node", num: true }], { size: 20, gap: 12 });
+  T(s, "Order of the steps when the pool is opened", FX, 1.66, FW, 0.36, { fontSize: 17, color: GRAY, objectName: "label order" });
+  const bw = 3.5, ys = [2.12, 2.98, 3.84, 4.7];
+  [["map the arena", false], ["bind it to the node of the card", true], ["write zeros to all of it", false], ["register it", false]].forEach(([t, isNew], k) => {
+    node(s, FX, ys[k], bw, 0.6, t, { size: 17, bold: isNew, color: isNew ? NAVY : INK, dash: isNew ? "dash" : "solid", name: "call " + (k + 1) });
+    if (k < 3) arrow(s, FX + bw / 2, ys[k] + 0.62, FX + bw / 2, ys[k + 1] - 0.02, { color: NAVY, width: 2 });
+  });
+  T(s, "the step that is not in the code today", FX + bw + 0.2, ys[1], FW - bw - 0.2, 0.6, { fontSize: 15, color: GRAY, valign: "middle", objectName: "label new step" });
+  claim(s, "", "Planned at the start of the work, and not implemented.", FX, 5.55, FW, 0.7, { size: 18 });
+  note(s, "The benchmark already pins its two threads. The pool and the connector do not.", { x: MX, y: 5.72, w: 5.8, h: 0.6, size: 16 });
+});
+
+def("m36", () => {
+  const s = newSlide("m36", "Text and figure", "NUMA: status on this testbed",
+    "For our measurements this means the following. Servers 2, 3 and 4 have one processor socket each, which normally forms a single node, and for such a server the vendor of the cards states that no tuning of this kind is required. So we do not expect the results to depend on the placement, and the placement cannot be evaluated on this testbed.\n\n" +
+    "On a server with two sockets the three cases can be compared without new code, by starting the benchmark with its memory bound to one node and its threads pinned to either.");
+  B(s, ["Servers 2, 3 and 4 have one processor socket each, which normally forms a single node",
+    "For a server with a single node, the vendor of the ConnectX cards states that no tuning of this kind is required",
+    "So these measurements are not expected to depend on the placement, and the placement cannot be evaluated here",
+    "On a server with two sockets the three cases can be compared without new code: the benchmark is started with its memory bound to one node and its two threads pinned to either"], { size: 20, gap: 12 });
+  const bottom = tbl(s, ["Server", "Processor sockets", "Nodes that Linux reports"], [
+    ["1", "", ""], ["2", "1", ""], ["3", "1", ""], ["4", "1", ""],
+  ], FX, 1.72, FW, [1.2, 2.1, 2.383], { size: 18, rowH: 0.5, align: ["left", "center", "center"], name: "sockets and nodes" });
+  star(s, "Waiting for the hardware record (run R0): the number of nodes on each server, and the board of server 1.", FX, bottom + 0.12, FW, 0.75);
+  note(s, "Vendor statement: NVIDIA, performance tuning notes for ConnectX-4 and later adapter cards.", { x: FX, y: bottom + 1.0, w: FW, h: 0.6, size: 15 });
 });

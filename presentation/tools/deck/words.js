@@ -11,7 +11,7 @@ for (const p of lib.PARTS.filter((p) => p.key !== "b")) {
   const ids = talk.filter((id) => id[0] === p.key);
   console.log((p.n || "-").padEnd(5), p.title.padEnd(32), String(ids.length).padStart(3), "slides", String(sum(ids)).padStart(5), "words", (sum(ids) / WPM).toFixed(1).padStart(5), "min");
 }
-const skip = (id) => id[0] === "h" || id[0] === "n" || ["m11", "d08", "d09", "c09", "c10", "z01", "z02"].includes(id);
+const skip = (id) => id[0] === "h" || id[0] === "n" || ["m11", "m32", "m33", "m34", "m35", "d08", "d09", "c09", "c10", "z01", "z02"].includes(id);
 const short = talk.filter((id) => !skip(id));
 console.log("whole talk:", talk.length, "slides,", sum(talk), "words,", (sum(talk) / WPM).toFixed(1), "min at", WPM, "words a minute");
 console.log("shorter path:", short.length, "slides,", sum(short), "words,", (sum(short) / WPM).toFixed(1), "min");

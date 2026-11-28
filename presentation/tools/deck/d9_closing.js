@@ -61,9 +61,9 @@ answer("z05", 3, "Research question 3: the cost of the transfer",
 
 def("z06", () => {
   const s = newSlide("z06", "Two columns", "Limitations: the serving path and the testbed",
-    "The limitations fall into four groups. On the serving path, the components that decide are not called by the connector, and its sender still serializes both classes. The testbed is one pair of machines and one cable.");
+    "The limitations fall into four groups. On the serving path, the components that decide are not called by the connector, and its sender still serializes both classes. The testbed is one pair of machines and one cable, and the servers recorded so far have one processor socket each, so memory placement is not evaluated.");
   B(s, [head("Serving path"), "The components that decide are not called by the connector", "The connector's sender serializes both classes in one queue"]);
-  B2(s, [head("Testbed"), "One pair and one cable, without a switch, packet loss or many senders", "Results on Soft-RoCE are specific to Soft-RoCE", "The card of server 4 sits in an eight-lane slot"]);
+  B2(s, [head("Testbed"), "One pair and one cable, without a switch, packet loss or many senders", "Results on Soft-RoCE are specific to Soft-RoCE", "The card of server 4 sits in an eight-lane slot", "One processor socket in each server recorded so far, so memory placement across NUMA nodes is not evaluated"]);
   vline(s, 6.66, Y0 + 0.05, 3.7);
 });
 
@@ -85,8 +85,8 @@ def("z08", () => {
 
 def("z09", () => {
   const s = newSlide("z09", "Two columns", "Future work: further out",
-    "Third, the hardware: open the GPU-direct path on server 4 and test with a switch, several senders and packet loss. Fourth, the next transport, where the question is whether separate endpoints still help when packets are spread across paths.");
-  B(s, [head("3   The hardware"), "Open the GPU-direct path on server 4, and measure staging by removing it", "A switch, several senders, packet loss"]);
+    "Third, the hardware: open the GPU-direct path on server 4, test with a switch, several senders and packet loss, and place the registered memory on a server with two sockets. Fourth, the next transport, where the question is whether separate endpoints still help when packets are spread across paths.");
+  B(s, [head("3   The hardware"), "Open the GPU-direct path on server 4, and measure staging by removing it", "A switch, several senders, packet loss", "A server with two sockets, with the pool placing its registered memory"]);
   B2(s, [head("4   The next transport"), "libfabric 2, with memory registration per endpoint", "Ultra Ethernet: do separate endpoints still help when packets take many paths?"]);
   vline(s, 6.66, Y0 + 0.05, 3.7);
 });

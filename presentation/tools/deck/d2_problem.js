@@ -96,6 +96,16 @@ def("p08", () => {
   note(s, "S is the time one message of s bytes holds the link, λ the arrival rate, ρ the load, C the link rate.", { x: FX, y: 4.85, w: FW, h: 0.8 });
 });
 
+// added in version 9: the three rows of the next slide as a picture
+def("p21", () => {
+  const s = newSlide("p21", "Title only", "Sharing one link: a post office",
+    "This picture shows where the three numbers on the next slide come from. One customer has a single letter, and every customer ahead of him brings forty parcels. The letter is a small urgent message, forty parcels are one large message, and the window is the link.\n\n" +
+    "With one line for everyone, the letter waits for every parcel ahead of it. With a line for letters, it waits for the rest of one customer. If the clerk takes the letter between two parcels, it waits for one parcel.\n\n" +
+    "A line for letters follows from the design. When the clerk switches is decided below our software, and experiment E3 measures it.");
+  gif(s, "x2_post_office", "Animation in three rows at a post office window. A customer with one letter waits while three customers ahead bring 40 parcels each. Row one, one line for everyone: the letter waits for 120 parcels, everyone ahead. Row two, a line for letters, and the clerk first finishes the customer at the window: the letter waits for up to 40 parcels, the rest of one customer. Row three, a line for letters, and the clerk takes the letter between two parcels: it waits for 1 parcel. A legend maps the letter to a small urgent message, 40 parcels to one large message, and the window to the link. The last caption reads: a line for letters is the design; when the clerk switches is what E3 measures.");
+  note(s, "Illustration with made-up numbers of customers and parcels. The next slide gives the three waits from the model.", { align: "center", y: 6.28 });
+});
+
 def("p09", () => {
   const s = newSlide("p09", "Text below", "Three ways to share the link",
     "For an assumed load the model gives three numbers. The step from the first row to the second comes from giving each class its own queue pair.\n\nThe step to the third depends on what sits below the queue pairs, because a hardware card arbitrates packet by packet and the software driver may not. These three numbers come from the model.");
