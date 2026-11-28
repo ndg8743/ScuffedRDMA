@@ -46,6 +46,10 @@ second, and the factor $8$ converts bytes to bits.
 Each RoCEv2 packet adds 82 bytes of headers, trailer and inter-frame gap, so
 the wire time is about 137 ms with 4,096-byte RDMA packets and 145 ms with
 1,024-byte packets. These are lower bounds from arithmetic, not measurements.
+In the terms of \cref{eq:amdahl} the transfer acts as the sequential fraction
+of a request: a faster GPU on either server shortens the prefill and the
+first decoding step of \cref{eq:ttft} and leaves the transfer as it is, so
+its share of the time to first token grows as the GPUs improve.
 
 The cache is not the only traffic on the link. \Cref{tab:traffic} lists the
 classes that occur in split serving, and \cref{sec:overview} states which of

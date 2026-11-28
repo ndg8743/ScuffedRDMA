@@ -119,15 +119,41 @@ commercial hard disk drive, the Model 350 of the RAMAC system
 \citep{chm_ramac}, which gave a program random access to stored records, and
 on April 7, 1964 it launched the System/360, a line on which software
 written for one machine ran on every other \citep{ibm_system360}. The chief
-architect of that line was Gene Amdahl \citep{ibm_system360}, whose
-observation of 1967, that the part of a program which cannot be divided sets
-a ceiling on the speed-up \citep{amdahl1967}, is why the cost of
-communication between processors decides how far a parallel machine can go.
-The storage side of the same problem is GPFS, presented in 2002 for the
-RS/6000 SP parallel supercomputer and for Linux clusters. It evolved from
-the Tiger Shark multimedia file system, lets the nodes of a cluster read and
-write the same disks at once under distributed byte-range locks, and ran at
-that time on six of the ten most powerful supercomputers
+architect of that line was Gene Amdahl \citep{ibm_system360}.
+
+In 1967 Amdahl, then at IBM, argued that the gain from more processors is
+limited by the part of the work that cannot be divided among them
+\citep{amdahl1967}. The relation that now carries his name states this for a
+workload of fixed size \citep{gustafson1988} as
+\mathalt{S of N equals 1 divided by the sum of 1 minus P and P over N}{%
+\begin{equation}
+  S(N) = \frac{1}{(1 - P) + P/N} ,
+  \label{eq:amdahl}
+\end{equation}}
+where $P$ is the fraction of the running time on one processor that can be
+divided among processors, $1 - P$ is the sequential fraction that cannot,
+$N$ is the number of processors, and $S(N)$ is the speed-up, the time on one
+processor divided by the time on $N$. As $N$ grows the term $P/N$ vanishes,
+so the speed-up approaches $1/(1 - P)$ from below. Amdahl's paper has no
+formula and makes the point in numbers. Data management made up 40 percent
+of the instructions executed in production runs, he judged that this share
+could at best be halved, and that overhead alone would then limit the
+throughput to five to seven times the sequential rate \citep{amdahl1967}.
+With $1 - P = 0.2$, \cref{eq:amdahl} gives the lower of these figures,
+$1/0.2 = 5$. The time that the parts of a divided program spend exchanging
+data is not divided with the work, so it counts toward $1 - P$, which is why
+the cost of communication decides how far a parallel machine can go.
+
+The other way to raise the limit is to make $1 - P$ itself smaller, and a
+parallel file system does this for the kind of work that Amdahl had counted
+as sequential. IBM's is GPFS, presented in 2002 for the RS/6000 SP parallel
+supercomputer, where it was offered as GPFS for AIX
+\citep{farazdel2001gpfsaix}, and for Linux clusters. It lets the nodes of a cluster read
+and write file data and metadata on the same disks at once under distributed
+byte-range locks, with each file striped across the disks, so that the data
+management of a parallel program is divided among the nodes as well
+\citep{schmuck2002gpfs}. GPFS evolved from the Tiger Shark multimedia file
+system and ran at that time on six of the ten most powerful supercomputers
 \citep{schmuck2002gpfs}. Its descendant, named IBM Storage Scale since 2023
 \citep{ibm2023storagebrand}, uses remote direct memory access in production
 today, and its field record, which we examine in \cref{ch:rdma}, shows what

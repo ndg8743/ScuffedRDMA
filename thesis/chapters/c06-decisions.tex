@@ -30,7 +30,7 @@ logarithm of the time since the previous transfer, and whether it is a control
 message. Latencies go into histograms per class, and events such as timeouts,
 reconnections and fallbacks to TCP are counted. Everything is exported in
 Prometheus text format, and the records can be written to a log that the
-learned classifier trains on.
+\looseness=-1 learned classifier trains on.
 
 \section{A Classifier as a Weighted Automaton}
 \label{sec:classifier}
@@ -82,7 +82,7 @@ However, the decode rule of the detector never fires on the traffic for which
 it is intended.
 
 \begin{proposition}[The static detector never reports decode]
-\label{prop:nodecode}
+\label{prop:nodecode}%
 Let $L \ge 2$ be the number of layers of the model, and suppose that
 transfers arrive layer by layer, with the layer numbers $0, 1, \dots, L-1$
 repeating. Then the phase detector never reports decode.
@@ -167,7 +167,7 @@ classifier lacks can be represented exactly.
 
 The classifier was evaluated on generated traffic with a rule-based oracle. \Cref{tab:wfa} gives the fraction
 of transfers routed as the oracle routes them, on a model shape that was not
-in the training set.
+\looseness=-1 in the training set.
 
 \begin{table}[htbp]
   \centering
@@ -221,7 +221,7 @@ where $P$ is the probability of \cref{eq:wfa}, $\lVert W \rVert^2$ is the sum
 of the squares of all weights, and $\eta$ is the weight of the penalty.
 
 \begin{proposition}[The training objective has one minimum]
-\label{prop:convex}
+\label{prop:convex}%
 The objective $J$ of \cref{eq:wfa-loss} is strictly convex in $W$ and has
 exactly one minimizer.
 \end{proposition}
@@ -260,7 +260,7 @@ function of $W$ is convex, and a sum of convex functions is convex, so the
 first term of \cref{eq:wfa-loss} is convex in $W$. The penalty has the
 second-derivative matrix $\eta I$, where $I$ is the identity matrix. This
 matrix is positive definite, so the penalty is strictly convex, and the sum
-of a convex and a strictly convex function is strictly convex.
+\looseness=-1 of a convex and a strictly convex function is strictly convex.
 
 \emph{A minimizer exists and is unique.} A strictly convex function has at
 most one minimizer. One exists, because the loss of each example is the
@@ -275,7 +275,7 @@ gradient method, so it approaches the minimizer and is not guaranteed to
 reach it exactly; the notebook checks the loss curve.
 
 \begin{proposition}[A size cut-off per phase is representable]
-\label{prop:cutoff}
+\label{prop:cutoff}%
 Fix a current state $s$ and two next states $s'$ and $s''$. Let $\tau_P$ and
 $\tau_D$ be two cut-offs on the logarithm $t$ of the size, one for prefill
 and one for decode, and let $\gamma_P$ and $\gamma_D$ be two positive slopes.
@@ -392,7 +392,7 @@ rule marked final or when both fields are set, and fields that are still
 unset then take their defaults.
 
 \begin{proposition}[Each field belongs to one rule]
-\label{prop:owner}
+\label{prop:owner}%
 When the procedure ends, each field holds the value given by the first rule,
 in sorted order, that was evaluated, whose condition held, and whose action
 names that field. If there is no such rule, the field holds its default.
@@ -418,7 +418,7 @@ fields that no processed rule set.
 \end{proof}
 
 \begin{proposition}[Stopping early does not change the decision]
-\label{prop:earlystop}
+\label{prop:earlystop}%
 The decision is the same as if every node of every rule were evaluated, in
 two senses. Inside a condition, an and node may stop at its first false
 child and an or node at its first true child. Across rules, evaluation may
@@ -448,7 +448,7 @@ leaves. In the default policy that leaf is in a rule of low priority, so the
 order of rules decides which transfers the classifier sees.
 
 \begin{proposition}[Linear cost]
-\label{prop:linear}
+\label{prop:linear}%
 One decision costs time proportional to the total number of nodes in the
 policy, plus one call to each classifier the policy names.
 \end{proposition}
@@ -487,7 +487,7 @@ rates of the two classes per unit of capacity, in operations per second. The
 control $u$, a number between $0$ and $1$, is the share of the link given to
 the hot queue. The cost to minimize is the weighted backlog over time, with
 weight $\alpha$ on the hot queue and $\beta$ on the cold queue,
-$\alpha > \beta$.
+\looseness=-1 $\alpha > \beta$.
 
 Pontryagin's principle \citep{pontryagin2018,liberzon2012} states that the optimal control minimizes a function, the Hamiltonian, at every instant. Here the
 Hamiltonian is linear in $u$, and a linear function on an interval takes its
@@ -558,12 +558,13 @@ costs, to which the same repair applies.
 
 \subsection{Scope of the Quantizer}
 
-The method is not new. It combines the rotation and scalar quantizer of
-TurboQuant \citep{zandieh2025turboquant} with the sign sketch of QJL
-\citep{zandieh2024qjl}. The scalar quantizer is the classical one of Lloyd
-and Max \citep{lloyd1982,max1960}, and the sketch rests on random projections
+The method is not new. It follows TurboQuant \citep{zandieh2025turboquant}
+in rotating a vector and rounding each coordinate, with a Hadamard matrix and
+random signs in place of its random rotation matrix, and it takes the sign
+sketch of QJL \citep{zandieh2024qjl}. The rounding is the classical scalar
+quantizer of Lloyd and Max \citep{lloyd1982,max1960}, and the sketch rests on random projections
 that preserve geometry \citep{johnson1984}. The contribution here is a packed wire format, an implementation whose sizes
-are measured from the bytes actually written, and its placement, as
+are measured from the bytes written, and its placement, as
 compression is applied to data in transit and at rest and never to the cache
 on the GPU. On the serving path the codec is selected by configuration for a
 whole run, and the compress field of the rule tree (\cref{sec:policy}) is the
@@ -773,7 +774,7 @@ is the matrix
 \end{equation}}
 
 \begin{lemma}[The rotation is orthogonal]
-\label[lemma]{lem:orth}
+\label[lemma]{lem:orth}%
 Let $R^{\mathsf T}$ be the transpose of $R$ and $I$ the identity matrix.
 Then $R R^{\mathsf T} = I$. Hence $\lVert R u \rVert = \lVert u \rVert$ and
 $\langle R u, R v \rangle = \langle u, v \rangle$ for all vectors $u$ and
@@ -806,7 +807,7 @@ and the statement about lengths is the case $v = u$.
 \end{proof}
 
 \begin{lemma}[Every rotated coordinate has mean zero and variance $1/d$]
-\label[lemma]{lem:moments}
+\label[lemma]{lem:moments}%
 Fix a unit vector $u$, and let the diagonal entries
 $\delta_1, \dots, \delta_d$ of $D$ be independent and equally likely to be
 $+1$ or $-1$. Then each coordinate $y_i$ of $y = R u$ has mean $0$ and
@@ -862,7 +863,7 @@ to $\theta_k$, by the level $c_k$. Its mean squared error is
 in which term $k$ is the contribution of the values that fall into cell $k$.
 
 \begin{proposition}[Conditions for a minimum \citep{lloyd1982,max1960}]
-\label{prop:lloyd}
+\label{prop:lloyd}%
 If the levels and thresholds minimize the mean squared error of
 \cref{eq:mse}, then each threshold is midway between its two levels,
 $\theta_k = \tfrac12 (c_k + c_{k+1})$ for $k = 1, \dots, K-1$, and each level
@@ -924,7 +925,7 @@ of the residual, and $\langle s_j, q \rangle$ is the projection of the query
 on the same random vector that produced the sign $z_j$.
 
 \begin{lemma}[The mean of a sign times a normal variable]
-\label[lemma]{lem:sign}
+\label[lemma]{lem:sign}%
 Let $X$ and $Y$ be jointly normal random variables with mean $0$, let
 $\sigma^2 > 0$ be the variance of $X$, and let $\kappa$ be the covariance of
 $X$ and $Y$. Then
@@ -956,7 +957,7 @@ and $a \sigma \sqrt{2/\pi} = \sqrt{2/\pi}\; \kappa / \sigma$.
 \end{proof}
 
 \begin{proposition}[The estimate is unbiased for normal projections \citep{zandieh2024qjl}]
-\label{prop:unbiased}
+\label{prop:unbiased}%
 If the vectors $s_1, \dots, s_m$ are independent and their entries are
 independent standard normal variables, then the mean of the estimate of
 \cref{eq:qjl-est} is $\langle q, r \rangle$.
@@ -980,7 +981,7 @@ of the $m$ terms of the sum has this mean, so the mean of the estimate is
 \end{proof}
 
 \begin{proposition}[Standard deviation of the estimate]
-\label{prop:qjlvar}
+\label{prop:qjlvar}%
 If the vectors $s_1, \dots, s_m$ are independent and the entries of each are
 uncorrelated with mean $0$ and variance $1$, the standard deviation of the
 estimate of \cref{eq:qjl-est} is at most the bound of \cref{eq:qjl}.
@@ -1036,7 +1037,7 @@ operating system's cache and requires every length, offset and buffer address
 to be a multiple of 4,096. Where direct I/O is refused, the tier falls back
 to buffered writes and records why. The procedures are stated with the
 analysis that follows, which proves the alignment conditions, the invariants
-of the free list, and the classes of error that the checksum detects.
+\looseness=-1 of the free list, and the classes of error that the checksum detects.
 
 \subsection{Analysis of the Storage Tier}
 \label{sec:proofs-storage}
@@ -1049,7 +1050,7 @@ $\var{len}$ bytes occupies a slot of $w = \lceil \var{len} / A \rceil\, A$
 bytes, that is, its length rounded up to a multiple of $A$. The tier keeps
 the end of the file, written $\var{end}$, a list of free extents, each with
 an offset and a size, and an index from each key to the offset, length, slot
-size and checksum of its block.
+\looseness=-1 size and checksum of its block.
 
 \begin{pseudocode}{Spilling a block to the storage tier}{alg:tier}
   \Function{Spill}{$\var{key}$, $\var{block}$}
@@ -1080,16 +1081,16 @@ size and checksum of its block.
 \end{pseudocode}
 
 \begin{proposition}[Every transfer meets the conditions of direct I/O]
-\label{prop:align}
+\label{prop:align}%
 In every write and read that the tier issues with direct I/O, the file
-offset, the length and the address of the buffer are multiples of $A$.
+\looseness=-1 offset, the length and the address of the buffer are multiples of $A$.
 \end{proposition}
 
 \begin{proof}
 \emph{Lengths.} A block of $\var{len}$ bytes is given a slot of
 $w = \lceil \var{len} / A \rceil\, A$ bytes. A batch is written as one run of
 such slots, whose length is a sum of multiples of $A$, and a read covers one
-slot or a run of them.
+\looseness=-1 slot or a run of them.
 
 \emph{Offsets.} The argument is an induction over the operations of the
 allocator (\cref{alg:alloc}). The end of the file starts at $0$. An allocation returns either
@@ -1126,7 +1127,7 @@ the device, which is 512 or 4,096 bytes on the drives used here.
 \end{pseudocode}
 
 \begin{proposition}[No two blocks share space]
-\label{prop:freelist}
+\label{prop:freelist}%
 At all times the free extents are sorted and pairwise disjoint, no two of
 them are adjacent, none overlaps an allocated range, and all of them end
 below the end of the file. Consequently two allocated ranges never overlap.
@@ -1161,14 +1162,13 @@ Merging is what allows reuse: two adjacent freed slots of 4 KiB become one
 extent of 8 KiB that can hold a block neither could hold alone.
 
 \begin{proposition}[What the checksum detects]
-\label{prop:crc}
+\label{prop:crc}%
 Let a block be read back with some of its bits changed. The 32-bit cyclic
 redundancy check used by the tier reports the change in each of these cases:
 one bit is changed; two bits are changed, in a block shorter than
 $2^{32} - 1$ bits; or all changed bits lie within four consecutive bytes. If
 instead every pattern of changed bits over the block is equally likely, the
-probability that the block is changed and the change goes unreported is less
-than $2^{-32}$.
+probability of a change that goes unreported is less than $2^{-32}$.
 \end{proposition}
 
 \begin{proof}
@@ -1219,7 +1219,7 @@ back different from what was written, and not against loss of the index.
 
 A flush has a cost that does not depend on how many bytes were written before
 it, and writing several blocks per flush spreads that cost. The simplest
-model is a fixed time per batch and a time per block:
+\looseness=-1 model is a fixed time per batch and a time per block:
 \mathalt{t batch of n equals t fix plus n times t block, and X of n equals n times s block
   divided by the quantity t fix plus n times t block, which approaches s block over t block
   as n grows}{%

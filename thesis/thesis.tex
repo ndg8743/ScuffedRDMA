@@ -79,6 +79,34 @@
 % \cref prints the right word.
 \newtheorem{definition}[proposition]{Definition}
 \newtheorem{lemma}[proposition]{Lemma}
+% TeX Live 2025 and TeX Live 2026 set these environments differently when
+% tagging is on, and chapter 6 came out a page longer on the older release.
+% TeX Live 2025 leaves the paragraph indent after the word "Proof.", and it
+% puts 3 pt more space above a statement that follows a paragraph. The lines
+% below take both out, so that the two releases break the same lines and
+% pages. They are skipped on TeX Live 2026, which has its own code for these
+% environments (the test is for a command that only amsthm.sty defines).
+% For the same reason the \label of a statement ends with a percent sign in
+% the chapters: on TeX Live 2025 the end of that line is otherwise set as a
+% space after the head.
+\makeatletter
+\@ifundefined{deferred@thm@head}{}{%
+  \AddToHook{env/proposition/begin}{\partopsep=0pt plus 1pt\relax}%
+  \AddToHook{env/lemma/begin}{\partopsep=0pt plus 1pt\relax}%
+  \AddToHook{env/definition/begin}{\partopsep=0pt plus 1pt\relax}%
+  \NewCommandCopy\thesis@proof\proof
+  \NewCommandCopy\thesis@endproof\endproof
+  \renewenvironment{proof}[1][\proofname]
+    {\thesis@proof[#1]\leavevmode
+     \setbox\z@\lastbox
+     \ifvoid\z@\else
+       \ifdim\wd\z@=\parindent \hskip-1\p@ \@plus 1\p@ \@minus 1\p@
+       \else \box\z@ \fi
+     \fi
+     \ignorespaces}
+    {\thesis@endproof}%
+}
+\makeatother
 
 % --- Contents, bibliography, links -----------------------------------
 \usepackage[nottoc]{tocbibind}        % lists and references show in the contents

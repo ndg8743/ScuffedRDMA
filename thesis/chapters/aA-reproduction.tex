@@ -36,7 +36,7 @@ hardware and reproduce every model figure.
 which they are made. The steps of each
 run are given with the figure that it fills.
 
-\fixnote{This section lists the outstanding runs: remove it, or reduce it to the commands of each run, when they are complete. R0 to R4 need no change to the code. If R5 is not completed, the evaluation rests on E1 to E5 with R3 and R4 and on the shorter prompts of E8.}
+\fixnote{This section lists the outstanding runs: remove it, or reduce it to the commands of each run, when they are complete. R0 to R4 need no change to the code. R5 begins with the tests marked rdma on both servers, built from one commit. If R5 is not completed, the evaluation rests on E1 to E5 with R3 and R4, and under E8 the blob channel has been tested on the software providers alone.}
 
 \begin{tightblock}
 \begin{longtable}{L{0.8cm}L{5.2cm}L{4.2cm}L{4.0cm}}
@@ -50,9 +50,9 @@ run are given with the figure that it fills.
   R2 & E1 to E5 on the lab pair, then the home pair & R1; performance counters enabled for E5 & \cref{sec:res-e1} to \cref{sec:res-e5} \\
   R3 & Storage sweep on the NVMe drive with repeats & server 2 & \cref{fig:pending-nvme} \\
   R4 & Quantizer on long prompts with real queries & one GPU machine & \cref{fig:pending-quant-long} \\
-  R5 & E6 on the lab pair & R1; the fix for multi-chunk blobs (\cref{sec:channel}) & \cref{sec:res-e6} \\
+  R5 & E6 on the lab pair, after the channel tests on the verbs provider (\cref{sec:channel}) & R1; both servers built from one commit & \cref{sec:res-e6} \\
   R6 & E7 on one GPU & one GPU machine & \cref{sec:res-e7} \\
-  R7 & E8 across the lab pair & R1; R5 for prompts over about 2,000 tokens; NIXL on both servers & \cref{sec:res-e8}; \cref{sec:impact-transport} \\
+  R7 & E8 across the lab pair & R1; R5; NIXL on both servers & \cref{sec:res-e8}; \cref{sec:impact-transport} \\
   R8 & The controller after a repair & one of the two repairs applied & \cref{sec:controller} \\
   \bottomrule
 \end{longtable}

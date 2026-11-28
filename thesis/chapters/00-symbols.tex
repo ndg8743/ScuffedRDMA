@@ -14,10 +14,14 @@
   $C$ & Rate of the link in bits per second; in the controller model, its capacity, set to 1. \\
   $d$ & Number of entries of a key, a value or a cache vector, 64 for this model. \\
   $L$,\ $T$ & Number of layers of the model, 40, and number of tokens of the prompt. \\
-  $t_{\text{wire}}$,\ $t_{\text{credit}}$ and the like & A duration in seconds, named by its subscript and defined where it is used. \\
-  $s_{\text{cache}}$,\ $s_{\text{packed}}$ and the like & A size in bytes, named by its subscript and defined where it is used. \\
+  $t_{\text{wire}}$,\ $t_{\text{credit}}$ and the like & A duration in seconds, named by its subscript and defined where used. \\
+  $s_{\text{cache}}$,\ $s_{\text{packed}}$ and the like & A size in bytes, named by its subscript and defined where used. \\
   $a \cdot b$,\ \ $\langle u, v \rangle$,\ \ $\lVert u \rVert$ & Dot product or inner product of two vectors, and length of a vector. \\
   $\operatorname{E}[\,\cdot\,]$,\ \ $\lceil\,\cdot\,\rceil$ & Mean of a random quantity, and rounding up to a whole number. \\
+  \addlinespace
+  \multicolumn{2}{l}{\textit{The limit on parallel speed-up (\cref{sec:history})}} \\*
+  $P$,\ $N$ & Share of the running time that can be divided, and number of processors. \\
+  $S(N)$ & Speed-up: the time on one processor divided by the time on $N$. \\
   \addlinespace
   \multicolumn{2}{l}{\textit{Attention and the size of the cache (\cref{ch:transformers,sec:traffic})}} \\*
   $z_i$ & Score at position $i$ of a list that is passed to the softmax. \\
@@ -26,12 +30,12 @@
   \addlinespace
   \multicolumn{2}{l}{\textit{Waiting on a shared link (\cref{sec:hol,sec:sfbench})}} \\*
   $k$,\ $s_i$ & Number of cold messages ahead of a hot one, and size of the $i$th in bytes. \\
-  $W$,\ $\overline{W}$ & Wait of a hot message behind them, and mean wait in the queueing model. \\
+  $W$,\ $\overline{W}$ & Wait of a hot message behind them; mean wait in the queueing model. \\
   $\lambda$,\ $S$,\ $\rho$ & Arrival rate, service time of a message, and fraction of time the link is busy. \\
   $p_{99}^{\text{hot}}$ & 99th percentile of the one-way latency of the hot messages. \\
   \addlinespace
   \multicolumn{2}{l}{\textit{The pool and the blob channel (\cref{sec:pool,sec:channel})}} \\*
-  $N$,\ $B$ & Receive slots on each side, 8 by default, and size of a slot, 4 MiB by default. \\
+  $N$,\ $B$ & Receive slots on each side (default 8), and size of a slot (default 4 MiB). \\
   $s$,\ $c$ & Number of a slot and of its credit, and traffic class, hot or cold. \\
   $\var{posted}[c]$,\ $\var{done}[c]$ & Number of operations posted and completed on the endpoint of class $c$. \\
   $X$,\ $P$ & Throughput, and rate of a copy between GPU and host memory, in bytes per second. \\

@@ -283,17 +283,33 @@ and on Soft-RoCE the kernel does. Whether the hot class stays fast there is
 the question that E3 measures (\cref{sec:res-e3}).
 
 \subsection{Differences Between Providers}
+\label{sec:providers}
 
-The tests of the pool run over three software providers of libfabric 1.17,
-and they showed two differences that the design of the completion signal
-has to respect. The shared-memory provider does not promise that two writes
-to the same peer are applied in order, so a signal that relies on a second
-write arriving after the first is not valid on it. The TCP provider did not
-increment the counter for remotely originated writes, so the counter signal
-is skipped there.
+The tests of the pool run over three software providers, the TCP provider,
+the RXM layer on top of it, and the shared-memory provider, with libfabric
+1.17.0 and with 2.7.0 built from source, and they showed three differences
+that the design has to respect. The shared-memory provider does not promise
+that two writes to the same peer are applied in order, so a signal that
+relies on a second write arriving after the first is not valid on it. The
+TCP provider did not increment the counter for remotely originated writes, so
+the counter signal is skipped there. The third difference concerns progress,
+the work that moves a transfer forward after the posting call has returned.
+The RXM layer and the shared-memory provider report manual progress and the
+TCP provider automatic progress, and in these tests a queued transfer
+advanced on all three only during calls into the library
+\citep{libfabric_repo}. The pool has no thread of its own, so a caller keeps
+calling \textsc{Progress} or \textsc{WaitTx} until its operation is complete,
+on both sides, and the blob channel is built on that rule
+(\cref{sec:channel}). The RXM layer and the shared-memory provider also need
+the progress of the peer for the first use of an endpoint, so the pool
+exchanges one message on each such endpoint when the connection is opened.
+The verbs provider, by its source, offers no counters and no events for
+remotely originated writes in either release, so the counter signal of
+\cref{tab:signals} cannot run on it, and a counter for the hot completions
+exists there on reliable-datagram endpoints, through the RXM layer.
 
-\waiting{results from E1 to E5 on the verbs provider: state whether either
-difference occurs there}
+\waiting{results from E1 to E5 on the verbs provider: state whether the
+ordering difference occurs there}
 
 \section{The Blob Channel}
 \label{sec:channel}
@@ -359,6 +375,7 @@ the kind ``data'' and the slot number.
       \State $\var{mark}[s] \gets (c,\ \var{posted}[c])$
       \State $\var{off} \gets \var{off} + \var{len}$
     \Until{$\var{off} \ge |\var{data}|$}
+    \State \Call{Drain}{\,} until $\var{done}[c] \ge \var{posted}[c]$ \Comment{every chunk has completed at the sender}
   \EndFunction
 \end{pseudocode}
 
@@ -367,7 +384,7 @@ the kind ``data'' and the slot number.
     \Loop
       \If{a credit $s$ is free}
         \If{$\var{mark}[s]$ is set to $(c', n)$}
-          \State \Call{WaitTx}{$c'$, $n$} \Comment{the earlier write from staging slot $s$ is complete}
+          \State \Call{Drain}{\,} until $\var{done}[c'] \ge n$ \Comment{its earlier write is complete}
         \EndIf
         \State \Return $s$
       \EndIf
@@ -375,6 +392,15 @@ the kind ``data'' and the slot number.
     \EndLoop
   \EndFunction
 \end{pseudocode}
+
+\Cref{alg:blob-recv,alg:blob-deliver} give the receiving side. The first of
+them is also the routine that a waiting sender runs, since credits arrive
+through the same completion queues as data. The completion of each write names the slot through its
+immediate value. The receiver copies the chunk out of the slot to its place
+in the blob, by blob identifier and offset, and only then returns the credit
+of the slot, as an 8-byte write on the hot endpoint whose immediate value
+carries the kind ``credit'' and the slot number. When all bytes of a blob
+have been copied, the blob is delivered to the caller under its key.
 
 \begin{pseudocode}{Draining both endpoints}{alg:blob-recv}
   \Function{Drain}{\,}
@@ -396,15 +422,6 @@ the kind ``data'' and the slot number.
   \EndFunction
 \end{pseudocode}
 
-\Cref{alg:blob-recv,alg:blob-deliver} give the receiving side. The first of
-them is also the routine that a waiting sender runs, since credits arrive
-through the same completion queues as data. The completion of each write names the slot through its
-immediate value. The receiver copies the chunk out of the slot to its place
-in the blob, by blob identifier and offset, and only then returns the credit
-of the slot, as an 8-byte write on the hot endpoint whose immediate value
-carries the kind ``credit'' and the slot number. When all bytes of a blob
-have been copied, the blob is delivered to the caller under its key.
-
 \begin{pseudocode}{Receiving a blob}{alg:blob-deliver}
   \Function{ReceiveBlob}{\,}
     \While{the ready list is empty}
@@ -423,12 +440,28 @@ on the hot endpoint whatever class the data used, so that the signal which
 allows the sender to continue never waits behind bulk data that the same side
 is sending in the opposite direction.
 
+A fourth choice concerns delivery, and it was made after a test failed.
+\textsc{SendBlob} returns when every chunk has completed at the sender, and
+it drains both endpoints while it waits. An earlier version returned as soon
+as the chunks were posted, and blobs of several chunks then stalled
+intermittently on the TCP provider when the sender made no further call: by
+the progress rule of \cref{sec:providers}, the part of a write that the
+socket had not accepted stayed in the queue of the provider. With the wait,
+the reproducer of the stall passes with both library versions on a
+development machine, and the suite tests a sender that stays idle after each
+blob. The time recorded for a blob now ends when its last chunk has
+completed, and two blobs no longer overlap on the wire unless the caller
+posts without the wait and flushes later. The sender of the connector also
+polls its channel every 2 ms while it is idle, so that credits are served.
+
+\waiting{run R5: this test on the verbs provider and on RXM over verbs}
+
 \subsection{Proved Properties}
 
 Four properties of this protocol are proved in \cref{sec:proofs-blob}.
 
 \begin{proposition}[Slots are never overwritten in use]
-\label{prop:slots}
+\label{prop:slots}%
 A receive slot cycles through three states, free with its credit at the
 sender, being written, and written with the receiver copying out, and returns
 to free only when the receiver sends the credit. The sender writes a slot only
@@ -437,21 +470,21 @@ are still being read.
 \end{proposition}
 
 \begin{proposition}[Notification never precedes data]
-\label{prop:notify}
+\label{prop:notify}%
 The receiver learns of a chunk only from the completion of the write with
 immediate data, and by fact 3 of \cref{sec:ordering} that completion follows
 the placement of every byte of the write.
 \end{proposition}
 
 \begin{proposition}[Reassembly is independent of arrival order]
-\label{prop:reassembly}
+\label{prop:reassembly}%
 Each chunk carries its blob identifier, the total length, its own offset and
 its length, so a receiver reconstructs the blob from chunks received in any
 order.
 \end{proposition}
 
 \begin{proposition}[Throughput bound]
-\label{prop:credit}
+\label{prop:credit}%
 Let $N$ be the number of receive slots, $B$ the size of a slot in bytes, and
 $t_{\text{credit}}$ the mean duration of the round trip of a credit, from the
 moment a slot is written to the moment its credit can be used again. Then the
@@ -461,7 +494,7 @@ satisfies
 \begin{equation}
   X \le \frac{N B}{t_{\text{credit}}}.
   \label{eq:credit}
-\end{equation}}
+\end{equation}}\par % keep \par: a theorem that ends with a display stops TeX Live 2025 when the page breaks after it
 \end{proposition}
 
 The last bound sizes the window. With the defaults, $N B = 32$ MiB can be in
@@ -471,8 +504,6 @@ about 2.7 ms. On the
 lab pair the window is therefore not the bottleneck unless credit processing
 is delayed by tens of milliseconds, which is the reason credits are kept off
 the cold endpoint.
-
-\fixnote{Fix before E6: blobs larger than one slot stall intermittently when the channel runs on the TCP provider of libfabric in loopback (reproducer: \nolinkurl{benchmarks/fabric/blob_multichunk_check.py}; cause not identified). With 4 MiB slots a layer of Granite 3.3 2B fits in one chunk for prompts up to about 2,000 tokens, so the 2,048-token and 4,096-token points of E8 need the fix or a larger slot. If the stall is still open at submission, state it here as a limitation.}
 
 \subsection{Proofs of the Channel Properties}
 \label{sec:proofs-blob}
@@ -544,7 +575,7 @@ The sending side needs the matching property for its staging slots, because a
 one-sided write reads its source buffer after it is posted.
 
 \begin{lemma}[Staging slots are not reused early]
-\label[lemma]{lem:staging}
+\label[lemma]{lem:staging}%
 The sender does not rewrite staging slot $s$ until the earlier write that
 used it as a source has completed at the sender.
 \end{lemma}
@@ -657,7 +688,7 @@ run, with the guarantee on which each one rests.
     Completion with immediate data & reads its completion queue & fact 3. Costs a posted receive per write \\
     Flag in the payload & polls a byte at the end of the buffer & nothing guarantees it for a multi-packet message (fact 2). Safe for single-packet messages \\
     Sentinel write & polls a second, tiny write posted after the data & fact 1, if the provider keeps write-after-write order. The shared-memory provider does not \\
-    Remote-write counter & reads a counter the provider increments & counts arrivals without identifying them. The TCP provider did not count \\
+    Remote-write counter & reads a counter the provider increments & counts arrivals without identifying them. The TCP provider did not count, and the verbs provider has no counters \\
     Write, then read & the sender reads 8 bytes back and waits for that completion & fact 1: the read is executed after the write. Signals the sender, not the receiver \\
     \bottomrule
   \end{tabular}
@@ -780,6 +811,67 @@ revision read for this work searches for specific vendor adapters and falls
 back to TCP, so on the lab pair that row measures the libfabric path of NIXL
 over TCP. A third reference is our connector on its TCP channel, which
 isolates the effect of the transport from the effect of the connector.
+
+\section{NUMA-Aware Placement of the Registered Memory}
+\label{sec:numa}
+
+A server with more than one processor socket has non-uniform memory access
+(NUMA). Each socket has its own memory and its own I/O buses, the sockets are
+joined by an interconnect, and Linux presents each socket with its memory as
+a \emph{node}. The time to reach a page and the bandwidth of the access
+depend on the distance between the node that holds the page and the node of
+the processor or I/O bus that makes the access \citep{kernel_numa}. A network
+card and a GPU are attached to the bus of one node, so the placement of
+memory matters for a device in the same way as for a thread.
+
+The arena of the pool (\cref{sec:pool}) is touched by two parties for every
+chunk. The network card reads a staging slot or writes a receive slot, and a
+thread copies the chunk into or out of that slot. Where the arena lies is
+decided when its pages are first written: unless a policy says otherwise,
+Linux allocates a page on the node of the processor on which the allocating
+thread runs \citep{kernel_mempolicy}. The pool maps the arena and writes
+zeros to all of it in the thread that opens the pool, so the arena is placed
+by where that thread happened to run. Registration then pins the pages for as
+long as the pool exists \citep{kernel_pin}, while the scheduler remains free
+to move the thread to another node, because it does not take the location of
+a task's memory into account directly \citep{kernel_numa}.
+
+On a server with two nodes this leaves three cases. With the arena and the
+copying thread on the node of the card, no access crosses the interconnect.
+With the arena on the node of the card and the thread on the other node,
+every copy crosses it. With the arena on the other node, every transfer of
+the card crosses it, wherever the thread runs. The staging copy between GPU
+memory and host memory is subject to the same rule, so the rate $P$ of
+\cref{eq:staging} can also depend on the placement. If the GPU and the card
+are attached to different nodes, the arena is local to only one of the two,
+and which to favor is a matter for measurement.
+
+A NUMA-aware pool removes the dependence on chance in four steps. It reads
+the node of the network card, which the kernel exposes for every PCI device
+and reports as $-1$ when the firmware does not supply it
+\citep{kernel_sysfs_pci}. It binds the mapping of the arena to that node
+before the first write, because a policy governs the pages that are
+allocated after it is installed \citep{kernel_mempolicy}; in the code the
+step belongs between the mapping of the arena and its zeroing. It registers
+the arena only then, and it restricts the threads that copy into and out of
+the slots to the processors of that node. The benchmark already pins its two
+threads to given processors, and the pool and the connector do not. Each
+results file would then name the node of the card and of the arena beside
+the number of nodes that the hardware record holds. This binding was planned
+at the start of the work and is not implemented.
+
+The measurements of this thesis are not expected to depend on the placement.
+Servers 2, 3 and 4 have one processor socket each (\cref{tab:servers}), which
+normally forms a single node, and for such a server the vendor of the
+ConnectX cards states that no tuning of this kind is required
+\citep{nvidia_cx4_tuning}. The placement can therefore not be evaluated on
+this testbed, which is a limit of it. On a server with two sockets the three
+cases can be compared before the binding is written, because a memory policy
+that is set for a program when it is started is inherited by it
+\citep{kernel_mempolicy}: the benchmark is started with its memory bound to
+one node and its two threads pinned to processors of either. The binding is
+the first addition to make before the pool runs on such a server.
+\waiting{the hardware record (run R0): the number of nodes on each server}
 
 The path of a transfer is thereby fixed from the engine of one server to the
 engine of the other, and the next chapter turns to the choices that can be

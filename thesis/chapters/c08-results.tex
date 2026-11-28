@@ -441,7 +441,7 @@ against which every other row is read.
   \par\smallskip\waiting{results from E4 (run R2)}
 \end{table}
 
-\pendingfigure{fig:pending-e4}{E4: Hot tail latency under load for six libfabric configurations}{results from E4 on both pairs (run R2)}{In notebook 03_libfabric_vs_libibverbs run the E4 matrix: connected for both classes, reliable-datagram for both, reliable-datagram hot with connected cold, hot completions through a counter, cold completions through a blocking wait, and the one-endpoint baseline ;; Use hot 64 B and cold 1 MiB, 20,000 iterations, five repeats, with the hot and cold threads pinned to different cores ;; Report hot 99th percentile loaded and unloaded, and cold MB/s, per configuration ;; Make the best configuration the default of the pool}
+\pendingfigure{fig:pending-e4}{E4: Hot tail latency under load for six libfabric configurations}{results from E4 on both pairs (run R2)}{In notebook 03_libfabric_vs_libibverbs run the E4 matrix: connected for both classes, reliable-datagram for both, reliable-datagram hot with connected cold, a hot counter (on reliable-datagram endpoints), a blocking wait for cold, and the one-endpoint baseline ;; Use hot 64 B and cold 1 MiB, 20,000 iterations, five repeats, with the hot and cold threads pinned to different cores ;; Keep a run only if hot_cntr_active and cold_wait_active in its record match the request ;; Report hot 99th percentile loaded and unloaded, and cold MB/s, per configuration, and make the best one the default of the pool}
 
 \section{E5: Completion Signaling}
 \label{sec:res-e5}
@@ -465,14 +465,14 @@ immediate data, only if it lowers the 99th percentile in \cref{tab:e5}.
     Completion with immediate data & & & & \\
     Flag in the payload & & & & \\
     Sentinel write & & & & \\
-    Remote-write counter & & & & \\
+    Remote-write counter & \multicolumn{4}{l}{no counter on the verbs provider (\cref{sec:providers})} \\
     Write, then read & & & & \\
     \bottomrule
   \end{tabular}
   \par\smallskip\waiting{results from E5 (run R2)}
 \end{table}
 
-\pendingfigure{fig:pending-e5}{E5: Latency and instructions per operation for five completion signals}{results from E5 on both pairs (run R2)}{Allow performance counters for the user: set kernel.perf_event_paranoid so that perf_event_open succeeds ;; On server 1 run notebook 02_completion_signaling in cluster mode: mechanisms cq, flag, sentinel, cntr and read, sizes 8 B to 16 KB, with --perf ;; Report median, 99th and 99.9th percentile one-way latency and instructions per post for each mechanism ;; Repeat on the home pair ;; Adopt a mechanism other than the default only if it moves the 99th percentile}
+\pendingfigure{fig:pending-e5}{E5: Latency and instructions per operation for five completion signals}{results from E5 on both pairs (run R2)}{Allow performance counters for the user: set kernel.perf_event_paranoid so that perf_event_open succeeds ;; On server 1 run notebook 02_completion_signaling in cluster mode: mechanisms cq, flag, sentinel and read (cntr is skipped on verbs), sizes 8 B to 16 KB, with --perf ;; Report median, 99th and 99.9th percentile one-way latency and instructions per post for each mechanism ;; Repeat on the home pair ;; Adopt a mechanism other than the default only if it moves the 99th percentile}
 
 \section{E6: The Blob Channel Against TCP}
 \label{sec:res-e6}
@@ -503,7 +503,7 @@ pair, and \cref{tab:e6} is read against them.
   \par\smallskip\waiting{results from E6 (run R5)}
 \end{table}
 
-\pendingfigure{fig:pending-e6}{E6: Time to move one blob over the blob channel and over TCP}{results from E6 (run R5), after the stall of blobs larger than one slot is fixed}{Reproduce the stall with benchmarks/fabric/blob_multichunk_check.py (8 MiB blobs, four slots of 4 MiB) on the tcp provider and on rxe0, and fix it ;; Add a regression test that sends 100 multi-chunk blobs without a timeout ;; Run benchmarks/fabric/blob_bench.py between server 1 and server 2 for sizes 4 KB to 32 MB on the fabric transport and on TCP, five repeats ;; Plot transfer time against blob size for both, with the wire time at 10 Gb/s as a reference line}
+\pendingfigure{fig:pending-e6}{E6: Time to move one blob over the blob channel and over TCP}{results from E6 (run R5)}{Build both libraries from one commit on both lab servers, as the setup exchange changed with the fix for blobs of several chunks ;; Run the tests marked rdma, then benchmarks/fabric/blob_multichunk_check.py on the verbs provider ;; Run benchmarks/fabric/blob_bench.py between server 1 and server 2 for sizes 4 KB to 32 MB on the fabric transport and on TCP, five repeats ;; Plot transfer time against blob size for both, with the wire time at 10 Gb/s as a reference line}
 
 \section{E7: The Split Engine on One GPU}
 \label{sec:res-e7}
@@ -589,7 +589,7 @@ of the connector, through our connector against NIXL.
   \par\smallskip\waiting{results from E8 (run R7)}
 \end{table}
 
-\pendingfigure{fig:pending-e8}{E8: Time to first token against prompt length for five setups}{results from E8 (run R7)}{Finish E6 first, because the multi-chunk stall blocks the connector's fabric path ;; Install NIXL on both lab servers for the two baseline rows ;; On server 1 run notebook 06_vllm_disagg_ttft in cluster mode; it prints the launch commands for each setup; start the decode instance on server 2 first ;; Sweep prompt lengths 128 to 4096 tokens with exact-length random prompts and a fixed output length, for each of the five setups, with enough requests for a stable 99th percentile ;; From the connector's telemetry split first-token time into prefill, transfer and first decode step ;; Fill the table and plot median and 99th percentile against prompt length, one line per setup ;; Results go to benchmarks/results/vllm_disagg/}
+\pendingfigure{fig:pending-e8}{E8: Time to first token against prompt length for five setups}{results from E8 (run R7)}{Complete run R5 first, which checks the blob channel on the verbs provider ;; Install NIXL on both lab servers for the two baseline rows ;; On server 1 run notebook 06_vllm_disagg_ttft in cluster mode; it prints the launch commands for each setup; start the decode instance on server 2 first ;; Sweep prompt lengths 128 to 4096 tokens with exact-length random prompts and a fixed output length, for each of the five setups, with enough requests for a stable 99th percentile ;; From the connector's telemetry split first-token time into prefill, transfer and first decode step ;; Fill the table and plot median and 99th percentile against prompt length, one line per setup ;; Results go to benchmarks/results/vllm_disagg/}
 
 \section{Discussion}
 \label{ch:discussion}
@@ -662,7 +662,7 @@ follows from its size, and it cannot show what per-transfer decisions would
 add. Moreover, the sender of the connector serializes both classes in one
 queue (\cref{sec:connector}), so the separation that E3 measures on the pool
 does not reach concurrent requests on the serving path until the sender has
-a queue per class.
+\looseness=-1 a queue per class.
 
 The second group concerns the testbed. Every transport experiment runs
 between one pair of machines over one cable, and nothing here indicates how
@@ -671,7 +671,9 @@ lab pair the network card is a kernel driver, and its packet processing
 shares processor cores with the benchmark. Results on Soft-RoCE therefore
 describe Soft-RoCE, and the home pair is included to bound how much of a
 result is due to the software device, although it has its own limit in the
-eight-lane slot.
+eight-lane slot. No experiment exercises the placement of the registered
+memory across NUMA nodes, since the servers recorded so far have one
+processor socket each (\cref{sec:numa}).
 
 The third group concerns the workload. The cache arithmetic and the
 quantizer result are for one two-billion-parameter model. Larger models have

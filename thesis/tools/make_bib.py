@@ -131,7 +131,7 @@ repo('perftest', '{Linux RDMA}', 'perftest', 'GitHub repository linux-rdma/perft
 web('barak2013tips', 'Dotan Barak', 'Tips and Tricks to Optimize Your RDMA Code', '2013', 'RDMAmojo, June 8, 2013', 'https://www.rdmamojo.com/2013/06/08/tips-and-tricks-to-optimize-your-rdma-code/')
 web('chen2024efa', 'Lequn Chen', 'Harnessing 3200 Gbps Network (1): RDMA and EFA', '2024', 'Blog post, December 25, 2024', 'https://le.qun.ch/en/blog/2024/12/25/libfabric-efa-1-rdma/')
 web('libfabric_man', '{OpenFabrics Interfaces Working Group}', 'Libfabric Programmer\'s Manual: fi_endpoint(3), fi_cq(3), fi_cntr(3), fi_mr(3), fi_rma(3), fi_verbs(7), fi_rxm(7)', 'n.d.', 'Online manual pages', 'https://ofiwg.github.io/libfabric/')
-repo('libfabric_repo', '{OpenFabrics Interfaces Working Group}', 'libfabric: Open Fabric Interfaces', 'GitHub repository ofiwg/libfabric', 'https://github.com/ofiwg/libfabric', None, 'repository README and license file read 2026-11-23')
+repo('libfabric_repo', '{OpenFabrics Interfaces Working Group}', 'libfabric: Open Fabric Interfaces', 'GitHub repository ofiwg/libfabric', 'https://github.com/ofiwg/libfabric', 'Provider sources of releases 1.17.0 and 2.7.0 read on November 26, 2026', 'repository README and license file read 2026-11-23; prov/tcp, prov/verbs, prov/rxm and prov/shm of tags v1.17.0 and v2.7.0 read 2026-11-26 for progress, counters and remote-write events (tcpx_tx_queue_insert, xnet_tx_queue_insert, fi_no_cntr_open in verbs_domain.c); release 2.7.0 built from source and used for the tests on the same day')
 repo('ucx_faq', '{OpenUCX}', 'UCX Frequently Asked Questions', 'docs/source/faq.md in the GitHub repository openucx/ucx', 'https://github.com/openucx/ucx/blob/master/docs/source/faq.md', None, REPO)
 repo('ucx_repo', '{OpenUCX}', 'UCX: Unified Communication X', 'GitHub repository openucx/ucx', 'https://github.com/openucx/ucx', None, REPO)
 web('mistral2026leak', '{Mistral AI}', 'Heaps Do Lie: Debugging a Memory Leak in vLLM', '2026', 'Mistral AI engineering blog, January 21, 2026', 'https://mistral.ai/news/debugging-memory-leak-in-vllm', None, 'page title and publication date fetched 2026-11-23')
@@ -250,6 +250,63 @@ web('ibm_system360', '{IBM}', 'The IBM System/360', 'n.d.', 'IBM Heritage',
 web('ibm2023storagebrand', 'Denis Kennelly', 'Evolving the IBM Storage Portfolio Brand Identity and Strategy', '2023', 'IBM product blog, March 2, 2023',
     'https://www.ibm.com/new/product-blog/evolving-the-ibm-storage-portfolio-brand-identity-and-strategy', None,
     'title, author, the date of March 2, 2023 in the page body, the change from IBM Spectrum to IBM Storage and the product name IBM Storage Scale read from the page 2026-11-23; a metadata field of the page carries a later date')
+
+# --- Amdahl's law in the History section (added for version 11; read 2026-11-26)
+entry('article', 'gustafson1988', [('author', 'John L. Gustafson'), ('title', "Reevaluating Amdahl's Law"), ('year', '1988'),
+                                   ('journal', 'Communications of the ACM'), ('volume', '31'), ('number', '5'), ('pages', '532--533'),
+                                   ('doi', '10.1145/42411.42415')],
+      'title, author, journal, volume, number and pages read from the first page of the article and the DOI from its index record 2026-11-26; '
+      'cited for the fixed-size form of the speed-up, 1/(s + p/N)')
+
+# --- Memory placement on NUMA servers (added for version 13; each page read 2026-11-27)
+A27 = 'Accessed November 27, 2026'
+entry('misc', 'kernel_numa', [('author', '{The Linux kernel development community}'), ('title', 'What is NUMA?'), ('year', 'n.d'),
+                              ('howpublished', 'The Linux Kernel documentation, Memory Management'),
+                              ('url', 'https://docs.kernel.org/mm/numa.html'),
+                              ('note', 'Started in November 1999 by Kanoj Sarcar. ' + A27)],
+      'page read 2026-11-27: title, the started-by line, cells with processors, local memory and I/O buses joined by an interconnect, '
+      'access time and bandwidth depending on the distance between the cell of the processor or I/O bus and the cell of the memory, '
+      'allocation from the node of the requesting processor by default, and the scheduler not taking the memory of a task into account directly')
+entry('misc', 'kernel_mempolicy', [('author', '{The Linux kernel development community}'), ('title', 'NUMA Memory Policy'), ('year', 'n.d'),
+                                   ('howpublished', "The Linux Kernel documentation, version 6.8, Administrator's Guide"),
+                                   ('url', 'https://docs.kernel.org/6.8/admin-guide/mm/numa_memory_policy.html'),
+                                   ('note', A27)],
+      'page read 2026-11-27: the system default policy is local allocation once the system is running; a policy for a range of the address space '
+      'is installed with mbind, governs anonymous pages and by default applies to pages allocated after it is installed; the bind mode restricts '
+      'allocation to the given nodes. The page does not use the words first touch')
+entry('misc', 'kernel_pin', [('author', '{The Linux kernel development community}'), ('title', 'pin_user_pages() and related calls'), ('year', 'n.d'),
+                             ('howpublished', 'The Linux Kernel documentation, version 6.14, Core API'),
+                             ('url', 'https://docs.kernel.org/6.14/core-api/pin_user_pages.html'),
+                             ('note', A27)],
+      'page read 2026-11-27: the case of RDMA sets the pin and long-term flags and says that the buffers are needed for a long time. '
+      'The page does not state that pinned pages cannot be migrated, and the thesis does not say so')
+entry('misc', 'kernel_sysfs_pci', [('author', '{The Linux kernel development community}'), ('title', 'sysfs-bus-pci'), ('year', 'n.d'),
+                                   ('howpublished', 'Linux kernel ABI documentation, Documentation/ABI/testing'),
+                                   ('url', 'https://kernel.org/doc/Documentation/ABI/testing/sysfs-bus-pci'),
+                                   ('note', 'Entry numa_node of October 2014. ' + A27)],
+      'file read 2026-11-27: the entry /sys/bus/pci/devices/.../numa_node, dated October 2014, holds the node to which the device is attached, '
+      'or -1 if the node is unknown; the initial value comes from the firmware')
+entry('misc', 'nvidia_cx4_tuning', [('author', '{NVIDIA}'), ('title', 'NVIDIA FreeBSD for ConnectX-4 and above Adapter Cards v3.7.1: Performance Tuning'), ('year', '2024'),
+                                    ('howpublished', 'NVIDIA Networking documentation, last updated June 10, 2024'),
+                                    ('url', 'https://docs.nvidia.com/networking/display/freebsdv371/performance+tuning'),
+                                    ('note', A27)],
+      'page read 2026-11-27: title, the date in the footer, the statement that a server with a single NUMA needs no tuning, and for two the steps '
+      'that bind the interrupts and the application to processors of the NUMA closest to the card. The page documents the FreeBSD driver')
+entry('misc', 'esnet_irq', [('author', '{Energy Sciences Network}'), ('title', 'Interrupt Binding'), ('year', '2024'),
+                            ('howpublished', 'ESnet Fasterdata knowledge base, Host Tuning, last edited December 26, 2024'),
+                            ('url', 'https://fasterdata.es.net/host-tuning/interrupt-binding/'),
+                            ('note', A27)],
+      'page read 2026-11-27: on hosts with 40 and 100 gigabit adapters TCP and UDP can be up to two times slower with processors on the wrong socket; '
+      'both the interrupts of the card and the application belong on the socket of the card; the last-edited date. The page itself is dated January 2, 2025')
+
+entry('book', 'farazdel2001gpfsaix', [('author', 'A. Farazdel and R. Curran and A. Jaehde and G. McPheeters and R. Paden and R. E. Wescott'),
+                                      ('title', 'GPFS on AIX Clusters: High Performance File System Administration Simplified'), ('year', '2001'), ('month', 'August'),
+                                      ('publisher', 'IBM'), ('address', 'Poughkeepsie, NY'),
+                                      ('url', 'https://www.pnnl.gov/publications/gpfs-aix-clusters-high-performance-file-system-administration-simplified'),
+                                      ('note', 'IBM Redbook. Record PNNL-SA-35463 with the abstract. ' + A27)],
+      'record and abstract read 2026-11-27 on the publications page of Pacific Northwest National Laboratory: authors, title, IBM, Poughkeepsie, the date '
+      'August 3, 2001 and the number PNNL-SA-35463; the abstract names the product General Parallel File System for AIX and says that its release 1.4 '
+      'is the first offered for AIX RS/6000 systems that are not part of an RS/6000 SP. The page gives initials only, and no IBM order number')
 
 open(sys.argv[2], 'w', encoding='utf-8').write('% refs.bib: every entry was checked on 2026-11-23 against the source named in\n% audit/bib_provenance.json (arXiv API, Crossref, the page itself, or the saved PDF).\n\n' + '\n\n'.join(out) + '\n')
 json.dump(prov, open(sys.argv[1].replace('bib_verified', 'bib_provenance'), 'w'), indent=1)

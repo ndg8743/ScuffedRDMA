@@ -85,7 +85,8 @@ and the cost of staging could then be measured by removing it on the one
 machine where that is possible. Beyond one pair of machines, the design has
 to be tested with a switch, with several senders and with packet loss, and a
 parallel file system reached over the same transport would add a tier below
-local flash.
+local flash. On a server with two sockets, the pool would also have to place
+its registered memory (\cref{sec:numa}).
 
 The furthest direction is the next transport. The pool can be built against
 libfabric 2.x with per-endpoint memory registration, and, once an Ultra

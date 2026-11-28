@@ -61,6 +61,16 @@ An engineering report on a memory leak caused by a transport library's hooks
 in a production split-serving system \citep{mistral2026leak} is a reminder
 that the interface chosen brings its side effects with it. We measure one narrow quantity in this space: the cost of libfabric relative to raw verbs for small messages, with everything else held equal.
 
+Guides for tuning fast adapters start from the node of the adapter. NVIDIA's
+notes for its ConnectX-4 and later cards bind the interrupts and the
+application to processors of the node closest to the card
+\citep{nvidia_cx4_tuning}, and ESnet reports for hosts with 40 and 100
+gigabit adapters that TCP and UDP can be up to two times slower when the
+processors in use belong to the other socket \citep{esnet_irq}. Both concern
+sockets and interrupts. With RDMA the same reasoning extends to the
+registered buffer, which the card reads and writes directly, and
+\cref{sec:numa} states what the pool would have to do.
+
 \section{Small Messages and Collectives}
 
 Communication libraries for multi-GPU computation face the same small-message

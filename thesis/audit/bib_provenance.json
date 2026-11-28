@@ -74,7 +74,7 @@
  "barak2013tips": "page title fetched 2026-11-23",
  "chen2024efa": "page title fetched 2026-11-23",
  "libfabric_man": "page title fetched 2026-11-23",
- "libfabric_repo": "repository README and license file read 2026-11-23; latest commit date from git log on a shallow clone",
+ "libfabric_repo": "repository README and license file read 2026-11-23; prov/tcp, prov/verbs, prov/rxm and prov/shm of tags v1.17.0 and v2.7.0 read 2026-11-26 for progress, counters and remote-write events (tcpx_tx_queue_insert, xnet_tx_queue_insert, fi_no_cntr_open in verbs_domain.c); release 2.7.0 built from source and used for the tests on the same day; latest commit date from git log on a shallow clone",
  "ucx_faq": "repository confirmed with git ls-remote 2026-11-23; latest commit date from git log on a shallow clone",
  "ucx_repo": "repository confirmed with git ls-remote 2026-11-23; latest commit date from git log on a shallow clone",
  "mistral2026leak": "page title and publication date fetched 2026-11-23",
@@ -143,5 +143,13 @@
  "mpi1995": "title, version and the date of Version 1.0 (June 1994) read from the page 2026-11-23",
  "chm_ramac": "page title, the Model 350 disk storage unit of the IBM 305 RAMAC and the shipment of June 1956 read from the page 2026-11-23",
  "ibm_system360": "page title, the launch date of April 7, 1964, the compatibility of software across the line and Gene Amdahl as chief architect read from the page 2026-11-23",
- "ibm2023storagebrand": "title, author, the date of March 2, 2023 in the page body, the change from IBM Spectrum to IBM Storage and the product name IBM Storage Scale read from the page 2026-11-23; a metadata field of the page carries a later date"
+ "ibm2023storagebrand": "title, author, the date of March 2, 2023 in the page body, the change from IBM Spectrum to IBM Storage and the product name IBM Storage Scale read from the page 2026-11-23; a metadata field of the page carries a later date",
+ "gustafson1988": "title, author, journal, volume, number and pages read from the first page of the article and the DOI from its index record 2026-11-26; cited for the fixed-size form of the speed-up, 1/(s + p/N)",
+ "kernel_numa": "page read 2026-11-27: title, the started-by line, cells with processors, local memory and I/O buses joined by an interconnect, access time and bandwidth depending on the distance between the cell of the processor or I/O bus and the cell of the memory, allocation from the node of the requesting processor by default, and the scheduler not taking the memory of a task into account directly",
+ "kernel_mempolicy": "page read 2026-11-27: the system default policy is local allocation once the system is running; a policy for a range of the address space is installed with mbind, governs anonymous pages and by default applies to pages allocated after it is installed; the bind mode restricts allocation to the given nodes. The page does not use the words first touch",
+ "kernel_pin": "page read 2026-11-27: the case of RDMA sets the pin and long-term flags and says that the buffers are needed for a long time. The page does not state that pinned pages cannot be migrated, and the thesis does not say so",
+ "kernel_sysfs_pci": "file read 2026-11-27: the entry /sys/bus/pci/devices/.../numa_node, dated October 2014, holds the node to which the device is attached, or -1 if the node is unknown; the initial value comes from the firmware",
+ "nvidia_cx4_tuning": "page read 2026-11-27: title, the date in the footer, the statement that a server with a single NUMA needs no tuning, and for two the steps that bind the interrupts and the application to processors of the NUMA closest to the card. The page documents the FreeBSD driver",
+ "esnet_irq": "page read 2026-11-27: on hosts with 40 and 100 gigabit adapters TCP and UDP can be up to two times slower with processors on the wrong socket; both the interrupts of the card and the application belong on the socket of the card; the last-edited date. The page itself is dated January 2, 2025",
+ "farazdel2001gpfsaix": "record and abstract read 2026-11-27 on the publications page of Pacific Northwest National Laboratory: authors, title, IBM, Poughkeepsie, the date August 3, 2001 and the number PNNL-SA-35463; the abstract names the product General Parallel File System for AIX and says that its release 1.4 is the first offered for AIX RS/6000 systems that are not part of an RS/6000 SP. The page gives initials only, and no IBM order number"
 }

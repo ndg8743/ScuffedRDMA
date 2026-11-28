@@ -221,7 +221,7 @@ library \citep{libfabric_repo}.
     December 16, 2022 & libfabric 1.17.0, the version on the development machine \\
     December 13, 2024 & libfabric 2.0.0, the version the Ultra Ethernet specification maps \\
     June 11, 2025 & Ultra Ethernet Specification 1.0 names libfabric as its interface (\cref{sec:uec}) \\
-    September 18, 2026 & libfabric 2.7.0, the latest release when the repository was read \\
+    September 18, 2026 & libfabric 2.7.0, the latest release when the repository was read, and the second version on which the tests of the pool run \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -628,8 +628,9 @@ Full and HPC profiles and not in AI Base, so the channel would need a device
 of one of the two larger profiles, or one of the other signals of
 \cref{tab:signals}. The fourth is the library version. The pool asks for
 interface version 1.9 and was developed against 1.17, while the mapping is
-written against 2.0, so a port begins with a build of the pool against the
-2.x series.
+written against 2.0. The pool builds against release 2.7.0 without a change
+to its source, and its tests pass there on the three software providers, so
+what remains of this point is the provider itself.
 
 A larger question sits behind these four points. Ultra Ethernet removes ordering and
 blocking inside the network, whereas the middleware separates traffic classes

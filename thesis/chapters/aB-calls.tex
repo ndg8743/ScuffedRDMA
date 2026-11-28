@@ -23,7 +23,7 @@ class is hot or cold, and offsets are positions inside the registered arena.
   \endhead
   \code{sf_opts_default} & fills the options with defaults: provider and endpoint type per class, queue depths, arena size, completion method for the hot class, blocking wait for the cold class \\
   \code{sf_open} & opens the fabric, domain, endpoints and queues for both classes and registers the arena \\
-  \code{sf_listen} & server side: waits for one peer on a TCP side channel, exchanges addresses and keys, accepts the connections \\
+  \code{sf_listen} & server side: waits for one peer on a TCP side channel, exchanges addresses and keys, accepts the connections; endpoints without a connection exchange one message, so that their first use is complete \\
   \code{sf_connect} & client side: connects the side channel and both endpoints \\
   \code{sf_close} & closes everything in reverse order \\
   \code{sf_buf}, \code{sf_buf_len} & start and length of the data region of the arena \\

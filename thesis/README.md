@@ -1,7 +1,7 @@
 # Thesis source
 
 Adaptive RDMA Middleware for Disaggregated LLM Inference over Commodity Ethernet.
-Nathan Gopee, M.S. Computer Science, SUNY New Paltz. Draft of November 24, 2026 (version 10).
+Nathan Gopee, M.S. Computer Science, SUNY New Paltz. Draft of November 27, 2026 (version 14).
 
 ## Build
 
@@ -20,11 +20,56 @@ slow. A build from nothing takes several minutes. While editing, change
 `tagging = on` to `tagging = off` near the top of `thesis.tex`, and switch it
 back on for any PDF you check or hand in.
 
-This draft has 166 pages, of which 17 are the bibliography, so 149 pages
-count against the limit of 150. The list of symbols takes two of them and
-the Dedication page one, and both can be dropped (see Switches). It builds with no LaTeX or BibTeX warnings and
-no overfull lines, every figure and formula has alt text, and no heading level
-is skipped.
+This draft has 168 pages, of which 18 are the bibliography, so 150 pages
+count against the limit of 150 and no page is spare. Version 13 added
+section 5.6 on NUMA (about a page and a half), and the page it cost was
+recovered in chapter 6 (see "Page budget" below). Version 14 names AIX in
+section 1.1 and makes one sentence of section 6.5.1 precise (see
+"Bibliography"); every chapter and section starts on the same page as in
+version 13. Text that is added from
+here on needs a cut of the same length. The list of symbols takes two of the
+pages and the Dedication page one, and both can be dropped (see Switches). It
+builds with no LaTeX or BibTeX warnings and no overfull lines, every figure
+and formula has alt text, and no heading level is skipped.
+
+The count was checked on TeX Live 2026 and on TeX Live 2025, each built from
+nothing on November 27, 2026: 168 pages on both, with every chapter starting
+on the same page. The two releases do not set every line alike, so check the
+count again after a change, on the release you hand in with.
+
+### Page budget
+
+Ten paragraphs carry the mark `\looseness=-1` at the start of their last
+source line: nine in chapter 6 and the first paragraph of section 8.15.3.
+The nine end "learned classifier trains on.", "in the training set.", "is
+strictly convex.", "$\alpha > \beta$.", "that the checksum detects.", "size
+and checksum of its block.", "are multiples of $A$." (Proposition 6.13),
+"slot or a run of them." and "a time per block:". The mark asks TeX to set
+that paragraph one line shorter if it can do so within its normal spacing
+limits, and it changes no word. Each of the ten takes effect in this build.
+They can be deleted once a page is spare, and a mark that no longer shortens
+its paragraph after an edit does nothing.
+
+One wording was shortened for the same reason, with the meaning kept: the
+last sentence of Proposition 6.15 now reads "the probability of a change that
+goes unreported is less than 2^-32" (before: "the probability that the block
+is changed and the change goes unreported is less than 2^-32").
+
+Three things were needed for TeX Live 2025 to give the same pages as TeX
+Live 2026. With tagging on, the older release leaves the paragraph indent
+after the word "Proof.", sets the end of the line of a `\label` that follows
+`\begin{proposition}` as a space after the head, and puts 3 pt more above a
+statement that follows a paragraph. `thesis.tex` takes the first and the
+third out (the lines after the `\newtheorem` declarations, which are skipped
+on TeX Live 2026), and for the second the `\label` of every proposition,
+lemma and definition ends with a percent sign. None of the three changes the
+output on TeX Live 2026.
+
+Where there is room today, on both releases: the last pages of chapters 1,
+2, 8 and 10 are full and those of chapters 5 and 6 have one free line, so
+more than one line added to any of these adds a page. Chapter 3 ends with
+about eighteen free lines, chapters 4 and 9 with four, and chapter 7 with
+three.
 
 ## Structure
 
@@ -37,7 +82,7 @@ and sections only (`\setcounter{tocdepth}{1}` in `thesis.tex`).
 | `chapters/c02-background.tex` | 2 Background: GPUs, arithmetic, the transformer, attention kernels, inference |
 | `chapters/c03-problem.tex` | 3 Problem Statement: traffic on the link, head-of-line blocking, research questions |
 | `chapters/c04-rdma.tex` | 4 RDMA at a Low Level: sockets to verbs, libfabric, one transfer step by step, Ultra Ethernet |
-| `chapters/c05-middleware.tex` | 5 The Middleware: overview figure and end-to-end algorithm, pool, blob channel with proofs, completion signals, connector |
+| `chapters/c05-middleware.tex` | 5 The Middleware: overview figure and end-to-end algorithm, pool, blob channel with proofs, completion signals, connector, NUMA placement of the registered memory |
 | `chapters/c06-decisions.tex` | 6 Per-Transfer Decisions, Compression and Storage: classifier, rule tree, controller, quantizer, storage tier, each with its algorithm and analysis |
 | `chapters/c07-testbed-method.tex` | 7 Testbed and Experimental Method |
 | `chapters/c08-results.tex` | 8 Results and Discussion: the quantizer, decompression and storage results, then one section per transport experiment, then the discussion |
@@ -69,8 +114,11 @@ There are no photographs or screenshots in this version.
 | `fig:quant-pipeline`, `alg:quant` | the four steps of the quantizer |
 | `alg:tier`, `alg:tier-read`, `alg:alloc` | the write path and the read path of the storage tier, and its allocator |
 
-The algorithms were written from the code at commit c03d365. If the code
-changes, change the algorithm with it. A long procedure is split at function
+The algorithms were written from the code at commit c03d365. `alg:blob-send`
+and `alg:take-credit` follow commit 5b0e9a7, where sending a blob waits until
+its last chunk has completed; that commit is in `main` since November 26,
+2026 (item 5 of the star notes below). If the code changes, change the
+algorithm with it. A long procedure is split at function
 boundaries into blocks of at most about twenty lines, because a block is never
 split across pages and a long one leaves white space on the page before it.
 For the same reason a block may stand a paragraph or two after the sentence
@@ -83,7 +131,7 @@ section, no section on withdrawn results or corrections, and no paragraph
 that tells the reader what is missing. Where something is missing, the place
 holds a blank, an empty table cell or a placeholder figure, and a note marked
 with a star says what it waits for. **Nothing else in the PDF uses the
-character `*`, so a search for `*` finds every note.** This build has 50.
+character `*`, so a search for `*` finds every note.** This build has 51.
 
 | Command | Prints | Used for |
 |---|---|---|
@@ -117,11 +165,18 @@ Where the notes are:
    are written so that they do not assume an outcome. Read them again when
    the numbers are in.
 4. **The hardware record** (run R0): the board and processor of server 1 in
-   `tab:servers`, and which firmware change is active on server 4.
-5. **Fixes in the repository** that the text depends on: the stall of blobs
-   larger than one slot (section 5.3), the field `kv_compressed_bytes`, the
-   `mamba3` file names, the rerun of the loopback table, the MIT notice of
-   libmesh-rdma.
+   `tab:servers`, which firmware change is active on server 4, and the number
+   of NUMA nodes on each server (the note at the end of section 5.6; notebook
+   00 already records the line "NUMA node(s)" of `lscpu`).
+5. **Fixes in the repository** that the text depends on. The stall of blobs
+   larger than one slot is fixed in `main` (commits 9ae6c93, 0c4c93e and
+   5b0e9a7, merged on November 26, 2026), and sections 5.2.3 and 5.3
+   describe that code. It is tested on the TCP, RXM and shared-memory
+   providers with libfabric 1.17.0 and 2.7.0, and not yet on the verbs
+   provider: run the tests marked `rdma` on the lab pair (the note in
+   section 5.3, run R5). Still open: the field
+   `kv_compressed_bytes`, the `mamba3` file names, the rerun of the loopback
+   table, the MIT notice of libmesh-rdma.
 6. **Decisions**: the controller (repair it or keep the analysis), and the
    statements about the connector in section 5.1.
 7. **Front matter**: the name and department of the third committee member
@@ -148,6 +203,36 @@ A star note in section 5.1 asks for this check. If any of these changes in
 the code, change section 5.1, the subsection "Where the Classes Separate on
 the Serving Path", the limitations in section 8.15 and the first and second
 items of the future work.
+
+Sections 5.2.3 and 5.3 state three things that were read from the libfabric
+source or tested on November 26, 2026: on the TCP, RXM and shared-memory
+providers a queued transfer advanced only during calls into the library, with
+releases 1.17.0 and 2.7.0; the verbs provider has no counters and no events
+for remote writes in either release, so the counter row of E4 needs
+reliable-datagram endpoints and the remote-write counter of E5 cannot be
+measured on the two pairs; and sending a blob returns when its last chunk has
+completed at the sender. The last of these is true of `main` since the merge
+of November 26, 2026.
+
+Section 5.6 states four things about memory placement that were read from the
+code at `main` (commit 8021e80) on November 27, 2026:
+
+- the pool maps its arena and writes zeros to all of it in the thread that
+  opens the pool (`sf_open`: `mmap`, then `memset`), and registers the arena
+  afterwards, so the node of the arena follows from where that thread ran;
+- the benchmark `sf_bench` pins its two threads to given processors;
+- the Python pool, the sender and the receiver of the connector do not pin
+  their threads;
+- no call in the code sets a memory policy or reads the node of the card. The
+  roadmap lists the NUMA-aware pool as open.
+
+The section describes the binding as a design and says that it is not
+implemented. If the binding is written, change the fourth and fifth
+paragraphs of section 5.6, the sentence on NUMA in the limitations (section
+8.15.3) and the last sentence of the third item of the future work. The
+sentence "Servers 2, 3 and 4 have one processor socket each" rests on the
+processors in `tab:servers`; the number of nodes that Linux reports on each
+server is the record the star note waits for.
 
 ## Switches
 
@@ -225,9 +310,53 @@ items of the future work.
   (`\begin{pseudocode}{title}{label}`), which is never split across pages.
 - Lemmas and definitions share the proposition counter. Label them with the
   kind named, `\label[lemma]{lem:name}`, so that `\cref` prints the right word.
+- A proposition, lemma or definition that ends with a displayed formula has
+  `\par` between the formula and its `\end` line (`prop:credit` in chapter 5
+  is the one case). Without it TeX Live 2025 stops with the tagpdf error
+  "text-unit para hooks differ" whenever a page happens to break right after
+  that formula; TeX Live 2026 builds either way.
+- The `\label` of a proposition, lemma or definition stands on the line after
+  its `\begin` and ends with a percent sign: `\label{prop:name}%`. Without
+  the percent sign TeX Live 2025 sets a space after the head of the statement
+  (see "Page budget").
 
 ## Bibliography
 
 `refs.bib` is generated from `audit/bib_verified.json` by
-`tools/make_bib.py`. Only cited entries are printed (126 of 145). Entries for
-web pages carry the date they were read, November 23, 2026.
+`tools/make_bib.py`. Only cited entries are printed (134 of 153). Entries for
+web pages carry the date they were read, November 23, 2026. One entry was
+added for version 11 and read on November 26, 2026: Gustafson (1988), cited
+in section 1.1 for the fixed-size form of Amdahl's law. For version 12 the
+entry of the libfabric repository carries a second date, November 26, 2026,
+for the provider sources of releases 1.17.0 and 2.7.0. Six entries were added
+for version 13, each read on November 27, 2026 and cited in section 5.6 or
+section 9.4: four pages of the Linux kernel documentation ("What is NUMA?",
+"NUMA Memory Policy" in the version for kernel 6.8, "pin_user_pages() and
+related calls" in the version for kernel 6.14, and the description of the
+sysfs entry `numa_node` of a PCI device), NVIDIA's performance tuning notes
+for ConnectX-4 and later cards, and the page "Interrupt Binding" of ESnet.
+The thesis does not state that pinned pages cannot be moved between nodes,
+because the page that was read for pinning does not say so.
+
+One entry was added for version 14 and read on November 27, 2026: the IBM
+book "GPFS on AIX Clusters: High Performance File System Administration
+Simplified" (Farazdel and others, 2001), cited in section 1.1 for the clause
+that GPFS was offered on the RS/6000 SP as GPFS for AIX. What was read is its
+record and abstract on the publications page of Pacific Northwest National
+Laboratory, which names the product "General Parallel File System for AIX"
+and says that release 1.4 was the first offered for AIX systems outside an
+RS/6000 SP. That page gives the authors by initials and no IBM order number,
+and the book itself was not read. The GPFS paper of 2002 names AIX only in
+the title of a manual it cites.
+
+Section 6.5.1 says since version 14 how the rotation differs from that of
+TurboQuant: a Hadamard matrix with random signs in place of a random rotation
+matrix. Before, the sentence read "the rotation and scalar quantizer of
+TurboQuant". Algorithm 1 of the TurboQuant paper (arXiv 2504.19874, version
+1, read on November 27, 2026) draws a rotation matrix from the QR
+decomposition of a matrix of normal entries and rounds each rotated
+coordinate to a level; its second algorithm adds one sign per coordinate for
+the residual. Its algorithms use no polar coordinates. Those belong to
+PolarQuant (arXiv 2502.02617), which the paper compares itself with and which
+the Google Research post of March 24, 2026 presents as the first stage of
+TurboQuant. The thesis does not cite PolarQuant.

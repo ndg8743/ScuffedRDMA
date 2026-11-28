@@ -371,7 +371,7 @@ a laptop and on the cluster.
     Test file & What it verifies & Runs on \\
     \midrule
     \code{test_dual_qp_completion} & an error or flushed completion raises and is never counted as a success & anywhere \\
-    \code{test_fabric_pool} & write round trips per provider; blob sizes and classes; each completion mechanism; one endpoint against two; the plugin builds & anywhere; device tests on the cluster \\
+    \code{test_fabric_pool} & write round trips per provider; blob sizes and classes; an idle sender; each completion mechanism; one endpoint against two; the plugin builds & anywhere; device tests on the cluster \\
     \code{test_vllm_connector} & block gather and scatter for three layouts; codecs; out-of-order requests; producer and consumer sides; timeouts report the lost blocks; a two-process loopback & anywhere; two tests need the serving engine \\
     \code{test_wfa_learner} & training lowers the loss; held-out accuracy beats the static classifier; save and load & anywhere \\
     \code{test_policy_tree} & operators, priority, short circuit, missing fields, bad configurations & anywhere \\
